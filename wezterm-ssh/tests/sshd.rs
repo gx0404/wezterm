@@ -90,7 +90,12 @@ impl Default for SshdConfig {
         config.set_authentication_methods(vec!["publickey".to_string()]);
         config.set_use_privilege_separation(false);
         config.set_subsystem(true, true);
-        config.set_use_pam(true);
+        // fork: UsePAM must be off for unprivileged (non-root) sshd runs;
+        // with PAM enabled the account phase rejects the current user
+        // ("Access denied ... by PAM account configuration") and the
+        // connection is dropped mid publickey auth. The tests only
+        // exercise publickey auth, which doesn't need PAM.
+        config.set_use_pam(false);
         config.set_x11_forwarding(true);
         config.set_print_motd(true);
         config.set_permit_tunnel(true);

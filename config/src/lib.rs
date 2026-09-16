@@ -425,8 +425,84 @@ pub fn set_config_file_override(path: &Path) {
         .replace(path.to_path_buf());
 }
 
+// fork: split `--config 'a=b;c=d'` into separate override pairs.
+// A `;` only separates pairs at the top level: semicolons inside
+// balanced `{}`/`()`/`[]` (Lua table separators such as
+// `keys={{a=1};{b=2}}`) and inside quoted strings are left alone.
+fn split_override_value(key: &str, value: &str) -> anyhow::Result<Vec<(String, String)>> {
+    let mut pairs = vec![(key.to_string(), String::new())];
+    let mut depth = 0usize;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    let mut segment = String::new();
+    for ch in value.chars() {
+        if escaped {
+            segment.push(ch);
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if quote.is_some() => {
+                segment.push(ch);
+                escaped = true;
+            }
+            '"' | '\'' | '`' => {
+                if quote == Some(ch) {
+                    quote = None;
+                } else if quote.is_none() {
+                    quote = Some(ch);
+                }
+                segment.push(ch);
+            }
+            '{' | '(' | '[' if quote.is_none() => {
+                depth += 1;
+                segment.push(ch);
+            }
+            '}' | ')' | ']' if quote.is_none() => {
+                depth = depth.saturating_sub(1);
+                segment.push(ch);
+            }
+            ';' if depth == 0 && quote.is_none() => {
+                pairs.last_mut().unwrap().1 = segment.trim().to_string();
+                segment = String::new();
+                // the next segment must carry its own `name=expr`
+                pairs.push((String::new(), String::new()));
+            }
+            _ => segment.push(ch),
+        }
+    }
+    pairs.last_mut().unwrap().1 = segment.trim().to_string();
+
+    // First segment keeps the explicit key; later segments must be
+    // `name=expr` themselves
+    let mut result = vec![];
+    for (idx, (k, v)) in pairs.into_iter().enumerate() {
+        if idx == 0 {
+            if v.is_empty() {
+                anyhow::bail!("empty value for config override {k:?}");
+            }
+            result.push((k, v));
+        } else {
+            match v.split_once('=') {
+                Some((name, expr)) if !name.trim().is_empty() && !expr.trim().is_empty() => {
+                    result.push((name.trim().to_string(), expr.trim().to_string()));
+                }
+                _ => anyhow::bail!(
+                    "invalid config override segment {v:?}: expected name=value \
+                     after `;`"
+                ),
+            }
+        }
+    }
+    Ok(result)
+}
+
 pub fn set_config_overrides(items: &[(String, String)]) -> anyhow::Result<()> {
-    *CONFIG_OVERRIDES.lock().unwrap() = items.to_vec();
+    let mut expanded = vec![];
+    for (key, value) in items {
+        expanded.extend(split_override_value(key, value)?);
+    }
+    *CONFIG_OVERRIDES.lock().unwrap() = expanded;
 
     let _ = default_config_with_overrides_applied()?;
     Ok(())
@@ -848,4 +924,51 @@ fn default_one_point_oh() -> f32 {
 
 fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod override_split_tests {
+    use super::split_override_value;
+
+    #[test]
+    fn plain_pair_untouched() {
+        assert_eq!(
+            split_override_value("font_size", "14").unwrap(),
+            vec![("font_size".to_string(), "14".to_string())]
+        );
+    }
+
+    #[test]
+    fn semicolon_separates_pairs() {
+        assert_eq!(
+            split_override_value("font_size", "14;keys={{key=\"F9\"}}").unwrap(),
+            vec![
+                ("font_size".to_string(), "14".to_string()),
+                ("keys".to_string(), "{{key=\"F9\"}}".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn semicolons_inside_braces_are_literal() {
+        // Lua table separator `;` must stay inside the value
+        assert_eq!(
+            split_override_value("keys", "{{a=1};{b=2}}").unwrap(),
+            vec![("keys".to_string(), "{{a=1};{b=2}}".to_string())]
+        );
+    }
+
+    #[test]
+    fn semicolons_inside_strings_are_literal() {
+        assert_eq!(
+            split_override_value("default_domain", "'name=x;a;b'").unwrap(),
+            vec![("default_domain".to_string(), "'name=x;a;b'".to_string())]
+        );
+    }
+
+    #[test]
+    fn bad_segment_rejected() {
+        assert!(split_override_value("font_size", "14;no_equals_here").is_err());
+        assert!(split_override_value("font_size", ";keys=1").is_err());
+    }
 }

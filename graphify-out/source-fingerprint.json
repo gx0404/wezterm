@@ -1,7 +1,7 @@
 {
   "artifacts": {
-    "GRAPH_REPORT.md": "02d237d06dc454f41d6084931a6574e0d42ea8d8f92d37093253ab1d63a9d394",
-    "graph.json": "6c8e3b42e26db3b918ba579333eccb62d06c3daa91363924dd19f06d2e7fc286"
+    "GRAPH_REPORT.md": "bdffc91e92a0407873e329dad47f28be48696c3c56ea1081cb4659a8324615b9",
+    "graph.json": "b6b37a5976f97427b28572b2c39f8e64d9c8e7b640c76925f89fdde66dcf8501"
   },
   "index_root": ".",
   "pipeline": {
@@ -18,6 +18,6 @@
       "wezterm-gui/src/unicode_names.rs"
     ],
     "file_count": 442,
-    "sha256": "7bfc0fbe747c907c8370b038cd80ce95dcd108b264d29bad52dac16b6a2fabd3"
+    "sha256": "4fcb6100ad65ec3b3da431beb6df8ec68b98238b96efab250f8ff94f35e23c2c"
   }
 }

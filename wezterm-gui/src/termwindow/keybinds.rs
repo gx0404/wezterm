@@ -7,7 +7,7 @@
 
 use crate::commands::{format_key_label, CommandDef, ExpandedCommand};
 use crate::termwindow::box_model::*;
-use crate::termwindow::modal::Modal;
+use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
 use crate::termwindow::{DimensionContext, TermWindow, UIItemType};
 use config::i18n::{tr, tr_cow};
 use config::keyassignment::KeyAssignment;
@@ -108,7 +108,8 @@ impl KeybindsOverlay {
                         top: Dimension::Cells(0.1),
                         bottom: Dimension::Cells(0.1),
                     })
-                    .display(DisplayType::Block),
+                    .display(DisplayType::Block)
+                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
             ];
 
         let top_row = *self.top_row.borrow();
@@ -208,7 +209,8 @@ impl KeybindsOverlay {
                 top: Dimension::Cells(0.1),
                 bottom: Dimension::Cells(0.1),
             })
-            .display(DisplayType::Block),
+            .display(DisplayType::Block)
+            .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
         );
 
         let dimensions = term_window.dimensions;
@@ -296,8 +298,11 @@ impl Modal for KeybindsOverlay {
         term_window: &mut TermWindow,
     ) -> anyhow::Result<()> {
         use ::window::MouseEventKind as WMEK;
+        if row == MODAL_CHROME_ROW {
+            return Ok(());
+        }
         if let WMEK::Move = event.kind {
-            if *self.selected.borrow() != row {
+            if row < self.commands.len() && *self.selected.borrow() != row {
                 self.selected.replace(row);
                 let mut top_row = self.top_row.borrow_mut();
                 let max_rows = *self.max_rows_on_screen.borrow();

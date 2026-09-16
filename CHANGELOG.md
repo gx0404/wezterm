@@ -108,18 +108,35 @@
 
 ### Fixed
 
-- 修复设置浮层顶部行被窗口边缘截断：原 bounds 高度按固定 8 行预算
+- 修复 `--config 'a=b;c=d;…'` 仅第一对生效：`set_config_overrides`
+  现按**顶层分号**展开为多对覆盖（花括号/圆括号/方括号嵌套与引号
+  字符串内的分号保持字面，如 `keys={{a=1};{b=2}}` 不受影响），后续
+  段必须是 `name=expr` 形式否则报错；新增 5 条拆分单测。
+- 修复浮层 chrome 行（标题/分区/页脚/过滤输入行）点击被当作
+  「点击浮层外」误关：chrome 行统一打 `UIItemType::Modal(MODAL_CHROME_ROW)`
+  哨兵进 hit map，各 Modal（命令面板/设置/快捷键页）mouse_event
+  对哨兵与越界行号加防护（Xvfb 实测：点击设置标题浮层保持打开，
+  点击浮层外仍正常关闭）。
+- 修复 ssh e2e 在非 root 环境全挂：`wezterm-ssh/tests/sshd.rs` 的
+  sshd 配置 `UsePAM yes` 在非 root sshd 下 PAM account 阶段拒绝当前
+  用户（`Access denied … by PAM account configuration`）、连接在
+  publickey 认证中途被断开；改为 `UsePAM no`（测试仅走 publickey，
+  不需要 PAM），本机 50/50 全过。
+- 设置浮层顶部行被窗口边缘截断：原 bounds 高度按固定 8 行预算
   传入 box model，列表较长时顶部溢出裁剪；改为与命令面板一致的全
   终端高度 bounds（Xvfb 截图验证标题/分区/页脚完整）。
 - `scripts/ui_smoke.sh` 在 ffmpeg 未编入 png 编码器的发行版上直接
   失败：增加编码器探测，缺失时回退 mjpeg 输出 `before.jpg`
   （result.json 的 screenshots 字段随实际文件名登记）。
-- 复审记录（未改动，留待后续）：`--config a=b;c=d` 仅第一对生效
-  （后续对被拼入 Lua chunk 变成全局赋值，上游行为）；`--config
-  keys=...` 与 `wezterm-gui start`（含 `--always-new-process`）组合
-  时键绑定在 GUI 内不生效而 `show-keys` 可见（配置文件方式正常，
-  待上游定位）；设置浮层标题/页脚等非交互行点击会走「点击浮层外
-  关闭」路径（可接受差异）。
+- 复审更正与遗留：早前记录的「`--config keys` + `wezterm-gui start`
+  不生效」为**误判**（截图 CDN 同名缓存 + OCR 未反色的双重假阴性；
+  多 `--config` 旗标与分号形式实测均生效）。WebGPU 前端经 lavapipe
+  软件渲染验证：release 构建下适配器枚举与渲染循环正常（debug 构建
+  的 wgpu 校验层与旧 Vulkan loader 组合会崩，非 wezterm 代码问题）；
+  xwd 截图为黑帧属 lavapipe 的 X11 present 不写回像素，视觉效果
+  仍需真实硬件确认。macOS 侧交叉编译被 C 依赖与 Apple SDK 阻断，
+  本轮对 `#[cfg(target_os="macos")]` 代码零改动（仅迁移平台无关的
+  键帽排序逻辑），macOS 实测仍 PENDING。
 - 修复 `dotfiles/install.sh` 配置步骤的启动竞态：原先先 `rm -rf`
   `~/.config/wezterm` 再整树 `cp -a`（19MB 快照需秒级），空窗期内启动
   wezterm 会报 `wezterm.lua: No such file or directory`。改为暂存目录

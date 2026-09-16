@@ -1,7 +1,7 @@
 use crate::commands::{CommandDef, ExpandedCommand};
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::box_model::*;
-use crate::termwindow::modal::Modal;
+use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
 use crate::termwindow::render::corners::{
     BOTTOM_LEFT_ROUNDED_CORNER, BOTTOM_RIGHT_ROUNDED_CORNER, TOP_LEFT_ROUNDED_CORNER,
     TOP_RIGHT_ROUNDED_CORNER,
@@ -294,7 +294,8 @@ impl CommandPalette {
                             .to_linear()
                             .into(),
                     })
-                    .display(DisplayType::Block),
+                    .display(DisplayType::Block)
+                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
             ];
 
         for (display_idx, command) in matches
@@ -587,10 +588,13 @@ impl Modal for CommandPalette {
         term_window: &mut TermWindow,
     ) -> anyhow::Result<()> {
         use ::window::MouseEventKind as WMEK;
+        if row == MODAL_CHROME_ROW {
+            return Ok(());
+        }
         match event.kind {
             WMEK::Move => {
                 // Hovering a row selects it, mirroring the keyboard UX
-                if *self.selected_row.borrow() != row {
+                if row < self.commands.len() && *self.selected_row.borrow() != row {
                     self.selected_row.replace(row);
                     term_window.invalidate_modal();
                 }

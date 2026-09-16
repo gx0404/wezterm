@@ -5,6 +5,12 @@ use downcast_rs::{impl_downcast, Downcast};
 use std::cell::Ref;
 use wezterm_term::{KeyCode, KeyModifiers};
 
+/// fork: sentinel row index for modal chrome (titles, footers, input
+/// lines) that must swallow clicks instead of letting the generic
+/// "press outside the modal closes it" logic dismiss the overlay.
+/// Modal implementations must ignore mouse events routed with this row.
+pub const MODAL_CHROME_ROW: usize = usize::MAX;
+
 pub trait Modal: Downcast {
     fn perform_assignment(
         &self,

@@ -11,7 +11,7 @@
 //! `UIItemType::Modal(row)` 进 hit map，与右键菜单共用鼠标通道。
 
 use crate::termwindow::box_model::*;
-use crate::termwindow::modal::Modal;
+use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
 use crate::termwindow::{DimensionContext, TermWindow, UIItemType};
 use config::i18n::{tr, UiLanguage};
 use config::keyassignment::KeyAssignment;
@@ -363,7 +363,8 @@ impl SettingsOverlay {
                     top: Dimension::Cells(0.1),
                     bottom: Dimension::Cells(0.1),
                 })
-                .display(DisplayType::Block),
+                .display(DisplayType::Block)
+                .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
         );
 
         // Section tab row
@@ -389,7 +390,8 @@ impl SettingsOverlay {
                     top: Dimension::Cells(0.),
                     bottom: Dimension::Cells(0.1),
                 })
-                .display(DisplayType::Block),
+                .display(DisplayType::Block)
+                .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
         );
 
         // Filter input line for the Appearance section
@@ -408,7 +410,8 @@ impl SettingsOverlay {
                         top: Dimension::Cells(0.),
                         bottom: Dimension::Cells(0.1),
                     })
-                    .display(DisplayType::Block),
+                    .display(DisplayType::Block)
+                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
             );
         }
 
@@ -426,7 +429,8 @@ impl SettingsOverlay {
                         top: Dimension::Cells(0.),
                         bottom: Dimension::Cells(0.),
                     })
-                    .display(DisplayType::Block),
+                    .display(DisplayType::Block)
+                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
             );
         }
 
@@ -476,7 +480,8 @@ impl SettingsOverlay {
                 top: Dimension::Cells(0.1),
                 bottom: Dimension::Cells(0.1),
             })
-            .display(DisplayType::Block),
+            .display(DisplayType::Block)
+            .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
         );
 
         let element = Element::new(&font, ElementContent::Children(rows))
@@ -610,9 +615,14 @@ impl Modal for SettingsOverlay {
         term_window: &mut TermWindow,
     ) -> anyhow::Result<()> {
         use ::window::MouseEventKind as WMEK;
+        // chrome rows (title/footer/filter) swallow the event; an
+        // out-of-range row must never move the selection
+        if row == MODAL_CHROME_ROW {
+            return Ok(());
+        }
         match event.kind {
             WMEK::Move => {
-                if *self.selected.borrow() != row {
+                if row < self.visible_items(term_window).len() && *self.selected.borrow() != row {
                     self.selected.replace(row);
                     let item = self.visible_items(term_window).get(row).cloned();
                     if let Some(Item::Scheme(name)) = item {
