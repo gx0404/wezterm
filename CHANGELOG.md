@@ -38,9 +38,20 @@
   `bell_notification_handling` 聚焦抑制、`bell_requests_attention`
   失焦 WM 提醒（X11 urgency / macOS dock bounce）与 Lua
   `window:request_attention()`、`bell_cooldown_ms` 每 pane 节流。
+- 命令面板鼠标交互：悬停行即选中、左键点击直接执行（与 Enter 共用
+  激活路径并记录 frecency）；`Modal::mouse_event` 通道接通，行矩形经
+  hit map（`UIItemType::Modal`）路由，region 绑定新增 `Modal` 区域。
 
 ### Fixed
 
+- 修复 `make test` 的 escape-parser no_std 轮编译失败（上游
+  8d668a78c 移除 macro_use 时遗漏测试模块的 `alloc::format` 导入）。
+- 框架 `make generated-check` 恒报漂移：键表比对改为经钉版 stylua
+  （`ci/stylua.toml`，与 docs 构建同约定）格式化后比较，缺工具时显式
+  跳过；`make generated-write` 由 `scripts/generated_write.sh` 包装
+  上游脚本并补格式化；stylua 2.5.2 入 `setup_env.sh` 钉版；shell
+  补全随 clap 生成器演进重建。`ui_smoke.sh` 修正 `--config` 全局参数
+  位置并加 `-n` 隔离用户配置（本机配置在裸 Xvfb 渲染全黑）。
 - 恢复 Linux 壁纸快捷键：`Alt+.` / `Alt+,` 切换下一张 / 上一张，
   `Alt+/` 随机、`Ctrl+Alt+/` 选择、`Alt+b` 切换纯色专注模式；
   避免壁纸控制跟随通用 `Ctrl+Shift` 修饰键变更。同步本机配置、
