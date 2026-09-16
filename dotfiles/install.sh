@@ -23,6 +23,13 @@
 
 set -euo pipefail
 
+# 配置换入用的暂存目录（见 config 安装步骤）；异常退出时由 trap 清理
+STAGED=""
+cleanup_staged() {
+   if [ -n "$STAGED" ] && [ -d "$STAGED" ]; then rm -rf "$STAGED"; fi
+}
+trap cleanup_staged EXIT
+
 CHECK=0
 FROM_BUILD=""
 IM="fcitx"
@@ -164,14 +171,22 @@ if [ "$CHECK" = 0 ]; then
 fi
 
 step "config -> ~/.config/wezterm (from $DOTFILES/wezterm-config)"
-if [ "$CHECK" = 0 ]; then
-   CFG="$HOME/.config/wezterm"
+CFG="$HOME/.config/wezterm"
+if [ "$CHECK" = 1 ]; then
+   if [ -e "$CFG" ]; then plan "backup $CFG -> $CFG.bak-gx-<ts> (rename 换入)"; fi
+else
+   # 先整树拷到暂存目录，再连续 rename 换入：若先 rm 旧目录再直接 cp，
+   # 空窗期内启动的 wezterm 会报 wezterm.lua 缺失（19MB 快照拷贝需秒级）。
+   STAGED="$HOME/.config/.wezterm.gx-new.$$"
+   BK=""
+   if [ -e "$CFG" ]; then BK="$CFG.bak-gx-$(date +%Y%m%d-%H%M%S)"; fi
+   if [ -n "$BK" ]; then plan "backup $CFG -> $BK"; fi
    mkdir -p "$HOME/.config"
-   if [ -e "$CFG" ]; then
-      backup_existing "$CFG"
-      rm -rf "$CFG"
-   fi
-   cp -a "$DOTFILES/wezterm-config" "$CFG"
+   rm -rf "$STAGED"
+   cp -a "$DOTFILES/wezterm-config" "$STAGED"
+   if [ -n "$BK" ]; then mv "$CFG" "$BK"; fi
+   mv "$STAGED" "$CFG"
+   STAGED=""
 fi
 
 step "plugins -> ~/.local/share/wezterm/plugins/"

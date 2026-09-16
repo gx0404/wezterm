@@ -54,6 +54,12 @@
 
 ### Fixed
 
+- 修复 `dotfiles/install.sh` 配置步骤的启动竞态：原先先 `rm -rf`
+  `~/.config/wezterm` 再整树 `cp -a`（19MB 快照需秒级），空窗期内启动
+  wezterm 会报 `wezterm.lua: No such file or directory`。改为暂存目录
+  整树拷贝 + 连续 rename 原子换入（备份同步改为 rename），空窗缩至
+  微秒级；EXIT trap 清理异常残留的暂存目录。实测安装期间并发 40 次
+  配置加载零失败。
 - 修复 `make test` 的 escape-parser no_std 轮编译失败（上游
   8d668a78c 移除 macro_use 时遗漏测试模块的 `alloc::format` 导入）。
 - 框架 `make generated-check` 恒报漂移：键表比对改为经钉版 stylua
