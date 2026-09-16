@@ -2,6 +2,11 @@ use crate::color::RgbColor;
 use crate::{Sixel, SixelData};
 #[cfg(not(feature = "std"))]
 use alloc::vec;
+// 测试模块里的 assert_eq!/format! 在 no_std 轮（-p 单独构建，无特性
+// 合一）下也需要显式导入 alloc::format；上游 8d668a78c 移除 macro_use
+// 时漏掉了这里。
+#[cfg(test)]
+use alloc::format;
 
 const MAX_PARAMS: usize = 5;
 const MAX_SIXEL_SIZE: usize = 100_000_000;

@@ -1,4 +1,8 @@
 use core::fmt::{Display, Error as FmtError, Formatter, Write as FmtWrite};
+// 测试模块的 format! 在 no_std 轮（-p 单独构建）需显式导入；
+// 上游 8d668a78c 移除 macro_use 时遗漏。
+#[cfg(test)]
+use alloc::format;
 use num_derive::*;
 use num_traits::{FromPrimitive, ToPrimitive};
 
