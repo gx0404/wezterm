@@ -29,8 +29,13 @@ pub enum TabBarItem {
     None,
     LeftStatus,
     RightStatus,
-    Tab { tab_idx: usize, active: bool },
+    Tab {
+        tab_idx: usize,
+        active: bool,
+    },
     NewTabButton,
+    /// fork: the `☰` main-menu button at the right end of the bar
+    MenuButton,
     WindowButton(IntegratedTitleButton),
 }
 
@@ -613,6 +618,34 @@ impl TabBarState {
             items.push(TabEntry {
                 item: TabBarItem::NewTabButton,
                 title: new_tab_button.clone(),
+                x: button_start,
+                width,
+            });
+
+            x += width;
+        }
+
+        // Main menu button (fork): opens the herdr-style main menu
+        if config.show_menu_button_in_tab_bar {
+            let menu_text = " ☰ ";
+            let hover = is_tab_hover(mouse_x, x, menu_text.len());
+            let mut attrs = if config.use_fancy_tab_bar {
+                CellAttributes::default()
+            } else {
+                new_tab_attrs.clone()
+            };
+            if hover {
+                attrs.set_reverse(true);
+            }
+            let menu_button = parse_status_text(menu_text, attrs);
+            let button_start = x;
+            let width = menu_button.len();
+
+            line.append_line(menu_button.clone(), SEQ_ZERO);
+
+            items.push(TabEntry {
+                item: TabBarItem::MenuButton,
+                title: menu_button,
                 x: button_start,
                 width,
             });

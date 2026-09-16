@@ -92,6 +92,12 @@ PAIRS = [
     ("Shows the command palette modal", "显示命令面板浮层"),
     ("Open Settings", "打开设置"),
     ("Shows the settings overlay", "显示设置浮层"),
+    ("Show Main Menu", "打开主菜单"),
+    ("Shows the main menu overlay", "显示主菜单浮层"),
+    ("Show Keybindings", "查看快捷键"),
+    ("Shows the keybinding cheat sheet overlay", "显示快捷键速查浮层"),
+    ("Keybindings", "快捷键"),
+    ("↑↓ scroll  Esc close", "↑↓ 滚动  Esc 关闭"),
     # ---- settings overlay (fork) ----
     ("Settings", "设置"),
     ("Language", "语言"),

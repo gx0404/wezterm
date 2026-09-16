@@ -649,6 +649,10 @@ pub enum KeyAssignment {
     ActivateCommandPalette,
     /// fork: open the settings overlay (herdr-style)
     OpenSettings,
+    /// fork: open the main menu overlay (herdr-style)
+    ShowMainMenu,
+    /// fork: open the keybinding cheat-sheet overlay
+    ShowKeybinds,
     ActivateWindow(usize),
     ActivateWindowRelative(isize),
     ActivateWindowRelativeNoWrap(isize),

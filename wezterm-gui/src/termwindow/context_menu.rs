@@ -177,6 +177,43 @@ impl ContextMenu {
         )
     }
 
+    /// The herdr-style main menu (fork): opened from the `☰` tab bar
+    /// button or the `ShowMainMenu` key assignment. Labels intentionally
+    /// reuse the command palette briefs so terminology stays consistent.
+    pub fn main_menu(x: f32, y: f32) -> Self {
+        Self::new(
+            vec![
+                (
+                    Some(tr("Activate Command Palette").into_owned()),
+                    Some(KeyAssignment::ActivateCommandPalette),
+                ),
+                (
+                    Some(tr("Show Keybindings").into_owned()),
+                    Some(KeyAssignment::ShowKeybinds),
+                ),
+                (
+                    Some(tr("Open Settings").into_owned()),
+                    Some(KeyAssignment::OpenSettings),
+                ),
+                (
+                    Some(tr("Reload configuration").into_owned()),
+                    Some(KeyAssignment::ReloadConfiguration),
+                ),
+                (None, None),
+                (
+                    Some(tr("Hide/Minimize Window").into_owned()),
+                    Some(KeyAssignment::Hide),
+                ),
+                (
+                    Some(tr("Quit WezTerm").into_owned()),
+                    Some(KeyAssignment::QuitApplication),
+                ),
+            ],
+            x,
+            y,
+        )
+    }
+
     fn compute(
         term_window: &mut TermWindow,
         items: &[MenuItem],

@@ -612,6 +612,62 @@ fn fillc(template: &str, args: &[(&str, &str)]) -> Cow<'static, str> {
     Cow::Owned(fill(template, args))
 }
 
+/// fork: format the keycap label shown beside a command (shared by the
+/// command palette rows and the keybinding cheat-sheet overlay)
+pub fn format_key_label(keys: &[(Modifiers, KeyCode)], config: &ConfigHandle) -> String {
+    let mut keys = keys.to_vec();
+
+    keys.sort_by(|(a_mods, a_key), (b_mods, b_key)| {
+        fn score_mods(mods: &Modifiers) -> usize {
+            let mut score: usize = mods.bits() as usize;
+            // Prefer keys with CMD on macOS, but not on other systems,
+            // where CMD tends to be reserved by the desktop environment
+            if cfg!(target_os = "macos") && mods.contains(Modifiers::SUPER) {
+                score += 1000;
+            } else if !cfg!(target_os = "macos") && !mods.contains(Modifiers::SUPER) {
+                score += 1000;
+            }
+            score
+        }
+
+        let a_mods = score_mods(a_mods);
+        let b_mods = score_mods(b_mods);
+
+        match b_mods.cmp(&a_mods) {
+            Ordering::Equal => {}
+            ordering => return ordering,
+        }
+
+        a_key.cmp(b_key)
+    });
+
+    let separator = if config.ui_key_cap_rendering == ::window::UIKeyCapRendering::AppleSymbols {
+        " "
+    } else {
+        "-"
+    };
+
+    let mut labels = keys
+        .into_iter()
+        .map(|(mods, keycode)| {
+            let mut mod_string = mods.to_string_with_separator(::window::ModifierToStringArgs {
+                separator,
+                want_none: false,
+                ui_key_cap_rendering: Some(config.ui_key_cap_rendering),
+            });
+            if !mod_string.is_empty() {
+                mod_string.push_str(separator);
+            }
+            let keycode = crate::inputmap::ui_key(&keycode, config.ui_key_cap_rendering);
+            format!("{mod_string}{keycode}")
+        })
+        .collect::<Vec<_>>();
+
+    labels.dedup();
+    labels.truncate(config.palette_max_key_assigments_for_action);
+    labels.join(", ")
+}
+
 fn spawn_command_from_action(action: &KeyAssignment) -> Option<&SpawnCommand> {
     match action {
         SplitPane(config::keyassignment::SplitPane { command, .. }) => Some(command),
@@ -2201,6 +2257,22 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["WezTerm"],
             icon: Some("md_cog"),
         },
+        ShowMainMenu => CommandDef {
+            brief: "Show Main Menu".into(),
+            doc: "Shows the main menu overlay".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["WezTerm"],
+            icon: Some("md_menu"),
+        },
+        ShowKeybinds => CommandDef {
+            brief: "Show Keybindings".into(),
+            doc: "Shows the keybinding cheat sheet overlay".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["WezTerm"],
+            icon: Some("md_keyboard"),
+        },
     })
 }
 
@@ -2245,6 +2317,8 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ClearKeyTableStack,
         ActivateCommandPalette,
         OpenSettings,
+        ShowMainMenu,
+        ShowKeybinds,
         // ----------------- View
         DecreaseFontSize,
         IncreaseFontSize,

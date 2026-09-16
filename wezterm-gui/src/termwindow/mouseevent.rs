@@ -33,6 +33,7 @@ impl UIItemType {
                 TabBarItem::RightStatus => MouseRegion::RightStatus,
                 TabBarItem::Tab { .. } => MouseRegion::Tab,
                 TabBarItem::NewTabButton { .. } => MouseRegion::NewTabButton,
+                TabBarItem::MenuButton => MouseRegion::MenuButton,
                 TabBarItem::WindowButton(_) => MouseRegion::WindowButton,
             },
             UIItemType::CloseTab(_) => MouseRegion::CloseTab,
@@ -717,6 +718,18 @@ impl super::TermWindow {
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Left);
                 }
+                // fork: open the main menu just below the ☰ button
+                TabBarItem::MenuButton => {
+                    let y =
+                        event.coords.y as f32 + self.render_metrics.cell_size.height as f32 * 1.5;
+                    crate::termwindow::context_menu::open_context_menu(
+                        self,
+                        crate::termwindow::context_menu::ContextMenu::main_menu(
+                            event.coords.x as f32,
+                            y,
+                        ),
+                    );
+                }
                 TabBarItem::None | TabBarItem::LeftStatus | TabBarItem::RightStatus => {
                     let maximized = self
                         .window_state
@@ -767,6 +780,7 @@ impl super::TermWindow {
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Middle);
                 }
+                TabBarItem::MenuButton => {}
                 TabBarItem::None
                 | TabBarItem::LeftStatus
                 | TabBarItem::RightStatus
@@ -791,6 +805,18 @@ impl super::TermWindow {
                 }
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Right);
+                }
+                // fork: right click on ☰ opens the same main menu
+                TabBarItem::MenuButton => {
+                    let y =
+                        event.coords.y as f32 + self.render_metrics.cell_size.height as f32 * 1.5;
+                    crate::termwindow::context_menu::open_context_menu(
+                        self,
+                        crate::termwindow::context_menu::ContextMenu::main_menu(
+                            event.coords.x as f32,
+                            y,
+                        ),
+                    );
                 }
                 TabBarItem::None | TabBarItem::LeftStatus | TabBarItem::RightStatus
                     if self.config.mouse_right_click_menu =>
@@ -824,7 +850,8 @@ impl super::TermWindow {
                 }
                 TabBarItem::WindowButton(_)
                 | TabBarItem::Tab { .. }
-                | TabBarItem::NewTabButton { .. } => {}
+                | TabBarItem::NewTabButton { .. }
+                | TabBarItem::MenuButton => {}
             },
             WMEK::VertWheel(n) => {
                 if self.config.mouse_wheel_scrolls_tabs {

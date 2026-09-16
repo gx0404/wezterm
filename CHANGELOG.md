@@ -12,6 +12,16 @@
 
 ### Added
 
+- herdr 式主菜单与 ☰ 按钮：tab 栏右端新增 `☰` 主菜单按钮（fancy 与
+  retro 两套 tab bar 均渲染，`show_menu_button_in_tab_bar` 默认开），
+  左键/右键点击在按钮下方弹出主菜单——命令面板 / 快捷键 / 设置 /
+  重载配置 / 隐藏窗口 / 退出（文案与命令面板术语一致）；新增
+  `ShowMainMenu`、`ShowKeybinds` 键位/面板命令（默认未绑键，可在
+  key_bindings 绑定）；鼠标绑定 region 新增 `MenuButton` 可定向绑定。
+- 快捷键速查浮层（`wezterm-gui/src/termwindow/keybinds.rs`）：按命令
+  面板分组列出全部命令与当前实际生效键位（含用户自定义），键帽渲染
+  与面板共用（`commands::format_key_label` 抽取共享），↑↓/j/k 滚动、
+  悬停高亮、Esc 关闭。
 - herdr 式设置浮层（`wezterm-gui/src/termwindow/settings.rs`，新
   `OpenSettings` 键位/面板命令，macOS 菜单栏归入 WezTerm 组）：四个分区
   ——语言（中文/English，应用即全 UI 切换）、外观（1001 个内置配色方案，

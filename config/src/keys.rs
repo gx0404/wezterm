@@ -200,6 +200,8 @@ pub enum MouseRegion {
     CloseTab,
     /// The `+` new tab button
     NewTabButton,
+    /// The `☰` main menu button in the tab bar (fork)
+    MenuButton,
     /// The left status area of the tab bar
     LeftStatus,
     /// The right status area of the tab bar
@@ -227,6 +229,7 @@ impl MouseRegion {
             Self::Tab => "Tab",
             Self::CloseTab => "CloseTab",
             Self::NewTabButton => "NewTabButton",
+            Self::MenuButton => "MenuButton",
             Self::LeftStatus => "LeftStatus",
             Self::RightStatus => "RightStatus",
             Self::WindowButton => "WindowButton",
@@ -249,6 +252,7 @@ impl FromDynamic for MouseRegion {
                 "Tab" => Self::Tab,
                 "CloseTab" => Self::CloseTab,
                 "NewTabButton" => Self::NewTabButton,
+                "MenuButton" => Self::MenuButton,
                 "LeftStatus" => Self::LeftStatus,
                 "RightStatus" => Self::RightStatus,
                 "WindowButton" => Self::WindowButton,
@@ -260,7 +264,7 @@ impl FromDynamic for MouseRegion {
                 _ => {
                     return Err(DynError::Message(format!(
                         "must be one of Any, Pane, TabBar, Tab, CloseTab, NewTabButton, \
-                         LeftStatus, RightStatus, WindowButton, ScrollThumb, \
+                         MenuButton, LeftStatus, RightStatus, WindowButton, ScrollThumb, \
                          AboveScrollThumb, BelowScrollThumb, Split, Modal; got: {s}"
                     )))
                 }

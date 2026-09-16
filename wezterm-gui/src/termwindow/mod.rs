@@ -80,6 +80,7 @@ pub mod box_model;
 pub mod charselect;
 pub mod clipboard;
 pub mod context_menu;
+pub mod keybinds;
 pub mod keyevent;
 pub mod modal;
 mod mouseevent;
@@ -3258,6 +3259,26 @@ impl TermWindow {
             }
             OpenSettings => {
                 crate::termwindow::settings::open_settings(self);
+            }
+            ShowMainMenu => {
+                // Anchor below the tab bar's left edge, mirroring the
+                // ☰ button dropdown placement
+                let border = self.get_os_border();
+                let top_bar_height = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
+                    self.tab_bar_pixel_height().unwrap()
+                } else {
+                    0.
+                };
+                let (_, padding_top) = self.padding_left_top();
+                let y = top_bar_height + padding_top + border.top.get() as f32 + 4.;
+                let x = border.left.get() as f32 + 8.;
+                crate::termwindow::context_menu::open_context_menu(
+                    self,
+                    crate::termwindow::context_menu::ContextMenu::main_menu(x, y),
+                );
+            }
+            ShowKeybinds => {
+                crate::termwindow::keybinds::open_keybinds(self);
             }
             PromptInputLine(args) => self.show_prompt_input_line(args),
             InputSelector(args) => self.show_input_selector(args),

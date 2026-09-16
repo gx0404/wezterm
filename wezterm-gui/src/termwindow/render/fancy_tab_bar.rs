@@ -191,6 +191,35 @@ impl crate::TermWindow {
                     bg: new_tab_hover.bg_color.to_linear().into(),
                     text: new_tab_hover.fg_color.to_linear().into(),
                 })),
+                // fork: `☰` main-menu button, styled like the `+` button
+                TabBarItem::MenuButton => {
+                    Element::new(&font, ElementContent::Text("☰".to_string()))
+                        .vertical_align(VerticalAlign::Middle)
+                        .item_type(UIItemType::TabBar(item.item.clone()))
+                        .margin(BoxDimension {
+                            left: Dimension::Cells(0.5),
+                            right: Dimension::Cells(0.),
+                            top: Dimension::Cells(0.2),
+                            bottom: Dimension::Cells(0.),
+                        })
+                        .padding(BoxDimension {
+                            left: Dimension::Cells(0.5),
+                            right: Dimension::Cells(0.5),
+                            top: Dimension::Cells(0.2),
+                            bottom: Dimension::Cells(0.25),
+                        })
+                        .border(BoxDimension::new(Dimension::Pixels(1.)))
+                        .colors(ElementColors {
+                            border: BorderColor::default(),
+                            bg: new_tab.bg_color.to_linear().into(),
+                            text: new_tab.fg_color.to_linear().into(),
+                        })
+                        .hover_colors(Some(ElementColors {
+                            border: BorderColor::default(),
+                            bg: new_tab_hover.bg_color.to_linear().into(),
+                            text: new_tab_hover.fg_color.to_linear().into(),
+                        }))
+                }
                 TabBarItem::Tab { active, .. } if active => element
                     .vertical_align(tab_vertical_alignment)
                     .item_type(UIItemType::TabBar(item.item.clone()))

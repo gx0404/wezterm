@@ -500,6 +500,13 @@ pub struct Config {
     #[dynamic(default = "default_true")]
     pub mouse_right_click_menu: bool,
 
+    /// If true, a `☰` main-menu button is shown at the right end of the
+    /// tab bar (both retro and fancy), opening the herdr-style main menu
+    /// (command palette / keybindings / settings / reload / quit).
+    /// Defaults to `true`.
+    #[dynamic(default = "default_true")]
+    pub show_menu_button_in_tab_bar: bool,
+
     /// If true, tab bar titles are prefixed with the tab index
     #[dynamic(default = "default_true")]
     pub show_tab_index_in_tab_bar: bool,
