@@ -19,6 +19,9 @@
   - `config/domains.lua`：WSL 域写死的 `username='kevin'` / `/home/kevin` 改为
     `os.getenv('USERNAME')` 动态取当前账户。
 - 本机存在 `~/.config/wezterm.bak-20260713`（38MB 旧快照），未收录。
+- 2026-09-16 增量同步：`config/bindings.lua` 恢复 Linux 壁纸控制的
+  `Alt+.` / `Alt+,` / `Alt+/` / `Ctrl+Alt+/` / `Alt+b`，与本机配置及
+  Oh My Zsh 仓库 `gx/wezterm/` 同步；常用终端功能继续使用 `Ctrl+Shift`。
 
 ## plugins/
 

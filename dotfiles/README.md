@@ -60,6 +60,18 @@ GX_SYNC_WRITE=1 make gx-sync        # 把本机改动收回 dotfiles/
 收录时提交进仓库的插件/字体不随 sync 变动；升级插件属于重新快照，
 须更新 PROVENANCE.md 的 pin 记录。
 
+## 壁纸快捷键（Linux / Windows）
+
+| 快捷键 | 功能 |
+|---|---|
+| `Alt+.` / `Alt+,` | 下一张 / 上一张壁纸 |
+| `Alt+/` | 随机壁纸 |
+| `Ctrl+Alt+/` | 打开壁纸选择器 |
+| `Alt+b` | 切换纯色专注模式与壁纸 |
+
+macOS 对应使用 `Super` / `Ctrl+Super`。Linux 的壁纸快捷键独立于常用终端功能的
+`Ctrl+Shift` 组合；修改后同步到 Oh My Zsh 仓库的 `gx/wezterm/config/bindings.lua`。
+
 ## 已知边界
 
 - `config/bindings.lua` 的 Alt+Shift+V 依赖 `~/.local/bin/ai-image-paste`，

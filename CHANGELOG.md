@@ -39,6 +39,13 @@
   失焦 WM 提醒（X11 urgency / macOS dock bounce）与 Lua
   `window:request_attention()`、`bell_cooldown_ms` 每 pane 节流。
 
+### Fixed
+
+- 恢复 Linux 壁纸快捷键：`Alt+.` / `Alt+,` 切换下一张 / 上一张，
+  `Alt+/` 随机、`Ctrl+Alt+/` 选择、`Alt+b` 切换纯色专注模式；
+  避免壁纸控制跟随通用 `Ctrl+Shift` 修饰键变更。同步本机配置、
+  `dotfiles/wezterm-config/` 与 Oh My Zsh 的 `gx/wezterm/` 快照。
+
 ## 0.1.0(TBD)
 
 ### Added
