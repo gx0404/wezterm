@@ -165,6 +165,9 @@ pub enum UIItemType {
     ScrollThumb,
     BelowScrollThumb,
     Split(PositionedSplit),
+    /// A row of an active modal overlay (command palette and friends);
+    /// the payload is the visible row index
+    Modal(usize),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

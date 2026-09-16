@@ -6,7 +6,7 @@ use crate::termwindow::render::corners::{
     BOTTOM_LEFT_ROUNDED_CORNER, BOTTOM_RIGHT_ROUNDED_CORNER, TOP_LEFT_ROUNDED_CORNER,
     TOP_RIGHT_ROUNDED_CORNER,
 };
-use crate::termwindow::{DimensionContext, GuiWin, TermWindow};
+use crate::termwindow::{DimensionContext, GuiWin, TermWindow, UIItemType};
 use crate::utilsprites::RenderMetrics;
 use config::keyassignment::KeyAssignment;
 use config::Dimension;
@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use termwiz::nerdfonts::NERD_FONTS;
 use wezterm_dynamic::{FromDynamic, ToDynamic};
-use wezterm_term::{KeyCode, KeyModifiers, MouseEvent};
+use wezterm_term::{KeyCode, KeyModifiers};
 use window::color::LinearRgba;
 use window::Modifiers;
 
@@ -437,7 +437,10 @@ impl CommandPalette {
                         bottom: Dimension::Cells(0.),
                     })
                     .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block),
+                    .display(DisplayType::Block)
+                    // Register the row in the hit map so that mouse
+                    // events can be routed back to the modal
+                    .item_type(UIItemType::Modal(display_idx)),
             );
         }
 
@@ -573,6 +576,33 @@ impl CommandPalette {
     }
 }
 
+impl CommandPalette {
+    /// Shared by the Enter key and mouse clicks: run the command that
+    /// is currently selected
+    fn activate_selected(&self, term_window: &mut TermWindow) -> anyhow::Result<()> {
+        let selected_idx = *self.selected_row.borrow();
+        let alias_idx = match self.matches.borrow().as_ref() {
+            None => return Ok(()),
+            Some(results) => match results.matches.get(selected_idx) {
+                Some(i) => *i,
+                None => return Ok(()),
+            },
+        };
+        let item = &self.commands[alias_idx];
+        if let Err(err) = save_recent(item) {
+            log::error!("Error while saving recents: {err:#}");
+        }
+        term_window.cancel_modal();
+
+        if let Some(pane) = term_window.get_active_pane_or_overlay() {
+            if let Err(err) = term_window.perform_key_assignment(&pane, &item.action) {
+                log::error!("Error while performing {item:?}: {err:#}");
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Modal for CommandPalette {
     fn perform_assignment(
         &self,
@@ -582,7 +612,27 @@ impl Modal for CommandPalette {
         false
     }
 
-    fn mouse_event(&self, _event: MouseEvent, _term_window: &mut TermWindow) -> anyhow::Result<()> {
+    fn mouse_event(
+        &self,
+        event: ::window::MouseEvent,
+        row: usize,
+        term_window: &mut TermWindow,
+    ) -> anyhow::Result<()> {
+        use ::window::MouseEventKind as WMEK;
+        match event.kind {
+            WMEK::Move => {
+                // Hovering a row selects it, mirroring the keyboard UX
+                if *self.selected_row.borrow() != row {
+                    self.selected_row.replace(row);
+                    term_window.invalidate_modal();
+                }
+            }
+            WMEK::Press(::window::MousePress::Left) => {
+                self.selected_row.replace(row);
+                self.activate_selected(term_window)?;
+            }
+            _ => {}
+        }
         Ok(())
     }
 
@@ -621,26 +671,8 @@ impl Modal for CommandPalette {
                 self.updated_input();
             }
             (KeyCode::Enter, KeyModifiers::NONE) => {
-                // Enter the selected character to the current pane
-                let selected_idx = *self.selected_row.borrow();
-                let alias_idx = match self.matches.borrow().as_ref() {
-                    None => return Ok(true),
-                    Some(results) => match results.matches.get(selected_idx) {
-                        Some(i) => *i,
-                        None => return Ok(true),
-                    },
-                };
-                let item = &self.commands[alias_idx];
-                if let Err(err) = save_recent(item) {
-                    log::error!("Error while saving recents: {err:#}");
-                }
-                term_window.cancel_modal();
-
-                if let Some(pane) = term_window.get_active_pane_or_overlay() {
-                    if let Err(err) = term_window.perform_key_assignment(&pane, &item.action) {
-                        log::error!("Error while performing {item:?}: {err:#}");
-                    }
-                }
+                // Activate the selected command in the current pane
+                self.activate_selected(term_window)?;
                 return Ok(true);
             }
             _ => return Ok(false),

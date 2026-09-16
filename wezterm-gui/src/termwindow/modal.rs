@@ -3,7 +3,7 @@ use crate::TermWindow;
 use config::keyassignment::KeyAssignment;
 use downcast_rs::{impl_downcast, Downcast};
 use std::cell::Ref;
-use wezterm_term::{KeyCode, KeyModifiers, MouseEvent};
+use wezterm_term::{KeyCode, KeyModifiers};
 
 pub trait Modal: Downcast {
     fn perform_assignment(
@@ -13,7 +13,15 @@ pub trait Modal: Downcast {
     ) -> bool {
         false
     }
-    fn mouse_event(&self, event: MouseEvent, term_window: &mut TermWindow) -> anyhow::Result<()>;
+    /// A mouse event that hit one of the modal's rows in the hit map
+    /// (see `UIItemType::Modal`); `row` is the visible row index the
+    /// event landed on.
+    fn mouse_event(
+        &self,
+        event: ::window::MouseEvent,
+        row: usize,
+        term_window: &mut TermWindow,
+    ) -> anyhow::Result<()>;
     fn key_down(
         &self,
         key: KeyCode,

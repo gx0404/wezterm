@@ -40,6 +40,7 @@ impl UIItemType {
             UIItemType::ScrollThumb => MouseRegion::ScrollThumb,
             UIItemType::BelowScrollThumb => MouseRegion::BelowScrollThumb,
             UIItemType::Split(_) => MouseRegion::Split,
+            UIItemType::Modal(_) => MouseRegion::Modal,
         }
     }
 }
@@ -174,7 +175,8 @@ impl super::TermWindow {
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
-            | UIItemType::Split(_) => {}
+            | UIItemType::Split(_)
+            | UIItemType::Modal(_) => {}
         }
     }
 
@@ -185,7 +187,8 @@ impl super::TermWindow {
             | UIItemType::AboveScrollThumb
             | UIItemType::BelowScrollThumb
             | UIItemType::ScrollThumb
-            | UIItemType::Split(_) => {}
+            | UIItemType::Split(_)
+            | UIItemType::Modal(_) => {}
         }
     }
 
@@ -534,6 +537,17 @@ impl super::TermWindow {
             }
             UIItemType::Split(split) => {
                 self.mouse_event_split(item, split, event, context);
+            }
+            UIItemType::Modal(row) => {
+                // Route the event to the active modal overlay; the row
+                // index came from the hit map
+                let modal = self.get_modal();
+                if let Some(modal) = modal {
+                    if let Err(err) = modal.mouse_event(event, row, self) {
+                        log::error!("while processing modal mouse event: {err:#}");
+                    }
+                }
+                context.set_cursor(Some(CursorIcon::Pointer));
             }
             UIItemType::CloseTab(idx) => {
                 self.mouse_event_close_tab(idx, event, context);

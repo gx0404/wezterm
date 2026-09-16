@@ -21,7 +21,7 @@ use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use termwiz::input::Modifiers;
-use wezterm_term::{KeyCode, KeyModifiers, MouseEvent};
+use wezterm_term::{KeyCode, KeyModifiers};
 use window::color::LinearRgba;
 
 struct MatchResults {
@@ -597,7 +597,12 @@ impl Modal for CharSelector {
         false
     }
 
-    fn mouse_event(&self, _event: MouseEvent, _term_window: &mut TermWindow) -> anyhow::Result<()> {
+    fn mouse_event(
+        &self,
+        _event: ::window::MouseEvent,
+        _row: usize,
+        _term_window: &mut TermWindow,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 

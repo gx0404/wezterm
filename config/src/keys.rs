@@ -214,6 +214,8 @@ pub enum MouseRegion {
     BelowScrollThumb,
     /// A split divider between panes
     Split,
+    /// A row of an active modal overlay (eg: the command palette)
+    Modal,
 }
 
 impl MouseRegion {
@@ -232,6 +234,7 @@ impl MouseRegion {
             Self::AboveScrollThumb => "AboveScrollThumb",
             Self::BelowScrollThumb => "BelowScrollThumb",
             Self::Split => "Split",
+            Self::Modal => "Modal",
         }
     }
 }
@@ -253,11 +256,12 @@ impl FromDynamic for MouseRegion {
                 "AboveScrollThumb" => Self::AboveScrollThumb,
                 "BelowScrollThumb" => Self::BelowScrollThumb,
                 "Split" => Self::Split,
+                "Modal" => Self::Modal,
                 _ => {
                     return Err(DynError::Message(format!(
                         "must be one of Any, Pane, TabBar, Tab, CloseTab, NewTabButton, \
                          LeftStatus, RightStatus, WindowButton, ScrollThumb, \
-                         AboveScrollThumb, BelowScrollThumb, Split; got: {s}"
+                         AboveScrollThumb, BelowScrollThumb, Split, Modal; got: {s}"
                     )))
                 }
             }),
@@ -318,6 +322,7 @@ mod tests {
             MouseRegion::AboveScrollThumb,
             MouseRegion::BelowScrollThumb,
             MouseRegion::Split,
+            MouseRegion::Modal,
         ] {
             let value = region.to_dynamic();
             assert_eq!(
