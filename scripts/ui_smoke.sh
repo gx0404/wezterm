@@ -67,9 +67,17 @@ sleep 8
 kill -0 "${GUI_PID}" 2>/dev/null || fail "wezterm-gui 提前退出（检查 Xvfb/字体/配置）"
 
 xwd -root -silent > "${EVIDENCE}/screen.xwd"
-ffmpeg -hide_banner -loglevel error -y -i "${EVIDENCE}/screen.xwd" "${EVIDENCE}/before.png"
+# 个别发行版 ffmpeg 未编入 png 编码器，回退 mjpeg/jpg
+if ffmpeg -hide_banner -encoders 2>/dev/null | grep -qE "(^| )png( |$)" \
+    || ffmpeg -hide_banner -encoders 2>/dev/null | grep -q " libpng"; then
+    ffmpeg -hide_banner -loglevel error -y -i "${EVIDENCE}/screen.xwd" "${EVIDENCE}/before.png"
+    SHOT="before.png"
+else
+    ffmpeg -hide_banner -loglevel error -y -i "${EVIDENCE}/screen.xwd" -c:v mjpeg -q:v 2 "${EVIDENCE}/before.jpg"
+    SHOT="before.jpg"
+fi
 rm -f "${EVIDENCE}/screen.xwd"
-[ -s "${EVIDENCE}/before.png" ] || fail "截图为空"
+[ -s "${EVIDENCE}/${SHOT}" ] || fail "截图为空"
 
 COMMIT="$(git -C "${ROOT}" rev-parse --short HEAD 2>/dev/null || echo no-git)"
 cat > "${EVIDENCE}/result.json" <<EOF
@@ -80,9 +88,9 @@ cat > "${EVIDENCE}/result.json" <<EOF
   "commit": "${COMMIT}",
   "display": "${DISPLAY}",
   "command": "scripts/ui_smoke.sh",
-  "screenshots": ["before.png"],
+  "screenshots": ["${SHOT}"],
   "images_reviewed": false,
-  "note": "截图已落盘但尚未读回；执行者必须读回 before.png 核对 '${MARKER}' 可见后将 images_reviewed 置 true 并把 status 改 PASS/FAIL"
+  "note": "截图已落盘但尚未读回；执行者必须读回 ${SHOT} 核对 '${MARKER}' 可见后将 images_reviewed 置 true 并把 status 改 PASS/FAIL"
 }
 EOF
-note "完成：${EVIDENCE#$ROOT/}/before.png —— 必须读回图片核对标记文本后再判定通过"
+note "完成：${EVIDENCE#$ROOT/}/${SHOT} —— 必须读回图片核对标记文本后再判定通过"

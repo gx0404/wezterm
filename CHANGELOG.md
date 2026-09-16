@@ -11,7 +11,6 @@
 ## 0.2.0(TBD)
 
 ### Added
-
 - CLI 帮助全面 zh-CN 汉化（wezterm 与 wezterm-gui 两二进制的全部子命令
   树）：clap derive 的帮助文本来自 doc 注释，采取**运行时本地化**——
   parse 前经 `wezterm-gui-subcommands::localize_clap` 遍历命令树
@@ -109,6 +108,18 @@
 
 ### Fixed
 
+- 修复设置浮层顶部行被窗口边缘截断：原 bounds 高度按固定 8 行预算
+  传入 box model，列表较长时顶部溢出裁剪；改为与命令面板一致的全
+  终端高度 bounds（Xvfb 截图验证标题/分区/页脚完整）。
+- `scripts/ui_smoke.sh` 在 ffmpeg 未编入 png 编码器的发行版上直接
+  失败：增加编码器探测，缺失时回退 mjpeg 输出 `before.jpg`
+  （result.json 的 screenshots 字段随实际文件名登记）。
+- 复审记录（未改动，留待后续）：`--config a=b;c=d` 仅第一对生效
+  （后续对被拼入 Lua chunk 变成全局赋值，上游行为）；`--config
+  keys=...` 与 `wezterm-gui start`（含 `--always-new-process`）组合
+  时键绑定在 GUI 内不生效而 `show-keys` 可见（配置文件方式正常，
+  待上游定位）；设置浮层标题/页脚等非交互行点击会走「点击浮层外
+  关闭」路径（可接受差异）。
 - 修复 `dotfiles/install.sh` 配置步骤的启动竞态：原先先 `rm -rf`
   `~/.config/wezterm` 再整树 `cp -a`（19MB 快照需秒级），空窗期内启动
   wezterm 会报 `wezterm.lua: No such file or directory`。改为暂存目录

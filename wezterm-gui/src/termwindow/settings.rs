@@ -502,11 +502,11 @@ impl SettingsOverlay {
             .max(80)
             .min(term_window.terminal_size.cols);
         let width = desired_width_cells as f32 * term_window.render_metrics.cell_size.width as f32;
-        let height = (top_bar_height
-            + padding_top
-            + border.top.get() as f32
-            + term_window.render_metrics.cell_size.height as f32 * 8.)
-            .min(term_window.dimensions.pixel_height as f32 * 0.8);
+        // fork: give the layout the full terminal height (like the command
+        // palette) instead of a fixed row budget — a short bounds height
+        // made the box model clip the overlay's top rows
+        let height = term_window.terminal_size.rows as f32
+            * term_window.render_metrics.cell_size.height as f32;
 
         let x = padding_left
             + ((term_window.dimensions.pixel_width as f32 - padding_left * 2.) - width).max(0.)

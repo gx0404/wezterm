@@ -1,7 +1,7 @@
 {
   "artifacts": {
-    "GRAPH_REPORT.md": "dd2165492f775f8c811f00a615888cdfc7f9e302b0109d806c73379db8bf1094",
-    "graph.json": "7f73d07072ba32d1f774a6ef6f572472c8f7c7a107c79dc88fdc612b6177a18e"
+    "GRAPH_REPORT.md": "02d237d06dc454f41d6084931a6574e0d42ea8d8f92d37093253ab1d63a9d394",
+    "graph.json": "6c8e3b42e26db3b918ba579333eccb62d06c3daa91363924dd19f06d2e7fc286"
   },
   "index_root": ".",
   "pipeline": {
@@ -17,7 +17,7 @@
       "wezterm-char-props/src/nerdfonts_data.rs",
       "wezterm-gui/src/unicode_names.rs"
     ],
-    "file_count": 436,
-    "sha256": "9bf764337f84a4f4d0a9af16749dc47d9c341c42e2f17a9b77c83224b16a844d"
+    "file_count": 442,
+    "sha256": "7bfc0fbe747c907c8370b038cd80ce95dcd108b264d29bad52dac16b6a2fabd3"
   }
 }
