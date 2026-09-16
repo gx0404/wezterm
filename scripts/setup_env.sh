@@ -5,6 +5,8 @@
 # 安装项：
 #   .local/tools/nextest/bin/cargo-nextest   # Makefile test 目标的既定运行器
 #   .local/tools/venv/                        # graphifyy(图谱) + tomli(py3.10 TOML)
+#   .local/tools/stylua/bin/stylua            # lua 代码块格式化（generated-check/
+#                                             # update-derived-files 与 docs 构建同一约定）
 #
 # 解析序：Makefile 已把上述 bin 目录前置到 PATH；$WEZTERM_TOOLCHAIN_ROOT
 # 可整体重定向 .local/tools（CI 或离线复用）。
@@ -30,6 +32,10 @@ NEXTEST_URL="https://github.com/nextest-rs/nextest/releases/download/cargo-nexte
 # musl 静态二进制（glibc 版本解耦）；sha256 与版本成对维护。
 NEXTEST_SHA256="20ed0a7d3d6f8dda9bb1b0bcb5838aea5784d3e2360746280868996d709dde0a"
 GRAPHIFY_VERSION="0.9.20"
+# musl 静态二进制（glibc 版本解耦）；与 ci/stylua.toml 共同决定键表派生物格式。
+STYLUA_VERSION="2.5.2"
+STYLUA_URL="https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA_VERSION}/stylua-linux-x86_64-musl.zip"
+STYLUA_SHA256="ca6f1cf52eaf69e6632b81acef9c197aa24b85eb30d2455a35e7dbe28ae77c72"
 
 fail=0
 note()  { printf '[setup-env] %s\n' "$*"; }
@@ -56,6 +62,13 @@ check_all() {
         ok "框架 venv $("${TOOLS}/venv/bin/python" --version 2>&1 | awk '{print $2}')（tomli+graphifyy）"
     else
         note "框架 venv 未安装（resolver 在 py3.10 上依赖其 tomli）：scripts/setup_env.sh"
+    fi
+    if [ -x "${TOOLS}/stylua/bin/stylua" ]; then
+        ok "stylua $("${TOOLS}/stylua/bin/stylua" --version 2>/dev/null | awk '{print $NF}')（项目钉版）"
+    elif command -v stylua >/dev/null 2>&1; then
+        note "stylua 走系统 PATH（建议安装项目钉版：scripts/setup_env.sh）"
+    else
+        miss stylua "运行 scripts/setup_env.sh 安装项目钉版（键表派生物比对/写入用）"
     fi
     [ "$fail" -eq 0 ] && echo "[setup-env] 诊断通过" || echo "[setup-env] 存在缺项（见上）"
     return "$fail"
@@ -98,6 +111,27 @@ install_nextest() {
     ok "cargo-nextest ${NEXTEST_VERSION} -> ${dest}/bin/"
 }
 
+install_stylua() {
+    local dest="${TOOLS}/stylua"
+    if [ -x "${dest}/bin/stylua" ] \
+        && "${dest}/bin/stylua" --version 2>/dev/null | grep -q "${STYLUA_VERSION}"; then
+        note "stylua ${STYLUA_VERSION} 已是钉版，跳过"
+        return 0
+    fi
+    mkdir -p "${dest}/bin"
+    local tmp
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "${tmp}"' RETURN
+    note "下载 stylua ${STYLUA_VERSION}（musl 静态）"
+    curl -fsSL "${STYLUA_URL}" -o "${tmp}/stylua.zip" \
+        || { echo "[setup-env] 下载失败；也可手动从 StyLua releases 安装到 ${dest}/bin/" >&2; return 1; }
+    echo "${STYLUA_SHA256}  ${tmp}/stylua.zip" | sha256sum -c - \
+        || { echo "[setup-env] sha256 校验失败，拒绝安装" >&2; return 1; }
+    unzip -o -q "${tmp}/stylua.zip" -d "${tmp}"
+    install -m 0755 "${tmp}/stylua" "${dest}/bin/stylua"
+    ok "stylua ${STYLUA_VERSION} -> ${dest}/bin/"
+}
+
 install_venv() {
     local venv="${TOOLS}/venv"
     if [ -x "${venv}/bin/python" ] && "${venv}/bin/python" -c "import tomli" 2>/dev/null \
@@ -125,5 +159,6 @@ else
     [ "$fail" -ne 0 ] && { echo "[setup-env] 必备引导工具缺失，先按提示安装" >&2; exit 1; }
     install_nextest
     install_venv
-    echo "[setup-env] 完成：make test / make graph / make framework-check 现在使用项目钉版工具"
+    install_stylua
+    echo "[setup-env] 完成：make test / make graph / make generated-check / make framework-check 现在使用项目钉版工具"
 fi

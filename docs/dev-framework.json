@@ -37,97 +37,171 @@
   "commands": {
     "setup": {
       "status": "configured",
-      "argv": ["scripts/setup_env.sh"],
+      "argv": [
+        "scripts/setup_env.sh"
+      ],
       "cwd": "."
     },
     "dev": {
       "status": "configured",
-      "argv": ["cargo", "run", "-p", "wezterm-gui", "--", "--always-new-process"],
+      "argv": [
+        "cargo",
+        "run",
+        "-p",
+        "wezterm-gui",
+        "--",
+        "--always-new-process"
+      ],
       "cwd": "."
     },
     "build": {
       "status": "configured",
-      "argv": ["make", "build"],
+      "argv": [
+        "make",
+        "build"
+      ],
       "cwd": "."
     },
     "lint": {
       "status": "configured",
-      "argv": ["cargo", "+nightly", "fmt", "--check"],
+      "argv": [
+        "cargo",
+        "+nightly",
+        "fmt",
+        "--check"
+      ],
       "cwd": "."
     },
     "typecheck": {
       "status": "configured",
-      "argv": ["make", "check"],
+      "argv": [
+        "make",
+        "check"
+      ],
       "cwd": "."
     },
     "test": {
       "status": "configured",
-      "argv": ["make", "test"],
+      "argv": [
+        "make",
+        "test"
+      ],
       "cwd": "."
     },
     "test-integration": {
       "status": "configured",
-      "argv": ["cargo", "nextest", "run", "-p", "wezterm-ssh"],
+      "argv": [
+        "cargo",
+        "nextest",
+        "run",
+        "-p",
+        "wezterm-ssh"
+      ],
       "cwd": "."
     },
     "test-heavy": {
       "status": "configured",
-      "argv": ["cargo", "nextest", "run", "--all", "--no-fail-fast"],
+      "argv": [
+        "cargo",
+        "nextest",
+        "run",
+        "--all",
+        "--no-fail-fast"
+      ],
       "cwd": "."
     },
     "generated-check": {
       "status": "configured",
-      "argv": ["scripts/generated_check.sh"],
+      "argv": [
+        "scripts/generated_check.sh"
+      ],
       "cwd": "."
     },
     "generated-write": {
       "status": "configured",
-      "argv": ["ci/update-derived-files.sh"],
+      "argv": [
+        "scripts/generated_write.sh"
+      ],
       "cwd": "."
     },
     "ui-smoke": {
       "status": "configured",
-      "argv": ["scripts/ui_smoke.sh"],
+      "argv": [
+        "scripts/ui_smoke.sh"
+      ],
       "cwd": "."
     },
     "graph": {
       "status": "configured",
-      "argv": ["scripts/graphify.sh", "rebuild"],
+      "argv": [
+        "scripts/graphify.sh",
+        "rebuild"
+      ],
       "cwd": "."
     },
     "graph-check": {
       "status": "configured",
-      "argv": ["scripts/graphify.sh", "check"],
+      "argv": [
+        "scripts/graphify.sh",
+        "check"
+      ],
       "cwd": "."
     },
     "kb": {
       "status": "configured",
-      "argv": ["python3", "scripts/build_agent_kb.py", "--confirm"],
+      "argv": [
+        "python3",
+        "scripts/build_agent_kb.py",
+        "--confirm"
+      ],
       "cwd": "."
     },
     "kb-check": {
       "status": "configured",
-      "argv": ["python3", "scripts/build_agent_kb.py", "--check"],
+      "argv": [
+        "python3",
+        "scripts/build_agent_kb.py",
+        "--check"
+      ],
       "cwd": "."
     },
     "framework-test": {
       "status": "configured",
-      "argv": ["python3", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"],
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts",
+        "-p",
+        "test_*.py"
+      ],
       "cwd": "."
     },
     "gx-bundle": {
       "status": "configured",
-      "argv": ["python3", "scripts/gx_bundle.py", "bundle"],
+      "argv": [
+        "python3",
+        "scripts/gx_bundle.py",
+        "bundle"
+      ],
       "cwd": "."
     },
     "gx-install": {
       "status": "configured",
-      "argv": ["scripts/gx_install.sh"],
+      "argv": [
+        "scripts/gx_install.sh"
+      ],
       "cwd": "."
     },
     "gx-sync": {
       "status": "configured",
-      "argv": ["python3", "scripts/gx_bundle.py", "sync"],
+      "argv": [
+        "python3",
+        "scripts/gx_bundle.py",
+        "sync"
+      ],
       "cwd": "."
     },
     "package": {

@@ -26,13 +26,25 @@ if [ -x "${BIN}" ]; then
     done
     for mode in copy_mode search_mode; do
         fname="default-$(echo "${mode}" | tr _ -)-key-table.markdown"
-        {
-            echo '```'
-            "${BIN}" -n show-keys --lua --key-table "${mode}"
-            echo '```'
-        } | perl -0777 -pe 's/^\n+|\n\K\n+$//g' > "${TMP}/${fname}"
-        if ! cmp -s "${TMP}/${fname}" "${ROOT}/docs/examples/${fname}"; then
-            bad "docs/examples/${fname}（重跑 make generated-write 或说明差异）"
+        # 入库键表是 stylua（ci/stylua.toml）格式化的——与 docs 构建的
+        # gelatyx/stylua 同一约定；比对前用钉版 stylua 做同样格式化。
+        STYLUA="$(command -v stylua 2>/dev/null || true)"
+        if [ -z "${STYLUA}" ] && [ -x "${ROOT}/.local/tools/stylua/bin/stylua" ]; then
+            STYLUA="${ROOT}/.local/tools/stylua/bin/stylua"
+        fi
+        if [ -n "${STYLUA}" ]; then
+            "${BIN}" -n show-keys --lua --key-table "${mode}" > "${TMP}/keytable.lua"
+            "${STYLUA}" --config-path "${ROOT}/ci/stylua.toml" "${TMP}/keytable.lua"
+            {
+                echo '```lua'
+                cat "${TMP}/keytable.lua"
+                echo '```'
+            } | perl -0777 -pe 's/^\n+|\n\K\n+$//g' > "${TMP}/${fname}"
+            if ! cmp -s "${TMP}/${fname}" "${ROOT}/docs/examples/${fname}"; then
+                bad "docs/examples/${fname}（重跑 make generated-write 或说明差异）"
+            fi
+        else
+            note "缺少 stylua，跳过键表 ${fname} 比对（scripts/setup_env.sh 安装钉版）"
         fi
     done
 else

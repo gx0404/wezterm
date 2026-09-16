@@ -31,7 +31,7 @@ servedocs:
 # ---------------------------------------------------------------------------
 # AI 协作开发框架（fork 维护段，上游没有；命令手册见 docs/MAKE_COMMANDS.md）
 # 工具解析序：项目钉版 .local/tools > 系统 PATH（安装：make setup）。
-export PATH := $(CURDIR)/.local/tools/venv/bin:$(CURDIR)/.local/tools/nextest/bin:$(PATH)
+export PATH := $(CURDIR)/.local/tools/venv/bin:$(CURDIR)/.local/tools/nextest/bin:$(CURDIR)/.local/tools/stylua/bin:$(PATH)
 FRAMEWORK_PY := $(if $(wildcard .local/tools/venv/bin/python),.local/tools/venv/bin/python,python3)
 
 # build/test 沿用上方上游目标语义；框架命令经 dev_framework.py 调度，不重复定义。
