@@ -38,6 +38,7 @@
 | `make kb` / `make kb-check` | 重建/校验知识库 | kb 写盘，kb-check 只读 |
 | `make gx-bundle` | docker ubuntu:20.04 容器构建 release 四件套并组装离线安装包 `dist/*.tar.xz`（有 Windows 包时顺带产出 zip） | 需 docker（或 `GX_USE_LOCAL=1` 本机构建，产物标注 glibc）；联网装依赖，耗时 |
 | `make gx-install` | 源码路径安装：rust 检查 → `./get-deps`（需 sudo，交互确认）→ release 构建 → `dotfiles/install.sh` 部署 | 改 `$HOME` 下用户文件（先备份）；联网 |
+| `make gx-upgrade` | **一条命令本机替换**：docker 容器构建 release 四件套（无 sudo；`GX_USE_LOCAL=1` 本机构建）→ `dotfiles/install.sh` 用户级部署（配置/插件/字体随快照，全带备份）→ 版本验证 | 改 `$HOME` 下用户文件（先备份）；需 docker、联网；已开窗口仍跑旧二进制需重启 |
 | `make gx-sync` | 对比本机 `~/.config/wezterm`、插件目录与 `dotfiles/` 快照差异 | 只读；`GX_SYNC_WRITE=1` 写回仓库 |
 | `make dev` | cargo run -p wezterm-gui（交互起 GUI） | 需显示；编译耗时 |
 

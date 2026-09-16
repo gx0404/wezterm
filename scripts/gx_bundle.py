@@ -5,6 +5,10 @@
 #           时顺带产出 Windows 部署 zip。
 # sync   —— 对比本机 ~/.config/wezterm 与插件目录同 dotfiles/ 快照的差异，
 #           GX_SYNC_WRITE=1 时把本机改动收回仓库（删除只报告不执行）。
+# upgrade —— 一条命令完成本机替换：容器构建 release 四件套 →
+#           dotfiles/install.sh 用户级部署（配置/插件/字体随快照更新，
+#           全程带时间戳备份，无需 sudo）→ 版本验证。等价
+#           `make gx-bundle && 安装`，但不产出离线包。
 # 领域规则见 docs/AGENT_RULES/dotfiles.md 与 development.md。
 
 import argparse
@@ -380,6 +384,24 @@ def cmd_sync(args) -> None:
         print(f"sync: {total} difference(s); run with GX_SYNC_WRITE=1 to sync back")
 
 
+def cmd_upgrade(args) -> None:
+    use_local = args.use_local or os.environ.get("GX_USE_LOCAL") == "1"
+    bin_dir = build_local() if use_local else build_in_docker()
+    for b in BINARIES:
+        if not (bin_dir / b).exists():
+            die(f"missing built binary: {bin_dir / b}")
+
+    run(["bash", str(DOTFILES / "install.sh"),
+         "--from-build", str(bin_dir), "--bundle-root", str(REPO)])
+
+    wrapper = Path.home() / ".local" / "bin" / "wezterm"
+    version = out([str(wrapper), "--version"])
+    print(f"upgrade verified: {version}")
+    print("note: 已打开的 wezterm 窗口仍运行旧二进制；重启 wezterm"
+          "（退出后从桌面/命令行重新启动）后新版本生效。"
+          "回滚：~/.local/bin 下 .bak-gx-* 备份与 ~/.local/opt/wezterm-nightly。")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -389,9 +411,15 @@ def main() -> None:
     b.add_argument("--linux-only", action="store_true", help="skip windows bundle")
     s = sub.add_parser("sync", help="diff/copy machine state back into dotfiles/")
     s.add_argument("--write", action="store_true", help="copy changes back")
+    u = sub.add_parser("upgrade",
+                       help="build in container + user-level install + verify")
+    u.add_argument("--use-local", action="store_true",
+                   help="build on the host instead of the ubuntu:20.04 container")
     args = ap.parse_args()
     if args.cmd == "bundle":
         cmd_bundle(args)
+    elif args.cmd == "upgrade":
+        cmd_upgrade(args)
     else:
         cmd_sync(args)
 
