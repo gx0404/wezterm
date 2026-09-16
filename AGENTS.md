@@ -133,6 +133,7 @@ push 目标只允许 origin。提交前提出 commit message 并对齐。
 | `cli-main` | wezterm/ 主 CLI 与 clap 子命令定义 |
 | `config-lua` | config/、lua-api-crates/、wezterm-dynamic、Lua 加载与热重载 |
 | `development` | 框架自身：scripts/、AGENT_RULES、Makefile、工具面 |
+| `dotfiles` | dotfiles/ 用户环境快照与跨机安装链（gx-bundle/install/sync） |
 | `font-shaping` | wezterm-font/、wezterm-char-props/、deps/ 构建辅助 |
 | `gui-rendering` | wezterm-gui/ 渲染、overlay、输入处理 |
 | `mux-domain` | mux/、wezterm-client/、mux-server、codec 帧协议 |

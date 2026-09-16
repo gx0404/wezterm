@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=WezTerm
+Comment=WezTerm (gx fork build)
+Keywords=shell;prompt;command;commandline;cmd;
+Icon=__ICON__
+StartupWMClass=org.wezfurlong.wezterm
+TryExec=__TRYEXEC__
+Exec=__EXEC__
+Type=Application
+Categories=System;TerminalEmulator;
+Terminal=false

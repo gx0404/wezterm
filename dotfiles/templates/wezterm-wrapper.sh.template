@@ -1,0 +1,3 @@
+#!/bin/sh
+# wezterm-gx wrapper: exec the gx fork build, config stays at ~/.config/wezterm.
+exec "__BIN_DIR__/wezterm" "$@"

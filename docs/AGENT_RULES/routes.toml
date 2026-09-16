@@ -105,6 +105,14 @@ paths = [
 tasks = []
 
 [[rules]]
+id = "dotfiles"
+doc = "docs/AGENT_RULES/dotfiles.md"
+paths = [
+  "dotfiles/**",
+]
+tasks = []
+
+[[rules]]
 id = "font-shaping"
 doc = "docs/AGENT_RULES/font-shaping.md"
 paths = [
