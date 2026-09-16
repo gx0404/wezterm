@@ -61,6 +61,9 @@ struct CopyRenderable {
     cursor: StableCursorPosition,
     delegate: Arc<dyn Pane>,
     start: Option<SelectionCoordinate>,
+    /// The mark set via CopyModeAssignment::SetMark, used by
+    /// JumpToMark to bounce between two locations
+    mark: Option<SelectionCoordinate>,
     selection_mode: SelectionMode,
     viewport: Option<StableRowIndex>,
     /// We use this to cancel ourselves later
@@ -144,6 +147,7 @@ impl CopyOverlay {
             window,
             delegate: Arc::clone(pane),
             start: None,
+            mark: None,
             viewport: term_window.get_viewport(pane.pane_id()),
             results: vec![],
             by_line: HashMap::new(),
@@ -1068,6 +1072,31 @@ impl CopyRenderable {
             .replace(PendingJump { forward, prev_char });
     }
 
+    fn set_mark(&mut self) {
+        self.clamp_cursor_to_scrollback();
+        self.mark
+            .replace(SelectionCoordinate::x_y(self.cursor.x, self.cursor.y));
+        self.window.invalidate();
+    }
+
+    fn jump_to_mark(&mut self) {
+        if let Some(mark) = self.mark.take() {
+            // Swap the cursor with the mark so that jumping again
+            // returns to where we came from, mirroring tmux's
+            // jump-to-mark semantics
+            self.clamp_cursor_to_scrollback();
+            let prior = SelectionCoordinate::x_y(self.cursor.x, self.cursor.y);
+            // Map BeforeZero onto the first cell for the cursor position
+            self.cursor.x = match mark.x {
+                SelectionX::Cell(x) => x,
+                SelectionX::BeforeZero => 0,
+            };
+            self.cursor.y = mark.y;
+            self.mark.replace(prior);
+            self.select_to_cursor_pos();
+        }
+    }
+
     fn jump_again(&mut self, reverse: bool) {
         if let Some(mut jump) = self.last_jump {
             if reverse {
@@ -1291,6 +1320,8 @@ impl Pane for CopyOverlay {
                     JumpBackward { prev_char } => render.jump(false, *prev_char),
                     JumpAgain => render.jump_again(false),
                     JumpReverse => render.jump_again(true),
+                    SetMark => render.set_mark(),
+                    JumpToMark => render.jump_to_mark(),
                 }
                 PerformAssignmentResult::Handled
             }
@@ -1499,6 +1530,36 @@ impl Pane for CopyOverlay {
                         }
                         line.clear_appdata();
                     }
+                    if let Some(mark) = &self.renderer.mark {
+                        if mark.y == stable_idx {
+                            let bg = colors.copy_mode_mark_bg;
+                            let fg = colors.copy_mode_mark_fg;
+                            let mark_x = match mark.x {
+                                SelectionX::Cell(x) => x,
+                                SelectionX::BeforeZero => 0,
+                            };
+                            if let Some(cell) =
+                                line.cells_mut_for_attr_changes_only().get_mut(mark_x)
+                            {
+                                let attrs = cell.attrs_mut();
+                                if bg.is_some() || fg.is_some() {
+                                    if let Some(bg) = bg {
+                                        attrs.set_background(bg);
+                                    }
+                                    if let Some(fg) = fg {
+                                        attrs.set_foreground(fg);
+                                    }
+                                    attrs.set_reverse(false);
+                                } else {
+                                    // No colors configured: mirror tmux's
+                                    // copy-mode-mark-style default of
+                                    // reverse video
+                                    attrs.set_reverse(true);
+                                }
+                            }
+                            line.clear_appdata();
+                        }
+                    }
                     overlay_lines.push(line);
                 }
 
@@ -1586,6 +1647,33 @@ impl Pane for CopyOverlay {
                                     )
                                     .set_reverse(false);
                             }
+                        }
+                    }
+                }
+            }
+            if let Some(mark) = &renderer.mark {
+                if mark.y == stable_idx {
+                    let bg = colors.copy_mode_mark_bg;
+                    let fg = colors.copy_mode_mark_fg;
+                    let mark_x = match mark.x {
+                        SelectionX::Cell(x) => x,
+                        SelectionX::BeforeZero => 0,
+                    };
+                    if let Some(cell) = line.cells_mut_for_attr_changes_only().get_mut(mark_x) {
+                        let attrs = cell.attrs_mut();
+                        if bg.is_some() || fg.is_some() {
+                            if let Some(bg) = bg {
+                                attrs.set_background(bg);
+                            }
+                            if let Some(fg) = fg {
+                                attrs.set_foreground(fg);
+                            }
+                            attrs.set_reverse(false);
+                        } else {
+                            // No colors configured: mirror tmux's
+                            // copy-mode-mark-style default of
+                            // reverse video
+                            attrs.set_reverse(true);
                         }
                     }
                 }
@@ -1979,6 +2067,16 @@ pub fn copy_key_table() -> KeyTable {
             WKeyCode::Char(','),
             Modifiers::NONE,
             KeyAssignment::CopyMode(CopyModeAssignment::JumpReverse),
+        ),
+        (
+            WKeyCode::Char('m'),
+            Modifiers::NONE,
+            KeyAssignment::CopyMode(CopyModeAssignment::SetMark),
+        ),
+        (
+            WKeyCode::Char('\''),
+            Modifiers::NONE,
+            KeyAssignment::CopyMode(CopyModeAssignment::JumpToMark),
         ),
         (
             WKeyCode::Char('F'),

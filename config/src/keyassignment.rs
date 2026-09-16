@@ -718,10 +718,21 @@ pub enum CopyModeAssignment {
     MoveForwardSemanticZone,
     MoveBackwardZoneOfType(SemanticType),
     MoveForwardZoneOfType(SemanticType),
-    JumpForward { prev_char: bool },
-    JumpBackward { prev_char: bool },
+    JumpForward {
+        prev_char: bool,
+    },
+    JumpBackward {
+        prev_char: bool,
+    },
     JumpAgain,
     JumpReverse,
+    /// Remember the current cursor position as the copy mode mark.
+    /// The mark lives for the duration of this copy mode session.
+    SetMark,
+    /// Jump to the mark set by [`CopyModeAssignment::SetMark`].
+    /// The cursor and the mark swap positions, so invoking this
+    /// repeatedly toggles between the two locations.
+    JumpToMark,
 }
 
 pub type KeyTable = HashMap<(KeyCode, Modifiers), KeyTableEntry>;

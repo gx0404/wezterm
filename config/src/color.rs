@@ -169,6 +169,12 @@ pub struct Palette {
     pub copy_mode_active_highlight_bg: Option<ColorSpec>,
     pub copy_mode_inactive_highlight_fg: Option<ColorSpec>,
     pub copy_mode_inactive_highlight_bg: Option<ColorSpec>,
+    /// The background color for the copy mode mark cell. When neither
+    /// this nor `copy_mode_mark_fg` is configured the mark is rendered
+    /// in reverse video, mirroring tmux's copy-mode mark style.
+    pub copy_mode_mark_bg: Option<ColorSpec>,
+    /// The foreground color for the copy mode mark cell.
+    pub copy_mode_mark_fg: Option<ColorSpec>,
 
     pub quick_select_label_fg: Option<ColorSpec>,
     pub quick_select_label_bg: Option<ColorSpec>,
@@ -227,6 +233,8 @@ impl Palette {
             copy_mode_active_highlight_bg: overlay!(copy_mode_active_highlight_bg),
             copy_mode_inactive_highlight_fg: overlay!(copy_mode_inactive_highlight_fg),
             copy_mode_inactive_highlight_bg: overlay!(copy_mode_inactive_highlight_bg),
+            copy_mode_mark_fg: overlay!(copy_mode_mark_fg),
+            copy_mode_mark_bg: overlay!(copy_mode_mark_bg),
             quick_select_label_fg: overlay!(quick_select_label_fg),
             quick_select_label_bg: overlay!(quick_select_label_bg),
             quick_select_match_fg: overlay!(quick_select_match_fg),
