@@ -723,6 +723,15 @@ pub fn window_level_to_nswindow_level(level: WindowLevel) -> NSWindowLevel {
 
 #[async_trait(?Send)]
 impl WindowOps for Window {
+    fn request_attention(&self) {
+        unsafe {
+            let ns_app = cocoa::appkit::NSApp();
+            // NSCriticalRequest == 1: bounce the dock icon until the
+            // user activates the application
+            let _: () = msg_send![ns_app, requestUserAttention: 1usize];
+        }
+    }
+
     async fn enable_opengl(&self) -> anyhow::Result<Rc<glium::backend::Context>> {
         let window_id = self.id;
         promise::spawn::spawn(async move {

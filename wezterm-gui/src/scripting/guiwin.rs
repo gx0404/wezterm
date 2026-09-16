@@ -106,6 +106,13 @@ impl UserData for GuiWin {
             this.window.notify(TermWindowNotif::SetLeftStatus(status));
             Ok(())
         });
+        // Ask the window manager / operating system to draw the user's
+        // attention to this window (eg: setting the X11 urgency hint,
+        // flashing the taskbar entry, or bouncing the dock icon).
+        methods.add_method("request_attention", |_, this, _: ()| {
+            this.window.request_attention();
+            Ok(())
+        });
         methods.add_async_method("get_dimensions", |_, this, _: ()| async move {
             let (tx, rx) = smol::channel::bounded(1);
             this.window.notify(TermWindowNotif::GetDimensions(tx));

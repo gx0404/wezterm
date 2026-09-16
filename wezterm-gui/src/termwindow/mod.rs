@@ -1253,6 +1253,9 @@ impl TermWindow {
                         let mut per_pane = self.pane_state(pane_id);
                         per_pane.bell_start.replace(Instant::now());
                     }
+                    if self.config.bell_requests_attention && self.focused.is_none() {
+                        window.request_attention();
+                    }
 
                     log::trace!("Ding! (this is the bell) in pane {}", pane_id);
                     // The bell event is emitted even when the side effects

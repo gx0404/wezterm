@@ -346,6 +346,16 @@ impl WindowOps for Window {
         }
     }
 
+    fn request_attention(&self) {
+        match self {
+            Self::X11(x) => x.request_attention(),
+            // No standard urgency mechanism on Wayland; the default
+            // WindowOps implementation is a no-op there
+            #[cfg(feature = "wayland")]
+            Self::Wayland(w) => w.request_attention(),
+        }
+    }
+
     fn restore(&self) {
         match self {
             Self::X11(x) => x.restore(),

@@ -1272,6 +1272,37 @@ impl XWindowInner {
         )
     }
 
+    fn request_attention(&mut self) {
+        // Per the EWMH spec: ask the window manager to add
+        // _NET_WM_STATE_DEMANDS_ATTENTION to our window. Unlike
+        // set_wm_state this doesn't touch the decorations, which is
+        // only appropriate for fullscreen transitions.
+        let conn = self.conn();
+        let data: [u32; 5] = [
+            NetWmStateAction::Add as u32,
+            conn.atom_state_demands_attention.resource_id(),
+            0,
+            0,
+            0,
+        ];
+        let result = conn
+            .send_request_no_reply(&xcb::x::SendEvent {
+                propagate: true,
+                destination: xcb::x::SendEventDest::Window(conn.root),
+                event_mask: xcb::x::EventMask::SUBSTRUCTURE_REDIRECT
+                    | xcb::x::EventMask::SUBSTRUCTURE_NOTIFY,
+                event: &xcb::x::ClientMessageEvent::new(
+                    self.window_id,
+                    conn.atom_net_wm_state,
+                    xcb::x::ClientMessageData::Data32(data),
+                ),
+            })
+            .and_then(|_| conn.flush().map_err(|err| anyhow::anyhow!("{err:#}")));
+        if let Err(err) = result {
+            log::error!("while requesting attention: {err:#}");
+        }
+    }
+
     #[allow(clippy::identity_op)]
     fn adjust_decorations(&mut self, decorations: WindowDecorations) -> anyhow::Result<()> {
         // Set the motif hints to disable decorations.
@@ -1952,6 +1983,13 @@ impl HasWindowHandle for XWindow {
 
 #[async_trait(?Send)]
 impl WindowOps for XWindow {
+    fn request_attention(&self) {
+        XConnection::with_window_inner(self.0, |inner| {
+            inner.request_attention();
+            Ok(())
+        });
+    }
+
     async fn enable_opengl(&self) -> anyhow::Result<Rc<glium::backend::Context>> {
         let window = self.0;
         promise::spawn::spawn(async move {

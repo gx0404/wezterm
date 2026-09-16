@@ -860,9 +860,15 @@ pub struct Config {
 
     #[dynamic(default)]
     pub visual_bell: VisualBell,
-
     #[dynamic(default)]
     pub audible_bell: AudibleBell,
+
+    /// If enabled, a bell (BEL) received while the window is unfocused
+    /// asks the window manager / operating system to draw attention to
+    /// the window (the X11 urgency hint, taskbar flashing, or a dock
+    /// bounce). Defaults to `false`.
+    #[dynamic(default)]
+    pub bell_requests_attention: bool,
 
     #[dynamic(default)]
     pub canonicalize_pasted_newlines: Option<NewlineCanon>,

@@ -274,6 +274,13 @@ pub trait WindowOps {
     /// be repainted shortly
     fn invalidate(&self);
 
+    /// Ask the window manager / operating system to draw the user's
+    /// attention to this window (eg: setting the urgency hint, flashing
+    /// the taskbar entry, or bouncing the dock icon). The default
+    /// implementation does nothing on platforms without a standard
+    /// mechanism.
+    fn request_attention(&self) {}
+
     /// Change the titlebar text for the window
     fn set_title(&self, title: &str);
 
