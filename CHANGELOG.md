@@ -45,6 +45,12 @@
   构建 release 四件套（无 sudo，get-deps 唯一真源）→ `dotfiles/install.sh`
   用户级部署（配置/插件/字体随快照，全带时间戳备份）→ 版本验证；
   消除手工两步安装尾巴。
+- 开箱即用的 tmux/herdr 式鼠标交互（默认启用，`mouse_right_click_menu`
+  可关）：终端区右键弹 pane 菜单（分屏/缩放/复制/粘贴/滚动/关闭），
+  tab 与 tab 栏空白右键弹各自菜单；菜单内悬停即选中、左键执行、
+  点击菜单外或 Esc 关闭；tab 支持按住左键拖拽重排（MoveTab）。
+  菜单为 `ContextMenu` Modal（`UIItemType::Modal` hit map 路由），
+  与命令面板共用 Modal 鼠标通道。
 
 ### Fixed
 

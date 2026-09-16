@@ -259,6 +259,14 @@ impl super::TermWindow {
             WMEK::Release(ref press) => {
                 self.current_mouse_capture = None;
                 self.current_mouse_buttons.retain(|p| p != press);
+                if press == &MousePress::Left {
+                    // Finish a tab drag-reorder, if any
+                    self.tab_press = None;
+                    if self.tab_drag.take().is_some() {
+                        self.finish_tab_drag(event.coords.x);
+                        return;
+                    }
+                }
                 if press == &MousePress::Left && self.window_drag_position.take().is_some() {
                     // Completed a window drag
                     return;
@@ -317,6 +325,18 @@ impl super::TermWindow {
                     self.drag_ui_item(item, start_event, x, y, event, context);
                     return;
                 }
+
+                // Promote a tab press into a drag-reorder once it moves
+                // by more than a cell width
+                if let Some((idx, press_x)) = self.tab_press.take() {
+                    if (event.coords.x as f32 - press_x).abs()
+                        > self.render_metrics.cell_size.width as f32
+                    {
+                        self.tab_drag.replace(idx);
+                    } else {
+                        self.tab_press.replace((idx, press_x));
+                    }
+                }
             }
             _ => {}
         }
@@ -349,6 +369,20 @@ impl super::TermWindow {
         } else {
             None
         };
+
+        // While a modal overlay (command palette, context menu) is open,
+        // pressing outside of it dismisses it and swallows the press,
+        // mirroring herdr/tmux menu semantics.
+        if self.get_modal().is_some() {
+            let on_modal = matches!(
+                ui_item.as_ref().map(|item| &item.item_type),
+                Some(UIItemType::Modal(_))
+            );
+            if !on_modal && matches!(event.kind, WMEK::Press(_)) {
+                self.cancel_modal();
+                return;
+            }
+        }
 
         if let Some(item) = ui_item.clone() {
             if capture_mouse {
@@ -623,6 +657,50 @@ impl super::TermWindow {
         .detach();
     }
 
+    /// Complete a tab drag-reorder: work out the insertion position
+    /// from the tab rectangles recorded in the hit map and move the
+    /// dragged tab there.
+    fn finish_tab_drag(&mut self, x: isize) {
+        let from = match self.tab_drag.take() {
+            Some(idx) => idx,
+            None => return,
+        };
+        let mut tabs: Vec<(usize, usize, usize)> = vec![];
+        for item in &self.ui_items {
+            if let UIItemType::TabBar(TabBarItem::Tab { tab_idx, .. }) = item.item_type {
+                tabs.push((tab_idx, item.x, item.width));
+            }
+        }
+        if tabs.is_empty() {
+            return;
+        }
+        tabs.sort_by_key(|(_, x, _)| *x);
+        let from_pos = match tabs.iter().position(|(idx, _, _)| *idx == from) {
+            Some(pos) => pos,
+            None => return,
+        };
+        // The drop lands before the first tab whose center is right of
+        // the pointer
+        let mut pos = tabs.len();
+        for (i, (_, tx, tw)) in tabs.iter().enumerate() {
+            if (x as usize) < tx + tw / 2 {
+                pos = i;
+                break;
+            }
+        }
+        let pos = if pos > from_pos { pos - 1 } else { pos };
+        if pos == from_pos {
+            return;
+        }
+        // MoveTab moves the active tab, so activate the dragged one first
+        self.activate_tab(from as isize).ok();
+        if let Some(pane) = self.get_active_pane_or_overlay() {
+            if let Err(err) = self.perform_key_assignment(&pane, &KeyAssignment::MoveTab(pos)) {
+                log::error!("while moving tab: {err:#}");
+            }
+        }
+    }
+
     pub fn mouse_event_tab_bar(
         &mut self,
         item: TabBarItem,
@@ -633,6 +711,8 @@ impl super::TermWindow {
             WMEK::Press(MousePress::Left) => match item {
                 TabBarItem::Tab { tab_idx, .. } => {
                     self.activate_tab(tab_idx as isize).ok();
+                    // Record the press so a subsequent drag can reorder
+                    self.tab_press.replace((tab_idx, event.coords.x as f32));
                 }
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Left);
@@ -693,11 +773,35 @@ impl super::TermWindow {
                 | TabBarItem::WindowButton(_) => {}
             },
             WMEK::Press(MousePress::Right) => match item {
-                TabBarItem::Tab { .. } => {
-                    self.show_tab_navigator();
+                TabBarItem::Tab { tab_idx, .. } => {
+                    if self.config.mouse_right_click_menu {
+                        // herdr/tmux style: right click opens a context
+                        // menu anchored at the pointer
+                        crate::termwindow::context_menu::open_context_menu(
+                            self,
+                            crate::termwindow::context_menu::ContextMenu::tab_menu(
+                                tab_idx,
+                                event.coords.x as f32,
+                                event.coords.y as f32,
+                            ),
+                        );
+                    } else {
+                        self.show_tab_navigator();
+                    }
                 }
                 TabBarItem::NewTabButton { .. } => {
                     self.do_new_tab_button_click(MousePress::Right);
+                }
+                TabBarItem::None | TabBarItem::LeftStatus | TabBarItem::RightStatus
+                    if self.config.mouse_right_click_menu =>
+                {
+                    crate::termwindow::context_menu::open_context_menu(
+                        self,
+                        crate::termwindow::context_menu::ContextMenu::tab_bar_menu(
+                            event.coords.x as f32,
+                            event.coords.y as f32,
+                        ),
+                    );
                 }
                 TabBarItem::None
                 | TabBarItem::LeftStatus
@@ -1012,6 +1116,22 @@ impl super::TermWindow {
         } else {
             CursorIcon::Text
         }));
+
+        // herdr/tmux style: right click in the terminal area opens a
+        // pane context menu, unless the application has grabbed the
+        // mouse (in which case the event belongs to the application)
+        if let WMEK::Press(MousePress::Right) = event.kind {
+            if !pane.is_mouse_grabbed() && self.config.mouse_right_click_menu {
+                crate::termwindow::context_menu::open_context_menu(
+                    self,
+                    crate::termwindow::context_menu::ContextMenu::pane_menu(
+                        event.coords.x as f32,
+                        event.coords.y as f32,
+                    ),
+                );
+                return;
+            }
+        }
 
         // Preserve the historical early-return for zero-delta wheel
         // events: they must not fall through to the pane as input.

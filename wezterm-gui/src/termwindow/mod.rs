@@ -78,6 +78,7 @@ pub mod background;
 pub mod box_model;
 pub mod charselect;
 pub mod clipboard;
+pub mod context_menu;
 pub mod keyevent;
 pub mod modal;
 mod mouseevent;
@@ -433,6 +434,11 @@ pub struct TermWindow {
     /// Keeps track of double and triple clicks
     last_mouse_click: Option<LastMouseClick>,
 
+    /// A tab press that may turn into a drag-reorder: (tab index, press x)
+    tab_press: Option<(usize, f32)>,
+    /// The tab index currently being drag-reordered
+    tab_drag: Option<usize>,
+
     /// The URL over which we are currently hovering
     current_highlight: Option<Arc<Hyperlink>>,
 
@@ -741,6 +747,8 @@ impl TermWindow {
             current_mouse_buttons: vec![],
             current_mouse_capture: None,
             last_mouse_click: None,
+            tab_press: None,
+            tab_drag: None,
             current_highlight: None,
             quad_generation: 0,
             shape_generation: 0,
