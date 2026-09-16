@@ -181,6 +181,105 @@ impl Default for MouseEventAltScreen {
     }
 }
 
+/// Identifies which region of the window a mouse binding applies to.
+///
+/// Bindings that don't specify a region retain their historical
+/// behavior: they only take effect over the terminal pane area.
+#[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
+pub enum MouseRegion {
+    /// Match the terminal pane area. This is the default and is
+    /// equivalent to not specifying a region.
+    Any,
+    /// The terminal pane area
+    Pane,
+    /// Anywhere in the tab bar, including its empty space
+    TabBar,
+    /// A specific tab in the tab bar
+    Tab,
+    /// The close button of a tab (retro tab bar)
+    CloseTab,
+    /// The `+` new tab button
+    NewTabButton,
+    /// The left status area of the tab bar
+    LeftStatus,
+    /// The right status area of the tab bar
+    RightStatus,
+    /// Integrated title bar window buttons (hide/maximize/close)
+    WindowButton,
+    /// The scrollbar thumb
+    ScrollThumb,
+    /// The scrollbar track above the thumb
+    AboveScrollThumb,
+    /// The scrollbar track below the thumb
+    BelowScrollThumb,
+    /// A split divider between panes
+    Split,
+}
+
+impl MouseRegion {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Any => "Any",
+            Self::Pane => "Pane",
+            Self::TabBar => "TabBar",
+            Self::Tab => "Tab",
+            Self::CloseTab => "CloseTab",
+            Self::NewTabButton => "NewTabButton",
+            Self::LeftStatus => "LeftStatus",
+            Self::RightStatus => "RightStatus",
+            Self::WindowButton => "WindowButton",
+            Self::ScrollThumb => "ScrollThumb",
+            Self::AboveScrollThumb => "AboveScrollThumb",
+            Self::BelowScrollThumb => "BelowScrollThumb",
+            Self::Split => "Split",
+        }
+    }
+}
+
+impl FromDynamic for MouseRegion {
+    fn from_dynamic(value: &Value, _options: FromDynamicOptions) -> Result<Self, DynError> {
+        match value {
+            Value::String(s) => Ok(match s.as_str() {
+                "Any" => Self::Any,
+                "Pane" => Self::Pane,
+                "TabBar" => Self::TabBar,
+                "Tab" => Self::Tab,
+                "CloseTab" => Self::CloseTab,
+                "NewTabButton" => Self::NewTabButton,
+                "LeftStatus" => Self::LeftStatus,
+                "RightStatus" => Self::RightStatus,
+                "WindowButton" => Self::WindowButton,
+                "ScrollThumb" => Self::ScrollThumb,
+                "AboveScrollThumb" => Self::AboveScrollThumb,
+                "BelowScrollThumb" => Self::BelowScrollThumb,
+                "Split" => Self::Split,
+                _ => {
+                    return Err(DynError::Message(format!(
+                        "must be one of Any, Pane, TabBar, Tab, CloseTab, NewTabButton, \
+                         LeftStatus, RightStatus, WindowButton, ScrollThumb, \
+                         AboveScrollThumb, BelowScrollThumb, Split; got: {s}"
+                    )))
+                }
+            }),
+            _ => Err(DynError::Message(
+                "must be a string naming a mouse region".to_string(),
+            )),
+        }
+    }
+}
+
+impl ToDynamic for MouseRegion {
+    fn to_dynamic(&self) -> Value {
+        Value::String(self.as_str().to_string())
+    }
+}
+
+impl Default for MouseRegion {
+    fn default() -> Self {
+        Self::Any
+    }
+}
+
 #[derive(
     Debug, Default, Clone, Copy, PartialOrd, Ord, PartialEq, Eq, Hash, FromDynamic, ToDynamic,
 )]
@@ -191,4 +290,72 @@ pub struct MouseEventTriggerMods {
     pub mouse_reporting: bool,
     #[dynamic(default)]
     pub alt_screen: MouseEventAltScreen,
+    /// Restricts this binding to a specific region of the window.
+    /// Defaults to `Any`, which preserves the historical behavior of
+    /// only taking effect over the terminal pane area.
+    #[dynamic(default)]
+    pub region: MouseRegion,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wezterm_dynamic::{FromDynamic, FromDynamicOptions, ToDynamic, Value};
+
+    #[test]
+    fn mouse_region_roundtrip() {
+        for region in [
+            MouseRegion::Any,
+            MouseRegion::Pane,
+            MouseRegion::TabBar,
+            MouseRegion::Tab,
+            MouseRegion::CloseTab,
+            MouseRegion::NewTabButton,
+            MouseRegion::LeftStatus,
+            MouseRegion::RightStatus,
+            MouseRegion::WindowButton,
+            MouseRegion::ScrollThumb,
+            MouseRegion::AboveScrollThumb,
+            MouseRegion::BelowScrollThumb,
+            MouseRegion::Split,
+        ] {
+            let value = region.to_dynamic();
+            assert_eq!(
+                MouseRegion::from_dynamic(&value, FromDynamicOptions::default()).unwrap(),
+                region
+            );
+        }
+    }
+
+    #[test]
+    fn mouse_region_rejects_unknown_names() {
+        assert!(MouseRegion::from_dynamic(
+            &Value::String("NoSuchRegion".to_string()),
+            FromDynamicOptions::default()
+        )
+        .is_err());
+        // Non-string values are rejected rather than silently ignored,
+        // so config typos surface via the strict config builder.
+        assert!(
+            MouseRegion::from_dynamic(&Value::Bool(true), FromDynamicOptions::default()).is_err()
+        );
+    }
+
+    #[test]
+    fn trigger_mods_default_region_is_any() {
+        let mut value = MouseEventTriggerMods::default().to_dynamic();
+        let mods =
+            MouseEventTriggerMods::from_dynamic(&value, FromDynamicOptions::default()).unwrap();
+        assert_eq!(mods.region, MouseRegion::Any);
+
+        if let Value::Object(obj) = &mut value {
+            obj.insert(
+                Value::String("region".to_string()),
+                Value::String("Tab".to_string()),
+            );
+        }
+        let mods =
+            MouseEventTriggerMods::from_dynamic(&value, FromDynamicOptions::default()).unwrap();
+        assert_eq!(mods.region, MouseRegion::Tab);
+    }
 }

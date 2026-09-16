@@ -7,7 +7,7 @@ use ::window::{
     WindowDecorations, WindowOps, WindowState,
 };
 use config::keyassignment::{KeyAssignment, MouseEventTrigger, SpawnTabDomain};
-use config::MouseEventAltScreen;
+use config::{MouseEventAltScreen, MouseRegion};
 use mux::pane::{Pane, WithPaneLines};
 use mux::tab::SplitDirection;
 use mux::Mux;
@@ -23,7 +23,138 @@ use wezterm_dynamic::ToDynamic;
 use wezterm_term::input::{MouseButton, MouseEventKind as TMEK};
 use wezterm_term::{ClickPosition, LastMouseClick, StableRowIndex};
 
+impl UIItemType {
+    /// The [`MouseRegion`] this UI element maps to for mouse bindings.
+    pub fn mouse_region(&self) -> MouseRegion {
+        match self {
+            UIItemType::TabBar(item) => match item {
+                TabBarItem::None => MouseRegion::TabBar,
+                TabBarItem::LeftStatus => MouseRegion::LeftStatus,
+                TabBarItem::RightStatus => MouseRegion::RightStatus,
+                TabBarItem::Tab { .. } => MouseRegion::Tab,
+                TabBarItem::NewTabButton { .. } => MouseRegion::NewTabButton,
+                TabBarItem::WindowButton(_) => MouseRegion::WindowButton,
+            },
+            UIItemType::CloseTab(_) => MouseRegion::CloseTab,
+            UIItemType::AboveScrollThumb => MouseRegion::AboveScrollThumb,
+            UIItemType::ScrollThumb => MouseRegion::ScrollThumb,
+            UIItemType::BelowScrollThumb => MouseRegion::BelowScrollThumb,
+            UIItemType::Split(_) => MouseRegion::Split,
+        }
+    }
+}
+
+/// Normalize wheel deltas and streaks to 1 so that mouse assignments
+/// are easier to wrangle; callers only need to bind WheelUp(1)/WheelDown(1).
+fn normalize_wheel_trigger(trigger: &mut MouseEventTrigger) {
+    match trigger {
+        MouseEventTrigger::Down {
+            ref mut streak,
+            button:
+                MouseButton::WheelUp(ref mut delta)
+                | MouseButton::WheelDown(ref mut delta)
+                | MouseButton::WheelLeft(ref mut delta)
+                | MouseButton::WheelRight(ref mut delta),
+        }
+        | MouseEventTrigger::Up {
+            ref mut streak,
+            button:
+                MouseButton::WheelUp(ref mut delta)
+                | MouseButton::WheelDown(ref mut delta)
+                | MouseButton::WheelLeft(ref mut delta)
+                | MouseButton::WheelRight(ref mut delta),
+        }
+        | MouseEventTrigger::Drag {
+            ref mut streak,
+            button:
+                MouseButton::WheelUp(ref mut delta)
+                | MouseButton::WheelDown(ref mut delta)
+                | MouseButton::WheelLeft(ref mut delta)
+                | MouseButton::WheelRight(ref mut delta),
+        } => {
+            *streak = 1;
+            *delta = 1;
+        }
+        _ => {}
+    }
+}
+
 impl super::TermWindow {
+    /// Derive the MouseEventTrigger for this event, taking click
+    /// streak counting into account. Returns None for events that
+    /// have no trigger representation (eg: a plain move with no
+    /// button held down).
+    fn mouse_event_trigger(&self, event: &MouseEvent) -> Option<MouseEventTrigger> {
+        match &event.kind {
+            WMEK::Press(press) => {
+                let press = mouse_press_to_tmb(press);
+                match self.last_mouse_click.as_ref() {
+                    Some(LastMouseClick { streak, button, .. }) if *button == press => {
+                        Some(MouseEventTrigger::Down {
+                            streak: *streak,
+                            button: press,
+                        })
+                    }
+                    _ => None,
+                }
+            }
+            WMEK::Release(press) => {
+                let press = mouse_press_to_tmb(press);
+                match self.last_mouse_click.as_ref() {
+                    Some(LastMouseClick { streak, button, .. }) if *button == press => {
+                        Some(MouseEventTrigger::Up {
+                            streak: *streak,
+                            button: press,
+                        })
+                    }
+                    _ => None,
+                }
+            }
+            WMEK::Move => {
+                if !self.current_mouse_buttons.is_empty() {
+                    if let Some(LastMouseClick { streak, button, .. }) =
+                        self.last_mouse_click.as_ref()
+                    {
+                        if Some(*button)
+                            == self.current_mouse_buttons.last().map(mouse_press_to_tmb)
+                        {
+                            Some(MouseEventTrigger::Drag {
+                                streak: *streak,
+                                button: *button,
+                            })
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            WMEK::VertWheel(amount) => Some(match *amount {
+                1.. => MouseEventTrigger::Down {
+                    streak: 1,
+                    button: MouseButton::WheelUp(*amount as usize),
+                },
+                _ => MouseEventTrigger::Down {
+                    streak: 1,
+                    button: MouseButton::WheelDown((*amount).abs() as usize),
+                },
+            }),
+            WMEK::HorzWheel(amount) => Some(match *amount {
+                1.. => MouseEventTrigger::Down {
+                    streak: 1,
+                    button: MouseButton::WheelLeft(*amount as usize),
+                },
+                _ => MouseEventTrigger::Down {
+                    streak: 1,
+                    button: MouseButton::WheelRight((*amount).abs() as usize),
+                },
+            }),
+        }
+    }
+
     fn resolve_ui_item(&self, event: &MouseEvent) -> Option<UIItem> {
         let x = event.coords.x;
         let y = event.coords.y;
@@ -354,6 +485,27 @@ impl super::TermWindow {
         }
     }
 
+    /// Look up a region-scoped mouse binding for an event that hit a
+    /// UI item. Only bindings that explicitly named this region match,
+    /// so the built-in chrome behaviors stay in effect unless the user
+    /// overrides them.
+    fn lookup_mouse_binding_for_region(
+        &self,
+        item_type: &UIItemType,
+        event: &MouseEvent,
+    ) -> Option<KeyAssignment> {
+        let mut trigger = self.mouse_event_trigger(event)?;
+        normalize_wheel_trigger(&mut trigger);
+        let mods = config::MouseEventTriggerMods {
+            mods: event.modifiers,
+            mouse_reporting: false,
+            alt_screen: MouseEventAltScreen::False,
+            region: item_type.mouse_region(),
+        };
+        self.input_map
+            .lookup_mouse_in_region(trigger, mods, item_type.mouse_region())
+    }
+
     fn mouse_event_ui_item(
         &mut self,
         item: UIItem,
@@ -363,6 +515,10 @@ impl super::TermWindow {
         context: &dyn WindowOps,
     ) {
         self.last_ui_item.replace(item.clone());
+        if let Some(action) = self.lookup_mouse_binding_for_region(&item.item_type, &event) {
+            self.perform_key_assignment(&pane, &action).ok();
+            return;
+        }
         match item.item_type {
             UIItemType::TabBar(item) => {
                 self.mouse_event_tab_bar(item, event, context);
@@ -843,76 +999,12 @@ impl super::TermWindow {
             CursorIcon::Text
         }));
 
-        let event_trigger_type = match &event.kind {
-            WMEK::Press(press) => {
-                let press = mouse_press_to_tmb(press);
-                match self.last_mouse_click.as_ref() {
-                    Some(LastMouseClick { streak, button, .. }) if *button == press => {
-                        Some(MouseEventTrigger::Down {
-                            streak: *streak,
-                            button: press,
-                        })
-                    }
-                    _ => None,
-                }
-            }
-            WMEK::Release(press) => {
-                let press = mouse_press_to_tmb(press);
-                match self.last_mouse_click.as_ref() {
-                    Some(LastMouseClick { streak, button, .. }) if *button == press => {
-                        Some(MouseEventTrigger::Up {
-                            streak: *streak,
-                            button: press,
-                        })
-                    }
-                    _ => None,
-                }
-            }
-            WMEK::Move => {
-                if !self.current_mouse_buttons.is_empty() {
-                    if let Some(LastMouseClick { streak, button, .. }) =
-                        self.last_mouse_click.as_ref()
-                    {
-                        if Some(*button)
-                            == self.current_mouse_buttons.last().map(mouse_press_to_tmb)
-                        {
-                            Some(MouseEventTrigger::Drag {
-                                streak: *streak,
-                                button: *button,
-                            })
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
-            WMEK::VertWheel(amount) => Some(match *amount {
-                0 => return,
-                1.. => MouseEventTrigger::Down {
-                    streak: 1,
-                    button: MouseButton::WheelUp(*amount as usize),
-                },
-                _ => MouseEventTrigger::Down {
-                    streak: 1,
-                    button: MouseButton::WheelDown(-amount as usize),
-                },
-            }),
-            WMEK::HorzWheel(amount) => Some(match *amount {
-                0 => return,
-                1.. => MouseEventTrigger::Down {
-                    streak: 1,
-                    button: MouseButton::WheelLeft(*amount as usize),
-                },
-                _ => MouseEventTrigger::Down {
-                    streak: 1,
-                    button: MouseButton::WheelRight(-amount as usize),
-                },
-            }),
-        };
+        // Preserve the historical early-return for zero-delta wheel
+        // events: they must not fall through to the pane as input.
+        if matches!(event.kind, WMEK::VertWheel(0) | WMEK::HorzWheel(0)) {
+            return;
+        }
+        let event_trigger_type = self.mouse_event_trigger(&event);
 
         if allow_action {
             if let Some(mut event_trigger_type) = event_trigger_type {
@@ -940,36 +1032,7 @@ impl super::TermWindow {
 
                 // normalize delta and streak to make mouse assignment
                 // easier to wrangle
-                match event_trigger_type {
-                    MouseEventTrigger::Down {
-                        ref mut streak,
-                        button:
-                            MouseButton::WheelUp(ref mut delta)
-                            | MouseButton::WheelDown(ref mut delta)
-                            | MouseButton::WheelLeft(ref mut delta)
-                            | MouseButton::WheelRight(ref mut delta),
-                    }
-                    | MouseEventTrigger::Up {
-                        ref mut streak,
-                        button:
-                            MouseButton::WheelUp(ref mut delta)
-                            | MouseButton::WheelDown(ref mut delta)
-                            | MouseButton::WheelLeft(ref mut delta)
-                            | MouseButton::WheelRight(ref mut delta),
-                    }
-                    | MouseEventTrigger::Drag {
-                        ref mut streak,
-                        button:
-                            MouseButton::WheelUp(ref mut delta)
-                            | MouseButton::WheelDown(ref mut delta)
-                            | MouseButton::WheelLeft(ref mut delta)
-                            | MouseButton::WheelRight(ref mut delta),
-                    } => {
-                        *streak = 1;
-                        *delta = 1;
-                    }
-                    _ => {}
-                };
+                normalize_wheel_trigger(&mut event_trigger_type);
 
                 let mouse_mods = config::MouseEventTriggerMods {
                     mods: modifiers,
@@ -979,6 +1042,7 @@ impl super::TermWindow {
                     } else {
                         MouseEventAltScreen::False
                     },
+                    region: MouseRegion::Pane,
                 };
 
                 if let Some(action) = self.input_map.lookup_mouse(event_trigger_type, mouse_mods) {

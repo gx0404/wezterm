@@ -3,7 +3,7 @@ use config::keyassignment::{
     ClipboardCopyDestination, ClipboardPasteSource, KeyAssignment, KeyTableEntry, KeyTables,
     MouseEventTrigger, SelectionMode,
 };
-use config::{ConfigHandle, MouseEventAltScreen, MouseEventTriggerMods};
+use config::{ConfigHandle, MouseEventAltScreen, MouseEventTriggerMods, MouseRegion};
 use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 use wezterm_dynamic::{ToDynamic, Value};
@@ -93,6 +93,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::False,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Down {
                         streak: 1,
@@ -105,6 +106,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::False,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Down {
                         streak: 1,
@@ -117,6 +119,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Down {
                         streak: 3,
@@ -129,6 +132,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Down {
                         streak: 2,
@@ -141,6 +145,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Down {
                         streak: 1,
@@ -153,6 +158,7 @@ impl InputMap {
                         mods: Modifiers::ALT,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Down {
                         streak: 1,
@@ -165,6 +171,7 @@ impl InputMap {
                         mods: Modifiers::SHIFT,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Down {
                         streak: 1,
@@ -177,6 +184,7 @@ impl InputMap {
                         mods: Modifiers::SHIFT,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Up {
                         streak: 1,
@@ -191,6 +199,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Up {
                         streak: 1,
@@ -205,6 +214,7 @@ impl InputMap {
                         mods: Modifiers::ALT,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Up {
                         streak: 1,
@@ -217,6 +227,7 @@ impl InputMap {
                         mods: Modifiers::ALT | Modifiers::SHIFT,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Down {
                         streak: 1,
@@ -229,6 +240,7 @@ impl InputMap {
                         mods: Modifiers::ALT | Modifiers::SHIFT,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Up {
                         streak: 1,
@@ -243,6 +255,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Up {
                         streak: 2,
@@ -255,6 +268,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Up {
                         streak: 3,
@@ -267,6 +281,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Drag {
                         streak: 1,
@@ -279,6 +294,7 @@ impl InputMap {
                         mods: Modifiers::ALT,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Drag {
                         streak: 1,
@@ -291,6 +307,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Drag {
                         streak: 2,
@@ -303,6 +320,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Drag {
                         streak: 3,
@@ -315,6 +333,7 @@ impl InputMap {
                         mods: Modifiers::NONE,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Down {
                         streak: 1,
@@ -327,6 +346,7 @@ impl InputMap {
                         mods: Modifiers::SUPER,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Drag {
                         streak: 1,
@@ -339,6 +359,7 @@ impl InputMap {
                         mods: ctrl_shift,
                         mouse_reporting: false,
                         alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Any,
                     },
                     MouseEventTrigger::Drag {
                         streak: 1,
@@ -454,12 +475,37 @@ impl InputMap {
             .cloned()
     }
 
+    /// Look up the assignment for a mouse event in the terminal pane area.
+    /// Region-specific bindings for `Pane` take precedence, then bindings
+    /// that didn't specify a region. Bindings scoped to another region
+    /// (eg: `Tab`) are never matched here.
     pub fn lookup_mouse(
         &self,
         event: MouseEventTrigger,
         mut mods: MouseEventTriggerMods,
     ) -> Option<KeyAssignment> {
         mods.mods = mods.mods.remove_positional_mods();
+        mods.region = MouseRegion::Pane;
+        if let Some(action) = self.mouse.get(&(event.clone(), mods)) {
+            return Some(action.clone());
+        }
+        mods.region = MouseRegion::Any;
+        self.mouse.get(&(event, mods)).cloned()
+    }
+
+    /// Look up the assignment for a mouse event that hit a specific UI
+    /// region (tab bar, scrollbar, split, ...). Only bindings that
+    /// explicitly named `region` match: region-less bindings never
+    /// hijack clicks on window chrome, so the built-in behaviors stay
+    /// in effect unless the user overrides them.
+    pub fn lookup_mouse_in_region(
+        &self,
+        event: MouseEventTrigger,
+        mut mods: MouseEventTriggerMods,
+        region: MouseRegion,
+    ) -> Option<KeyAssignment> {
+        mods.mods = mods.mods.remove_positional_mods();
+        mods.region = region;
         self.mouse.get(&(event, mods)).cloned()
     }
 
@@ -552,10 +598,16 @@ impl InputMap {
             }
 
             for ((trigger, mods), action) in ordered {
-                let mods = if mods.mods == Modifiers::NONE {
-                    String::new()
+                let mods = if mods.region == MouseRegion::Any {
+                    if mods.mods == Modifiers::NONE {
+                        String::new()
+                    } else {
+                        format!("{:?}", mods.mods)
+                    }
+                } else if mods.mods == Modifiers::NONE {
+                    format!("region={}", mods.region.as_str())
                 } else {
-                    format!("{:?}", mods.mods)
+                    format!("{:?} region={}", mods.mods, mods.region.as_str())
                 };
                 let trigger = format!("{trigger:?}");
                 println!("\t{mods:mod_width$}   {trigger:trigger_width$}   ->   {action:?}");
@@ -807,5 +859,91 @@ fn show_key_table_as_lua(table: &config::keyassignment::KeyTable, indent: usize)
     for ((key, mods), entry) in ordered {
         let action = &entry.action;
         println!("{pad}{},", lua_key(key, *mods, action));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn left_down(streak: usize) -> MouseEventTrigger {
+        MouseEventTrigger::Down {
+            streak,
+            button: MouseButton::Left,
+        }
+    }
+
+    fn mods(region: MouseRegion) -> MouseEventTriggerMods {
+        MouseEventTriggerMods {
+            mods: Modifiers::NONE,
+            mouse_reporting: false,
+            alt_screen: MouseEventAltScreen::False,
+            region,
+        }
+    }
+
+    #[test]
+    fn regionless_defaults_still_match_pane() {
+        let im = InputMap::default_input_map();
+        assert!(matches!(
+            im.lookup_mouse(left_down(1), mods(MouseRegion::Any)),
+            Some(KeyAssignment::SelectTextAtMouseCursor(_))
+        ));
+    }
+
+    #[test]
+    fn regionless_defaults_never_match_chrome_regions() {
+        let im = InputMap::default_input_map();
+        for region in [
+            MouseRegion::Tab,
+            MouseRegion::TabBar,
+            MouseRegion::NewTabButton,
+            MouseRegion::LeftStatus,
+            MouseRegion::RightStatus,
+            MouseRegion::Split,
+            MouseRegion::ScrollThumb,
+        ] {
+            assert!(
+                im.lookup_mouse_in_region(left_down(1), mods(MouseRegion::Any), region)
+                    .is_none(),
+                "region {region:?} should not match region-less defaults"
+            );
+        }
+    }
+
+    #[test]
+    fn region_specific_binding_scoping() {
+        let mut im = InputMap::default_input_map();
+        im.mouse
+            .insert((left_down(1), mods(MouseRegion::Tab)), KeyAssignment::Nop);
+        // Matches the exact chrome region it was scoped to
+        assert!(matches!(
+            im.lookup_mouse_in_region(left_down(1), mods(MouseRegion::Any), MouseRegion::Tab),
+            Some(KeyAssignment::Nop)
+        ));
+        // Does not leak into the terminal pane lookup
+        assert!(!matches!(
+            im.lookup_mouse(left_down(1), mods(MouseRegion::Any)),
+            Some(KeyAssignment::Nop)
+        ));
+        // Does not match a different chrome region
+        assert!(im
+            .lookup_mouse_in_region(left_down(1), mods(MouseRegion::Any), MouseRegion::TabBar)
+            .is_none());
+    }
+
+    #[test]
+    fn pane_region_takes_precedence_over_regionless() {
+        let mut im = InputMap::default_input_map();
+        im.mouse
+            .insert((left_down(2), mods(MouseRegion::Pane)), KeyAssignment::Nop);
+        assert!(matches!(
+            im.lookup_mouse(left_down(2), mods(MouseRegion::Any)),
+            Some(KeyAssignment::Nop)
+        ));
+        // And it does not match chrome lookups either
+        assert!(im
+            .lookup_mouse_in_region(left_down(2), mods(MouseRegion::Any), MouseRegion::Tab)
+            .is_none());
     }
 }
