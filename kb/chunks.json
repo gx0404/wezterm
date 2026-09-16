@@ -58,13 +58,25 @@
       "anchor": "领域规则索引",
       "id": "AGENTS.md#领域规则索引",
       "source": "AGENTS.md",
-      "text": "## 领域规则索引\n\n| 域 | 覆盖 |\n|---|---|\n| `build-ci-release` | ci/、.github/、nix/、workspace 依赖与版本、生成物清单 |\n| `cli-main` | wezterm/ 主 CLI 与 clap 子命令定义 |\n| `config-lua` | config/、lua-api-crates/、wezterm-dynamic、Lua 加载与热重载 |\n| `development` | 框架自身：scripts/、AGENT_RULES、Makefile、工具面 |\n| `font-shaping` | wezterm-font/、wezterm-char-props/、deps/ 构建辅助 |\n| `gui-rendering` | wezterm-gui/ 渲染、overlay、输入处理 |\n| `mux-domain` | mux/、wezterm-client/、mux-server、codec 帧协议 |\n| `platform-window` | window/、wezterm-input-types/ 平台抽象 |\n| `process-io` | pty/、procinfo/、filedescriptor/、umask/ |\n| `product-assets` | assets/ 资源（shell-integration 除外） |\n| `product-docs` | docs/ 产品文档站（AGENT_RULES 除外） |\n| `ssh-domain` | wezterm-ssh/ 与双后端 feature |\n| `support-crates` | promise/bidi/lfucache 等支撑库 |\n| `terminal-model` | term/、wezterm-cell/、wezterm-surface/、shell-integration |\n| `testing` | test-data/ 手动 fixtures 与测试数据纪律 |\n| `code-review` | 审核任务专用（`--task review`） |"
+      "text": "## 领域规则索引\n\n| 域 | 覆盖 |\n|---|---|\n| `build-ci-release` | ci/、.github/、nix/、workspace 依赖与版本、生成物清单 |\n| `cli-main` | wezterm/ 主 CLI 与 clap 子命令定义 |\n| `config-lua` | config/、lua-api-crates/、wezterm-dynamic、Lua 加载与热重载 |\n| `development` | 框架自身：scripts/、AGENT_RULES、Makefile、工具面 |\n| `dotfiles` | dotfiles/ 用户环境快照与跨机安装链（gx-bundle/install/sync） |\n| `font-shaping` | wezterm-font/、wezterm-char-props/、deps/ 构建辅助 |\n| `gui-rendering` | wezterm-gui/ 渲染、overlay、输入处理 |\n| `mux-domain` | mux/、wezterm-client/、mux-server、codec 帧协议 |\n| `platform-window` | window/、wezterm-input-types/ 平台抽象 |\n| `process-io` | pty/、procinfo/、filedescriptor/、umask/ |\n| `product-assets` | assets/ 资源（shell-integration 除外） |\n| `product-docs` | docs/ 产品文档站（AGENT_RULES 除外） |\n| `ssh-domain` | wezterm-ssh/ 与双后端 feature |\n| `support-crates` | promise/bidi/lfucache 等支撑库 |\n| `terminal-model` | term/、wezterm-cell/、wezterm-surface/、shell-integration |\n| `testing` | test-data/ 手动 fixtures 与测试数据纪律 |\n| `code-review` | 审核任务专用（`--task review`） |"
     },
     {
       "anchor": "0.1.0(TBD)",
       "id": "CHANGELOG.md#0.1.0(TBD)",
       "source": "CHANGELOG.md",
       "text": "## 0.1.0(TBD)"
+    },
+    {
+      "anchor": "0.2.0(TBD)",
+      "id": "CHANGELOG.md#0.2.0(TBD)",
+      "source": "CHANGELOG.md",
+      "text": "## 0.2.0(TBD)"
+    },
+    {
+      "anchor": "Added",
+      "id": "CHANGELOG.md#Added",
+      "source": "CHANGELOG.md",
+      "text": "### Added\n\n- 收录本机 wezterm 用户环境快照为仓库真源 `dotfiles/`：配置工作区\n  （含壁纸与生效中的事件脚本，`config/launch.lua`、`config/domains.lua`\n  的 Windows 死路径改动态拼接）、4 个插件按 wezterm 插件加载器转义目录名\n  快照（pin 见 `dotfiles/PROVENANCE.md`）、精选字体（JetBrainsMono Nerd\n  Font 6 字重 + Noto Sans CJK Regular/Bold）、desktop entry / wrapper /\n  zshrc 模板。\n- 跨机一键安装链：`dotfiles/install.sh`（Linux 用户级、幂等、`--check`\n  干跑）与 `dotfiles/install.ps1`（Windows 用户级）；`make gx-bundle`\n  经 docker ubuntu:20.04 容器构建 glibc≤2.31 兼容二进制并组装自包含离线\n  包（Ubuntu 20.04/24.04 通吃）；`make gx-install` 提供在线源码构建路径；\n  `make gx-sync` 把本机配置改动收回仓库（默认只读对比）。\n- Windows 分支构建 workflow `.github/workflows/gx-windows-build.yml`\n  （workflow_dispatch / gx-v* tag 触发，产出四件套 zip 供 gx-bundle 组装）。\n- 领域规则 `docs/AGENT_RULES/dotfiles.md` + 路由；`dist/`、`target-gx-*/`\n  入 `.gitignore` fork 段。\n\n- UI 交互增强（源自对 herdr 与 tmux 的交互调研）：鼠标绑定新增\n  `region` 维度（可按 TabBar/Tab/NewTabButton/LeftStatus/RightStatus/\n  Split/ScrollThumb 等区域定向绑定；未指定 region 的绑定语义不变）；\n  copy mode 新增 mark 标记（`m` 设标记、`'` 交换式跳转）、段落移动\n  （`{`/`}`）、`MoveToLine` 行跳转、无选区时复制光标处词、\n  `PipeSelection` 管道赋值与 `copy_mode_mark_bg/fg` 配色；tmux 域\n  pane 的 copy mode 搜索默认可用；bell 治理三件套：\n  `bell_notification_handling` 聚焦抑制、`bell_requests_attention`\n  失焦 WM 提醒（X11 urgency / macOS dock bounce）与 Lua\n  `window:request_attention()`、`bell_cooldown_ms` 每 pane 节流。"
     },
     {
       "anchor": "Added",
@@ -77,6 +89,12 @@
       "id": "CHANGELOG.md#Changelog（gx0404/wezterm fork）",
       "source": "CHANGELOG.md",
       "text": "# Changelog（gx0404/wezterm fork）\n\n本文件记录 fork 层面已实现的可观察变更（AI 协作框架、开发流程、定制功能）。\n上游 WezTerm 的产品级变更见 `docs/changelog.md`（随上游同步，不在本文件重复维护，\n避免同步上游时产生冲突）。\n\n版本真源：本文件 `## X.Y.Z(日期|TBD)` 标题中的最大 SemVer（`scripts/version.py`，\n`make version` 只读查询）。WezTerm 产品自身的版本号由 `wezterm-version/build.rs`\n按 git 提交时间与哈希生成，两套体系互不干扰（见 docs/RELEASE.md）。"
+    },
+    {
+      "anchor": "Fixed",
+      "id": "CHANGELOG.md#Fixed",
+      "source": "CHANGELOG.md",
+      "text": "### Fixed\n\n- 恢复 Linux 壁纸快捷键：`Alt+.` / `Alt+,` 切换下一张 / 上一张，\n  `Alt+/` 随机、`Ctrl+Alt+/` 选择、`Alt+b` 切换纯色专注模式；\n  避免壁纸控制跟随通用 `Ctrl+Shift` 修饰键变更。同步本机配置、\n  `dotfiles/wezterm-config/` 与 Oh My Zsh 的 `gx/wezterm/` 快照。"
     },
     {
       "anchor": "Fixed",
@@ -419,6 +437,42 @@
       "id": "docs/AGENT_RULES/development.md#验证",
       "source": "docs/AGENT_RULES/development.md",
       "text": "## 验证\n\n- `make framework-check && make framework-ready && make ai-doctor`。\n- 框架脚本自身：`make framework-test`（unittest：resolver 拒绝边界、\n  hooks 探针、KB 契约）。\n- 改命令绑定：`make ci-check` 实跑；改工具面：按 docs/AI_TOOLS.md 的\n  逐客户端验证清单执行并登记结果。"
+    },
+    {
+      "anchor": "dotfiles：本机 wezterm 环境快照与跨机安装链",
+      "id": "docs/AGENT_RULES/dotfiles.md#dotfiles：本机 wezterm 环境快照与跨机安装链",
+      "source": "docs/AGENT_RULES/dotfiles.md",
+      "text": "# dotfiles：本机 wezterm 环境快照与跨机安装链"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/dotfiles.md#不变量",
+      "source": "docs/AGENT_RULES/dotfiles.md",
+      "text": "## 不变量\n\n- 本机 `~/.config/wezterm` 保持独立目录（不 symlink 进仓库）；仓库快照是\n  移植真源，本机改动经 `make gx-sync` 回收（默认只读对比，\n  `GX_SYNC_WRITE=1` 写回）。\n- 插件目录名必须与 `compute_repo_dir` 的转义结果一致，否则 wezterm 认为\n  未安装而重新 clone；升级插件 = 整目录重新快照 + 更新 PROVENANCE.md 的\n  pin 表。\n- sync 永不自动删除仓库侧文件（REMOVED 只报告）；`.git` 与 resurrect\n  `state/`（会话数据）一律不入库。\n- 敏感信息（凭据、token、非回环 IP、hostname）禁入 `dotfiles/`；新增文件\n  前人工过一遍。\n- install.sh 幂等且不 sudo：覆盖已有目标前先备份 `.bak-gx-<ts>`；\n  不改写用户已有的 `~/.wezterm.lua`（只警告优先级冲突）。\n- bundle 二进制必须来自本分支构建：默认 docker `ubuntu:20.04` 容器保证\n  glibc ≤ 2.31 兼容（目标机 20.04/24.04 通吃）；本机构建回退\n  （`GX_USE_LOCAL=1`）必须在产物文件名与 manifest.env 标注 glibc 要求。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/dotfiles.md#禁止项",
+      "source": "docs/AGENT_RULES/dotfiles.md",
+      "text": "## 禁止项\n\n- 不收录运行态：`~/.cache/wezterm/`、`check_update`、resurrect 已保存会话。\n- 不把上游 `assets/` 资源复制进 dotfiles/（图标例外，来源在 PROVENANCE\n  登记）。\n- `install.ps1` 只做用户级安装（不写 Program Files / HKLM）。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/dotfiles.md#符号真源",
+      "source": "docs/AGENT_RULES/dotfiles.md",
+      "text": "## 符号真源\n\n- 快照溯源：`dotfiles/PROVENANCE.md`（来源仓库与 commit、插件 pin 表、\n  收录期相对本机的有意改动、不收录项）。\n- 安装器：`dotfiles/install.sh`（Linux 用户级、幂等、`--check` 干跑）；\n  `dotfiles/install.ps1`（Windows 用户级）。目标路径依据产品源码：\n  配置查找序 `config/src/config.rs::load_with_overrides`（两平台都支持\n  `$HOME/.config/wezterm/wezterm.lua`，`~/.wezterm.lua` 更优先）、\n  插件目录 `lua-api-crates/plugin/src/lib.rs::RepoSpec::plugins_dir` 与\n  转义算法 `compute_repo_dir`（`/`→`sZs`、`:`→`sCs`、`.`→`sDs`）、\n  Windows 数据目录 = Roaming AppData（`config/src/config.rs::compute_data_dir`）。\n- 打包/同步：`scripts/gx_bundle.py`（`bundle` / `sync` 子命令）；\n  源码路径安装 `scripts/gx_install.sh`；命令入口见根 Makefile 追加段。\n- apt 构建依赖唯一真源：根 `get-deps`（docker 构建镜像与 gx-install 都\n  调用它，不在 dotfiles/ 另立清单）。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/dotfiles.md#范围",
+      "source": "docs/AGENT_RULES/dotfiles.md",
+      "text": "## 范围\n\n`dotfiles/**`：`wezterm-config/`（配置快照）、`plugins/`（插件快照）、\n`fonts/`（精选字重）、`templates/`、`assets/`（安装模板与图标）、\n`install.sh` / `install.ps1`（安装器）、`README.md`、`PROVENANCE.md`。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/dotfiles.md#验证",
+      "source": "docs/AGENT_RULES/dotfiles.md",
+      "text": "## 验证\n\n- 语法：`bash -n dotfiles/install.sh scripts/gx_install.sh`；\n  `python3 -m py_compile scripts/gx_bundle.py`。\n- 沙箱安装：`HOME=$(mktemp -d) dotfiles/install.sh --check` 干跑 → 全量安装\n  → 沙箱 HOME 下 `wezterm --version` / `wezterm ls-fonts` 冒烟（配置可解析、\n  字体/插件就位）。\n- GUI 可见行为（壁纸/状态栏/tab 标题）：Xvfb 截图留证\n  `.ui-evidence/`（读回核对，遵守 development.md 证据纪律）。\n- `make gx-sync` 干跑：除 PROVENANCE 登记的收录期有意改动外应无差异。\n- 容器构建产物：`objdump -T` 抽查 GLIBC 符号最大版本 ≤ 2.31。"
     },
     {
       "anchor": "font-shaping：字体加载与整形",
@@ -982,13 +1036,19 @@
       "anchor": "框架目标（fork 维护）",
       "id": "docs/MAKE_COMMANDS.md#框架目标（fork 维护）",
       "source": "docs/MAKE_COMMANDS.md",
-      "text": "## 框架目标（fork 维护）\n\n| 目标 | 作用 | 前置/副作用 |\n|---|---|---|\n| `make help` | 目标总览 | 无 |\n| `make setup` | 钉版安装 nextest + venv(graphifyy/tomli) 到 `.local/tools/` | 联网下载；幂等 |\n| `make ai-doctor` | 只读诊断命令入口 | 无 |\n| `make framework-check` | resolver --check（规则闭集/体积/排序守门） | 无 |\n| `make framework-ready` | 配置完整门（拒绝 pending 命令） | 无 |\n| `make framework-test` | 框架脚本 unittest | 无 |\n| `make ci-check` | resolver --check → version --check → lint → typecheck → test | 编译+全量测试，耗时 |\n| `make version` / `version-check` / `version-write` | fork 版本（CHANGELOG 最大 SemVer） | write 才写盘 |\n| `make evidence TASK=x` | 分配 `.ui-evidence/<分支>/<任务>/<批次>/` | 建目录+初始 result.json |\n| `make lint` | cargo +nightly fmt --check | 需 nightly |\n| `make typecheck` | = make check | 只读 |\n| `make test-integration` | cargo nextest run -p wezterm-ssh | 需 /usr/sbin/sshd |\n| `make test-heavy` | nextest --all --no-fail-fast（CI 形态） | 同 make test |\n| `make generated-check` | 派生文件只读比对（补全/键表/docs 索引） | 二进制链需 target/debug/wezterm，缺则跳过该段并注明 |\n| `make generated-write` | = ci/update-derived-files.sh（有意重建派生文件） | **改文件**；需 target/debug/wezterm |\n| `make ui-smoke` | Xvfb 隔离显示截图冒烟 | 需 target/debug/wezterm-gui、Xvfb、xwd、ffmpeg |\n| `make graph` / `make graph-check` | 重建/校验代码图谱 | graph 需 venv（make setup） |\n| `make kb` / `make kb-check` | 重建/校验知识库 | kb 写盘，kb-check 只读 |\n| `make dev` | cargo run -p wezterm-gui（交互起 GUI） | 需显示；编译耗时 |"
+      "text": "## 框架目标（fork 维护）"
+    },
+    {
+      "anchor": "框架目标（fork 维护）",
+      "id": "docs/MAKE_COMMANDS.md#框架目标（fork 维护）[1]",
+      "source": "docs/MAKE_COMMANDS.md",
+      "text": "| 目标 | 作用 | 前置/副作用 |\n|---|---|---|\n| `make help` | 目标总览 | 无 |\n| `make setup` | 钉版安装 nextest + venv(graphifyy/tomli) 到 `.local/tools/` | 联网下载；幂等 |\n| `make ai-doctor` | 只读诊断命令入口 | 无 |\n| `make framework-check` | resolver --check（规则闭集/体积/排序守门） | 无 |\n| `make framework-ready` | 配置完整门（拒绝 pending 命令） | 无 |\n| `make framework-test` | 框架脚本 unittest | 无 |\n| `make ci-check` | resolver --check → version --check → lint → typecheck → test | 编译+全量测试，耗时 |\n| `make version` / `version-check` / `version-write` | fork 版本（CHANGELOG 最大 SemVer） | write 才写盘 |\n| `make evidence TASK=x` | 分配 `.ui-evidence/<分支>/<任务>/<批次>/` | 建目录+初始 result.json |\n| `make lint` | cargo +nightly fmt --check | 需 nightly |\n| `make typecheck` | = make check | 只读 |\n| `make test-integration` | cargo nextest run -p wezterm-ssh | 需 /usr/sbin/sshd |\n| `make test-heavy` | nextest --all --no-fail-fast（CI 形态） | 同 make test |\n| `make generated-check` | 派生文件只读比对（补全/键表/docs 索引） | 二进制链需 target/debug/wezterm，缺则跳过该段并注明 |\n| `make generated-write` | = ci/update-derived-files.sh（有意重建派生文件） | **改文件**；需 target/debug/wezterm |\n| `make ui-smoke` | Xvfb 隔离显示截图冒烟 | 需 target/debug/wezterm-gui、Xvfb、xwd、ffmpeg |\n| `make graph` / `make graph-check` | 重建/校验代码图谱 | graph 需 venv（make setup） |\n| `make kb` / `make kb-check` | 重建/校验知识库 | kb 写盘，kb-check 只读 |\n| `make gx-bundle` | docker ubuntu:20.04 容器构建 release 四件套并组装离线安装包 `dist/*.tar.xz`（有 Windows 包时顺带产出 zip） | 需 docker（或 `GX_USE_LOCAL=1` 本机构建，产物标注 glibc）；联网装依赖，耗时 |\n| `make gx-install` | 源码路径安装：rust 检查 → `./get-deps`（需 sudo，交互确认）→ release 构建 → `dotfiles/install.sh` 部署 | 改 `$HOME` 下用户文件（先备份）；联网 |\n| `make gx-sync` | 对比本机 `~/.config/wezterm`、插件目录与 `dotfiles/` 快照差异 | 只读；`GX_SYNC_WRITE=1` 写回仓库 |\n| `make dev` | cargo run -p wezterm-gui（交互起 GUI） | 需显示；编译耗时 |"
     },
     {
       "anchor": "环境变量",
       "id": "docs/MAKE_COMMANDS.md#环境变量",
       "source": "docs/MAKE_COMMANDS.md",
-      "text": "## 环境变量\n\n- `WEZTERM_TOOLCHAIN_ROOT`：重定向 `.local/tools`（CI/离线复用）。\n- `WEZTERM_GRAPHIFY_CLI` / `WEZTERM_GRAPHIFY_ALLOW_ANY_VERSION=1`：\n  图谱 CLI 覆盖/版本放行（升级比对时用）。\n- `TASK=`：`make evidence TASK=<任务名>`（缺省 ui-smoke）。"
+      "text": "## 环境变量\n\n- `WEZTERM_TOOLCHAIN_ROOT`：重定向 `.local/tools`（CI/离线复用）。\n- `WEZTERM_GRAPHIFY_CLI` / `WEZTERM_GRAPHIFY_ALLOW_ANY_VERSION=1`：\n  图谱 CLI 覆盖/版本放行（升级比对时用）。\n- `TASK=`：`make evidence TASK=<任务名>`（缺省 ui-smoke）。\n- `GX_USE_LOCAL=1`：`make gx-bundle` 回退本机构建（产物只兼容本机 glibc）。\n- `GX_WINDOWS_ZIP=<path>`：指定 Windows 构建包（缺省时尝试 `gh` 拉取\n  gx-windows-build workflow 产物或复用 `dist/` 现成包）。\n- `GX_SYNC_WRITE=1`：`make gx-sync` 把本机改动写回 `dotfiles/`。"
     },
     {
       "anchor": "wezterm fork 开发文档索引（AI 协作框架）",
@@ -1055,8 +1115,8 @@
   "schema_version": 1,
   "source_hashes": {
     "<generated>crate-map": "fe5a2477a3e8a68f0fee68adeb2f744ab485da6d9a13d1b93d5a81a722890a31",
-    "AGENTS.md": "ea8a686fbe7ed696bde7b078fdfff11150ecef640e7b72298f8b3e347f3a8bdf",
-    "CHANGELOG.md": "7011fba9380cff278e14a2864f670de202e9f5607c71b4008b3c39537414a275",
+    "AGENTS.md": "6eea2dd0157e12d85636f69932eb86f770932f618a62067a2b2080de092e835a",
+    "CHANGELOG.md": "08ce66fbd60b9f774ad93417668bb2ae0129bde197493b2400fea62c253a859e",
     "CONTRIBUTING.md": "4b532cb620398e61b342833ee98705afb555abef7a0c9de9390b727d23395ebb",
     "docs/AGENT_RULES/README.md": "3e032c14f9cee9dcf0478cefb576432aecb43ec6a98b66a5b0f04744875a5d0d",
     "docs/AGENT_RULES/build-ci-release.md": "121befbd0463e594e9dc5dc02d29ccd3a813ece9b995dc1455409b422a70395e",
@@ -1065,6 +1125,7 @@
     "docs/AGENT_RULES/code-review.md": "25e720270c5945f287370784408f1615fa60bb7e13991078c7ec56e7f47e127b",
     "docs/AGENT_RULES/config-lua.md": "93fcf5c68e5b626a62d2ca9242fd5e4e62969ebf8c116665a2d943a405a2d9b0",
     "docs/AGENT_RULES/development.md": "959abf05f5eebeaaae4319dec4c2499eb0a49e64ce76fb46674dd5c140ccd20a",
+    "docs/AGENT_RULES/dotfiles.md": "91b168d801cf0643d04ef3c9b78693d62003fa0becfb9b1ed34c6a246618739e",
     "docs/AGENT_RULES/font-shaping.md": "db51515bef42bda5d2291ac3428397565c0d263db61b5ecb2d4d0f426d5851fc",
     "docs/AGENT_RULES/gui-rendering.md": "91da499b3cdc2c717811292890c7bfe55f54cad8ec47542f54380f56c8fa57b8",
     "docs/AGENT_RULES/mux-domain.md": "0148bb1a29360f551db764c136588768da4159f02fa6199e7647e7288003384a",
@@ -1079,7 +1140,7 @@
     "docs/AI_TOOLS.md": "e6a52d5e8b10b57424931d727b33f5fcc50ea6ecd6f8b60bee820085595b251f",
     "docs/ARCHITECTURE.md": "4a82c062c9f23c099d93fc6220102057424ad0b02020d97af1825a36dae5afc7",
     "docs/DEVELOPMENT.md": "90a8d67b18aeb531aa72bfb3246d496aca207cfe8810ad33ff1354c6c89c86ae",
-    "docs/MAKE_COMMANDS.md": "12170b6df3a4f6fb1fe5ba55c87214f0e68c18bceea631f7bd69787f1f942b6f",
+    "docs/MAKE_COMMANDS.md": "1a1b164c469dc70b84201982b799ee22e4d0b3816ffee28e1a06a35bdafdb07e",
     "docs/README.md": "e422cf6ead4de20f835c7d24215854992e5db7949fdf8bf449ec6b81e64fe986",
     "docs/RELEASE.md": "0c15492b5a7988dda54fe0d352ab48da54b14c7384f38293e6bd853c3f826c51",
     "docs/TESTING.md": "9571b9c2c49ff20dde14cfb0638f5344d513fffdecf085f1a5c94d55ac204f37"
