@@ -209,6 +209,9 @@ pub struct PaneState {
     pub overlay: Option<OverlayState>,
 
     bell_start: Option<Instant>,
+    /// Timestamp of the most recent bell in this pane, used to
+    /// collapse bell storms under `bell_cooldown_ms`
+    last_bell_at: Option<Instant>,
     pub mouse_terminal_coords: Option<(ClickPosition, StableRowIndex)>,
 }
 
@@ -1242,7 +1245,8 @@ impl TermWindow {
                         return Ok(());
                     }
 
-                    let suppressed = self.bell_suppressed(pane_id);
+                    let suppressed =
+                        self.bell_suppressed(pane_id) || self.bell_on_cooldown(pane_id);
                     if !suppressed {
                         match self.config.audible_bell {
                             AudibleBell::SystemBeep => {
@@ -1250,11 +1254,14 @@ impl TermWindow {
                             }
                             AudibleBell::Disabled => {}
                         }
+                        let wants_attention =
+                            self.config.bell_requests_attention && self.focused.is_none();
                         let mut per_pane = self.pane_state(pane_id);
                         per_pane.bell_start.replace(Instant::now());
-                    }
-                    if self.config.bell_requests_attention && self.focused.is_none() {
-                        window.request_attention();
+                        drop(per_pane);
+                        if wants_attention {
+                            window.request_attention();
+                        }
                     }
 
                     log::trace!("Ding! (this is the bell) in pane {}", pane_id);
@@ -1920,6 +1927,25 @@ impl TermWindow {
         };
 
         return window_id == self.mux_window_id;
+    }
+
+    /// Returns true when this pane already rang within the configured
+    /// `bell_cooldown_ms` window, so that bell storms from busy
+    /// programs collapse into a single audible/visual bell. Always
+    /// updates the per-pane bell timestamp.
+    fn bell_on_cooldown(&mut self, pane_id: PaneId) -> bool {
+        let cooldown = Duration::from_millis(self.config.bell_cooldown_ms);
+        if cooldown.is_zero() {
+            return false;
+        }
+        let now = Instant::now();
+        let mut state = self.pane_state(pane_id);
+        let on_cooldown = state
+            .last_bell_at
+            .map(|at| now.duration_since(at) < cooldown)
+            .unwrap_or(false);
+        state.last_bell_at.replace(now);
+        on_cooldown
     }
 
     /// Whether the audible/visual bell side effects should be

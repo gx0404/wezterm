@@ -870,6 +870,13 @@ pub struct Config {
     #[dynamic(default)]
     pub bell_requests_attention: bool,
 
+    /// Collapse bell storms from busy programs: bells from the same
+    /// pane within this many milliseconds are suppressed (the `bell`
+    /// window event is still emitted for each of them). `0` disables
+    /// the cooldown. Defaults to `0`.
+    #[dynamic(default)]
+    pub bell_cooldown_ms: u64,
+
     #[dynamic(default)]
     pub canonicalize_pasted_newlines: Option<NewlineCanon>,
 
