@@ -726,9 +726,11 @@ impl WindowOps for Window {
     fn request_attention(&self) {
         unsafe {
             let ns_app = cocoa::appkit::NSApp();
-            // NSCriticalRequest == 1: bounce the dock icon until the
-            // user activates the application
-            let _: () = msg_send![ns_app, requestUserAttention: 1usize];
+            // NSCriticalRequest == 0（NSInformationalRequest == 1）：
+            // 持续跳动 dock 图标直至用户激活应用，与 X11 的
+            // _NET_WM_STATE_DEMANDS_ATTENTION 语义对齐。请求仅在 app
+            // 非活动时生效；调用侧已按窗口失焦门控。
+            let _: () = msg_send![ns_app, requestUserAttention: 0usize];
         }
     }
 

@@ -32,7 +32,7 @@
 | `make test-integration` | cargo nextest run -p wezterm-ssh | 需 /usr/sbin/sshd |
 | `make test-heavy` | nextest --all --no-fail-fast（CI 形态） | 同 make test |
 | `make generated-check` | 派生文件只读比对（补全/键表/docs 索引） | 二进制链需 target/debug/wezterm，缺则跳过该段并注明 |
-| `make generated-write` | = ci/update-derived-files.sh（有意重建派生文件） | **改文件**；需 target/debug/wezterm |
+| `make generated-write` | = scripts/generated_write.sh（上游 update-derived-files.sh + 键表 stylua 格式化） | **改文件**；需 target/debug/wezterm、钉版 stylua |
 | `make ui-smoke` | Xvfb 隔离显示截图冒烟 | 需 target/debug/wezterm-gui、Xvfb、xwd、ffmpeg |
 | `make graph` / `make graph-check` | 重建/校验代码图谱 | graph 需 venv（make setup） |
 | `make kb` / `make kb-check` | 重建/校验知识库 | kb 写盘，kb-check 只读 |
