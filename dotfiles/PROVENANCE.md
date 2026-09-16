@@ -17,7 +17,9 @@
   - `config/launch.lua`：Git Bash 路径 `C:\Users\kevin\scoop\...` 改为
     `wezterm.home_dir` 动态拼接；
   - `config/domains.lua`：WSL 域写死的 `username='kevin'` / `/home/kevin` 改为
-    `os.getenv('USERNAME')` 动态取当前账户。
+    `os.getenv('USERNAME')` 动态取当前账户；
+  - `config/general.lua`（2026-09-16，R1）：新增 `language = 'zh-CN'`
+    （本 fork 的界面文案语言配置项，见根 CHANGELOG 0.2.0；本机尚未同步）。
 - 本机存在 `~/.config/wezterm.bak-20260713`（38MB 旧快照），未收录。
 - 2026-09-16 增量同步：`config/bindings.lua` 恢复 Linux 壁纸控制的
   `Alt+.` / `Alt+,` / `Alt+/` / `Ctrl+Alt+/` / `Alt+b`，与本机配置及

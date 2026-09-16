@@ -12,6 +12,19 @@
 
 ### Added
 
+- 界面文案 i18n 基建（`config::i18n`）：英文原文为 key 的 zh-CN 译表
+  （有序静态表 + binary_search，未命中回退英文，上游新增文案不炸构建）；
+  新增 `language` 配置项（`"zh-CN"` 默认 / `"en"`，严格校验），
+  `WEZTERM_LANG` 环境变量优先级最高（运维钉死）；语言状态为进程内
+  全局原子，配置加载漏斗（`load_with_overrides` 成功路径）统一落地，
+  reload/每窗口 override 路径自然收敛。
+- GUI 设置持久化通道 `gui-settings.json`（`config::gui_settings`）：
+  位于实际生效的 wezterm.lua 同目录（HOME 时退回 XDG 目录），加载
+  优先级 wezterm.lua < gui-settings.json < `--config` CLI 覆盖 <
+  每窗口 `set_config_overrides`；该文件为 GUI 设置页独占（临时文件 +
+  rename 原子写入），无效键告警跳过而不拖垮整个配置加载；
+  `peek_language()` 供 CLI 进程免执行 Lua 快速取语言。
+
 - 收录本机 wezterm 用户环境快照为仓库真源 `dotfiles/`：配置工作区
   （含壁纸与生效中的事件脚本，`config/launch.lua`、`config/domains.lua`
   的 Windows 死路径改动态拼接）、4 个插件按 wezterm 插件加载器转义目录名

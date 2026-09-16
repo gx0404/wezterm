@@ -33,6 +33,8 @@ mod daemon;
 mod exec_domain;
 mod font;
 mod frontend;
+pub mod gui_settings;
+pub mod i18n;
 pub mod keyassignment;
 mod keys;
 pub mod lua;
@@ -324,6 +326,9 @@ fn default_config_with_overrides_applied() -> anyhow::Result<Config> {
     // Cause the default config to be re-evaluated with the overrides applied
     let lua = lua::make_lua_context(Path::new("override")).context("make_lua_context")?;
     let table = mlua::Value::Table(lua.create_table()?);
+    // fork: apply the GUI settings sidecar beneath the CLI overrides so
+    // gui-settings.json also works without a wezterm.lua file
+    let table = gui_settings::apply_to_lua(&lua, table)?;
     let config = Config::apply_overrides_to(&lua, table).context("apply_overrides_to")?;
 
     let dyn_config = luahelper::lua_value_to_dynamic(config)?;

@@ -10,6 +10,7 @@ use crate::font::{
     FontShaperSelection, FreeTypeLoadFlags, FreeTypeLoadTarget, StyleRule, TextStyle,
 };
 use crate::frontend::FrontEndSelection;
+use crate::i18n::UiLanguage;
 use crate::keyassignment::{
     KeyAssignment, KeyTable, KeyTableEntry, KeyTables, MouseEventTrigger, SpawnCommand,
 };
@@ -729,6 +730,14 @@ pub struct Config {
     #[dynamic(default = "default_true")]
     pub scroll_to_bottom_on_input: bool,
 
+    /// Sets the language used for translated interface strings (command
+    /// palette, menus, overlays, CLI help). Accepts `"zh-CN"` (the default)
+    /// or `"en"`. The `WEZTERM_LANG` environment variable takes precedence
+    /// over this option, and keys set in `gui-settings.json` (written by
+    /// the settings overlay) override the value given here.
+    #[dynamic(default)]
+    pub language: UiLanguage,
+
     #[dynamic(default = "default_true")]
     pub use_ime: bool,
     #[dynamic(default)]
@@ -1100,7 +1109,15 @@ impl Config {
                     }
                 }
                 Ok(None) => continue,
-                Ok(Some(loaded)) => return loaded,
+                Ok(Some(loaded)) => {
+                    // fork: resolve the interface language on every
+                    // successful load so reloads and per-window override
+                    // paths converge here (WEZTERM_LANG outranks this).
+                    if let Ok(cfg) = &loaded.config {
+                        crate::i18n::apply_language(cfg.language);
+                    }
+                    return loaded;
+                }
             }
         }
 
@@ -1117,7 +1134,12 @@ impl Config {
                 lua: None,
                 warnings: vec![],
             },
-            Ok(cfg) => cfg,
+            Ok(cfg) => {
+                if let Ok(c) = &cfg.config {
+                    crate::i18n::apply_language(c.language);
+                }
+                cfg
+            }
         }
     }
 
@@ -1165,6 +1187,11 @@ impl Config {
                         .set_name(p.to_string_lossy())
                         .eval_async(),
                 )?;
+                // fork: layer the GUI settings sidecar (gui-settings.json,
+                // owned by the settings overlay) on top of the lua config.
+                // --config overrides and per-window overrides still win over
+                // it, as they are applied just below.
+                let config = crate::gui_settings::apply_to_lua(&lua, config)?;
                 let config = Config::apply_overrides_to(&lua, config)?;
                 let config = Config::apply_overrides_obj_to(&lua, config, overrides)?;
                 cfg = Config::from_lua(config, &lua).with_context(|| {
