@@ -77,6 +77,31 @@ impl super::TermWindow {
         }
     }
 
+    /// The text to use for copy/pipe actions: the current selection,
+    /// or, when an overlay owns input routing (in practice: copy mode)
+    /// and there is no selection, the word under the overlay cursor,
+    /// mirroring tmux's behavior of copying the match at the cursor.
+    pub fn selection_text_for_copy(&self, pane: &Arc<dyn Pane>) -> String {
+        let text = self.selection_text(pane);
+        if !text.is_empty() {
+            return text;
+        }
+        let overlay_owns_input = self
+            .pane_state(pane.pane_id())
+            .overlay
+            .as_ref()
+            .map(|o| Arc::ptr_eq(&o.pane, pane))
+            .unwrap_or(false);
+        if !overlay_owns_input {
+            return text;
+        }
+        let cursor = pane.get_cursor_position();
+        let word =
+            SelectionRange::word_around(SelectionCoordinate::x_y(cursor.x, cursor.y), &**pane)
+                .normalize();
+        self.selection_range_text(pane, word, false)
+    }
+
     /// Returns the text covered by an explicit selection range,
     /// applying the same wrapping/trailing-blank semantics as
     /// [`Self::selection_text`].

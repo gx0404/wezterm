@@ -546,6 +546,11 @@ pub enum KeyAssignment {
         text: String,
         destination: ClipboardCopyDestination,
     },
+    /// Pipes the text of the current selection (or, while copy mode is
+    /// active with no selection, the word under the cursor) to the
+    /// standard input of the given command. The command is spawned
+    /// directly; it is not interpreted by a shell.
+    PipeSelection(SpawnCommand),
     PasteFrom(ClipboardPasteSource),
     ActivateTabRelative(isize),
     ActivateTabRelativeNoWrap(isize),

@@ -635,6 +635,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Edit"],
             icon: Some("md_content_copy"),
         },
+        PipeSelection(cmd) => CommandDef {
+            brief: label_string(action, format!("Pipe selection to {cmd:?}")).into(),
+            doc: format!("Pipe the selection to the standard input of {cmd:?}").into(),
+            keys: vec![],
+            args: &[],
+            menubar: &[],
+            icon: None,
+        },
         CopyTextTo {
             text: _,
             destination: ClipboardCopyDestination::Clipboard,

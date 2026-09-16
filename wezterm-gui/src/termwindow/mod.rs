@@ -2713,31 +2713,17 @@ impl TermWindow {
                 window.set_window_level(level.clone());
             }
             CopyTo(dest) => {
-                let mut text = self.selection_text(pane);
-                if text.is_empty()
-                    && self
-                        .pane_state(pane.pane_id())
-                        .overlay
-                        .as_ref()
-                        .map(|o| Arc::ptr_eq(&o.pane, pane))
-                        .unwrap_or(false)
-                {
-                    // Copying with no selection while an overlay owns the
-                    // input (in practice: copy mode): fall back to the word
-                    // under the overlay cursor, mirroring tmux's behavior of
-                    // copying the match at the cursor
-                    let cursor = pane.get_cursor_position();
-                    let word = crate::selection::SelectionRange::word_around(
-                        crate::selection::SelectionCoordinate::x_y(cursor.x, cursor.y),
-                        &**pane,
-                    )
-                    .normalize();
-                    text = self.selection_range_text(pane, word, false);
-                }
+                let text = self.selection_text_for_copy(pane);
                 self.copy_to_clipboard(*dest, text);
             }
             CopyTextTo { text, destination } => {
                 self.copy_to_clipboard(*destination, text.clone());
+            }
+            PipeSelection(cmd) => {
+                let text = self.selection_text_for_copy(pane);
+                if !text.is_empty() {
+                    Self::spawn_pipe_selection(cmd, text);
+                }
             }
             PasteFrom(source) => {
                 self.paste_from_clipboard(pane, *source);
@@ -3235,6 +3221,48 @@ impl TermWindow {
             .detach();
         }
     }
+    /// Pipe `text` to the standard input of the command described by
+    /// `cmd`. Runs on a detached thread so that we never block the
+    /// event loop and never re-enter the window proc (cf. the open-uri
+    /// comment further up in this file).
+    fn spawn_pipe_selection(cmd: &SpawnCommand, text: String) {
+        let args = match cmd.args.as_ref() {
+            Some(args) if !args.is_empty() => args.clone(),
+            _ => {
+                log::error!("PipeSelection requires a command to pipe to");
+                return;
+            }
+        };
+        let cwd = cmd.cwd.clone();
+        let env = cmd.set_environment_variables.clone();
+        std::thread::spawn(move || {
+            let (program, rest) = (args[0].clone(), args[1..].to_vec());
+            let mut command = std::process::Command::new(program);
+            command
+                .args(rest)
+                .envs(env)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            if let Some(cwd) = cwd {
+                command.current_dir(cwd);
+            }
+            match command.spawn() {
+                Ok(mut child) => {
+                    use std::io::Write;
+                    if let Some(stdin) = child.stdin.as_mut() {
+                        if let Err(err) = stdin.write_all(text.as_bytes()) {
+                            log::error!("while piping selection: {err:#}");
+                        }
+                    }
+                    drop(child.stdin.take());
+                    let _ = child.wait();
+                }
+                Err(err) => log::error!("failed to spawn pipe selection command: {err:#}"),
+            }
+        });
+    }
+
     fn close_current_pane(&mut self, confirm: bool) {
         let mux_window_id = self.mux_window_id;
         let mux = Mux::get();
