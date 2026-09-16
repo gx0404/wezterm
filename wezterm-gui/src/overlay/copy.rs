@@ -38,6 +38,68 @@ lazy_static::lazy_static! {
 
 const SEARCH_CHUNK_SIZE: StableRowIndex = 1000;
 
+/// Scan for the first/last row of the paragraph containing (or, when
+/// starting from a blank separator row or from an existing boundary,
+/// the adjacent paragraph in the requested direction). `is_blank(i)`
+/// reports whether row `i` is blank; rows are 0-based indices into a
+/// `rows`-long region. Pure so it can be unit tested.
+fn scan_paragraph(
+    rows: usize,
+    cursor: usize,
+    want_start: bool,
+    is_blank: impl Fn(usize) -> bool,
+) -> usize {
+    let last = rows.saturating_sub(1);
+    let mut i = cursor.min(last);
+    if is_blank(i) {
+        // On a separator row: move to the adjacent paragraph
+        if want_start {
+            while i > 0 && is_blank(i) {
+                i -= 1;
+            }
+            while i > 0 && !is_blank(i - 1) {
+                i -= 1;
+            }
+        } else {
+            while i < last && is_blank(i) {
+                i += 1;
+            }
+            while i < last && !is_blank(i + 1) {
+                i += 1;
+            }
+        }
+        return i;
+    }
+    if want_start {
+        while i > 0 && !is_blank(i - 1) {
+            i -= 1;
+        }
+        if i == cursor {
+            // Already at the paragraph start: continue to the previous one
+            while i > 0 && is_blank(i - 1) {
+                i -= 1;
+            }
+            while i > 0 && !is_blank(i - 1) {
+                i -= 1;
+            }
+        }
+    } else {
+        while i < last && !is_blank(i + 1) {
+            i += 1;
+        }
+        if i == cursor {
+            // Already at the paragraph end: continue to the next one
+            while i < last && is_blank(i + 1) {
+                i += 1;
+            }
+            while i < last && !is_blank(i + 1) {
+                i += 1;
+            }
+        }
+    }
+    i
+}
+
 pub struct CopyOverlay {
     delegate: Arc<dyn Pane>,
     render: Arc<Mutex<CopyRenderable>>,
@@ -1079,6 +1141,41 @@ impl CopyRenderable {
         self.window.invalidate();
     }
 
+    fn row_is_blank(&self, y: StableRowIndex) -> bool {
+        let (_top, lines) = self.delegate.get_lines(y..y + 1);
+        match lines.get(0) {
+            Some(line) => line.columns_as_str(0..line.len()).trim().is_empty(),
+            None => true,
+        }
+    }
+
+    fn move_to_paragraph_boundary(&mut self, want_start: bool) {
+        self.clamp_cursor_to_scrollback();
+        let dims = self.delegate.get_dimensions();
+        let top = dims.scrollback_top;
+        let rows = dims.scrollback_rows as usize;
+        let idx = (self.cursor.y - top).max(0) as usize;
+        let target = scan_paragraph(rows, idx, want_start, |i| {
+            self.row_is_blank(top + i as StableRowIndex)
+        });
+        self.cursor.y = top + target as StableRowIndex;
+        self.select_to_cursor_pos();
+    }
+
+    fn move_to_line(&mut self, line: isize) {
+        self.clamp_cursor_to_scrollback();
+        let dims = self.delegate.get_dimensions();
+        let top = dims.scrollback_top;
+        let total = dims.scrollback_rows as isize;
+        let target = if line >= 0 {
+            top + line.min(total.saturating_sub(1))
+        } else {
+            (top + total + line).max(top)
+        };
+        self.cursor.y = target;
+        self.select_to_cursor_pos();
+    }
+
     fn jump_to_mark(&mut self) {
         if let Some(mark) = self.mark.take() {
             // Swap the cursor with the mark so that jumping again
@@ -1294,6 +1391,9 @@ impl Pane for CopyOverlay {
                     MoveBackwardWord => render.move_backward_one_word(),
                     MoveForwardWord => render.move_forward_one_word(),
                     MoveForwardWordEnd => render.move_to_end_of_word(),
+                    MoveToStartOfParagraph => render.move_to_paragraph_boundary(true),
+                    MoveToEndOfParagraph => render.move_to_paragraph_boundary(false),
+                    MoveToLine { line } => render.move_to_line(*line),
                     MoveRight => render.move_right_single_cell(),
                     MoveLeft => render.move_left_single_cell(),
                     MoveUp => render.move_up_single_row(),
@@ -2079,6 +2179,26 @@ pub fn copy_key_table() -> KeyTable {
             KeyAssignment::CopyMode(CopyModeAssignment::JumpToMark),
         ),
         (
+            WKeyCode::Char('{'),
+            Modifiers::NONE,
+            KeyAssignment::CopyMode(CopyModeAssignment::MoveToStartOfParagraph),
+        ),
+        (
+            WKeyCode::Char('{'),
+            Modifiers::SHIFT,
+            KeyAssignment::CopyMode(CopyModeAssignment::MoveToStartOfParagraph),
+        ),
+        (
+            WKeyCode::Char('}'),
+            Modifiers::NONE,
+            KeyAssignment::CopyMode(CopyModeAssignment::MoveToEndOfParagraph),
+        ),
+        (
+            WKeyCode::Char('}'),
+            Modifiers::SHIFT,
+            KeyAssignment::CopyMode(CopyModeAssignment::MoveToEndOfParagraph),
+        ),
+        (
             WKeyCode::Char('F'),
             Modifiers::NONE,
             KeyAssignment::CopyMode(CopyModeAssignment::JumpBackward { prev_char: false }),
@@ -2122,4 +2242,68 @@ pub fn copy_key_table() -> KeyTable {
         table.insert((key, mods), KeyTableEntry { action });
     }
     table
+}
+
+#[cfg(test)]
+mod paragraph_tests {
+    use super::scan_paragraph;
+
+    /// 'T' is a text row, '_' is a blank separator row
+    fn scan(pattern: &str, cursor: usize, want_start: bool) -> usize {
+        let blanks: Vec<bool> = pattern.chars().map(|c| c == '_').collect();
+        scan_paragraph(blanks.len(), cursor, want_start, |i| blanks[i])
+    }
+
+    #[test]
+    fn paragraph_start_from_middle() {
+        assert_eq!(scan("TT_TTT", 4, true), 3);
+        assert_eq!(scan("TT_TTT", 5, true), 3);
+        assert_eq!(scan("TT_TTT", 1, true), 0);
+        assert_eq!(scan("TT_TTT", 0, true), 0);
+    }
+
+    #[test]
+    fn paragraph_start_at_boundary_goes_previous() {
+        // Already at the start of the second paragraph: jump to the
+        // start of the first
+        assert_eq!(scan("TT_TTT", 3, true), 0);
+    }
+
+    #[test]
+    fn paragraph_start_from_blank_separator() {
+        assert_eq!(scan("TT_TTT", 2, true), 0);
+        assert_eq!(scan("TTT__TT", 3, true), 0);
+        assert_eq!(scan("TTT__TT", 4, true), 0);
+    }
+
+    #[test]
+    fn paragraph_end_from_middle() {
+        assert_eq!(scan("TT_TTT", 3, false), 5);
+        assert_eq!(scan("TT_TTT", 4, false), 5);
+        assert_eq!(scan("TT_TTT", 0, false), 1);
+    }
+
+    #[test]
+    fn paragraph_end_at_boundary_goes_next() {
+        // Already at the end of the first paragraph: jump to the end
+        // of the second
+        assert_eq!(scan("TT_TTT", 1, false), 5);
+        assert_eq!(scan("TT_TTT", 5, false), 5);
+    }
+
+    #[test]
+    fn paragraph_end_from_blank_separator() {
+        assert_eq!(scan("TT_TTT", 2, false), 5);
+    }
+
+    #[test]
+    fn all_blank_and_edge_clamping() {
+        assert_eq!(scan("___", 1, true), 0);
+        assert_eq!(scan("___", 1, false), 2);
+        assert_eq!(scan("TTT", 0, true), 0);
+        assert_eq!(scan("TTT", 2, false), 2);
+        // A cursor beyond the end is clamped to the last row
+        assert_eq!(scan("TT_TT", 9, false), 4);
+        assert_eq!(scan("TT_TT", 9, true), 3);
+    }
 }

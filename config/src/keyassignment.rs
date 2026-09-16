@@ -703,6 +703,21 @@ pub enum CopyModeAssignment {
     MoveBackwardWord,
     MoveForwardWord,
     MoveForwardWordEnd,
+    /// Move the cursor to the first row of the current paragraph.
+    /// Paragraphs are delimited by blank lines, mirroring tmux's `{`
+    /// motion in copy mode; when already at the paragraph start, move
+    /// to the previous paragraph.
+    MoveToStartOfParagraph,
+    /// Move the cursor to the last row of the current paragraph
+    /// (tmux's `}` motion); when already at the paragraph end, move
+    /// to the next paragraph.
+    MoveToEndOfParagraph,
+    /// Move the cursor to a specific row: `line >= 0` counts from the
+    /// top of the scrollback, negative numbers count back from the
+    /// last row (`-1` is the bottom-most row).
+    MoveToLine {
+        line: isize,
+    },
     MoveRight,
     MoveLeft,
     MoveUp,
