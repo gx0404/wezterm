@@ -24,8 +24,12 @@
 - Codex 注意：hooks 必须写成数组表 `[[hooks.PreToolUse]]` + 嵌套
   `[[hooks.PreToolUse.hooks]]`，timeout 按秒；apply_patch 无 file_path
   字段，FILE 类模式靠 SHELL 重定向规则兜底（已知边界）。
+- **适配器语言纪律**：`python3` 登记调用的脚本必须是真 Python（shell
+  冒充 `.py` 只有按注册入口探针才拦得住——2026-09 落地事故沉淀）；
+  `bash` 调用的 `.sh` 过 `bash -n`。两类检查都锁在
+  `scripts/test_ai_tool_hooks.py` 的 RegisteredAdapterIntegrity。
 - 改模式必须跑：`python3 -m unittest discover -s scripts -p
-  test_ai_tool_hooks.py`（含允许/拒绝探针）。
+  test_ai_tool_hooks.py`（含允许/拒绝探针、注册入口探针与配置形状锁）。
 
 ## 权限面（Claude settings.json 要点）
 
@@ -39,7 +43,7 @@
 | 项 | ZCode | Claude | Codex | Kimi |
 |---|---|---|---|---|
 | 配置语法解析 | PASS（JSON） | PASS（JSON） | PASS（TOML） | N/A（无目录） |
-| hooks 探针（无副作用 JSON） | PASS（离线探针：`python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`；ZCode 复用 claude 协议形状） | PASS（同左，block_dangerous.sh 直接探针） | PASS（--protocol codex 探针，permissionDecision 形状） | N/A |
+| hooks 探针（无副作用 JSON） | PASS（离线探针：`python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`；含**注册入口探针**（按配置原样解释器+适配器调用）与 codex/zcode 配置形状锁） | PASS（同左，block_dangerous.sh 直接探针） | PASS（--protocol codex 探针 + python3 注册入口探针） | N/A |
 | 新会话规则加载 | PENDING（首次真实会话时补验） | PENDING | PENDING | PENDING |
 | MCP | N/A（本仓无项目级 MCP） | N/A | N/A | N/A |
 

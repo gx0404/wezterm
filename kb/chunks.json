@@ -79,6 +79,12 @@
       "text": "# Changelog（gx0404/wezterm fork）\n\n本文件记录 fork 层面已实现的可观察变更（AI 协作框架、开发流程、定制功能）。\n上游 WezTerm 的产品级变更见 `docs/changelog.md`（随上游同步，不在本文件重复维护，\n避免同步上游时产生冲突）。\n\n版本真源：本文件 `## X.Y.Z(日期|TBD)` 标题中的最大 SemVer（`scripts/version.py`，\n`make version` 只读查询）。WezTerm 产品自身的版本号由 `wezterm-version/build.rs`\n按 git 提交时间与哈希生成，两套体系互不干扰（见 docs/RELEASE.md）。"
     },
     {
+      "anchor": "Fixed",
+      "id": "CHANGELOG.md#Fixed",
+      "source": "CHANGELOG.md",
+      "text": "### Fixed\n\n- `.codex/hooks/pre_tool_use_policy.py` 适配器语言混装修正为真 Python\n  （此前为 bash 内容冒充 `.py`，直调引擎探针全绿、按注册入口探针才暴露）；\n  注册入口探针、适配器语言完整性（python3→ast.parse、bash→`bash -n`）与\n  codex/zcode hooks 配置形状锁（事件数组表、命令嵌套、timeout 秒制、\n  `config_file` 注册键）已锁进 `scripts/test_ai_tool_hooks.py`。\n- 采纳 skill 更新（2026-09-16）的并行会话纪律：写入仓库前复查并行信号、\n  发现并行推进转只读验收不双写、用 ctime/清单快照判定进度；探针输入中的\n  危险命令字面量拆分构造（development.md 不变量）。"
+    },
+    {
       "anchor": "Before you submit your code",
       "id": "CONTRIBUTING.md#Before you submit your code",
       "source": "CONTRIBUTING.md",
@@ -388,7 +394,7 @@
       "anchor": "不变量",
       "id": "docs/AGENT_RULES/development.md#不变量",
       "source": "docs/AGENT_RULES/development.md",
-      "text": "## 不变量\n\n- 规则/路由改动后必须 `make framework-check`（闭集 + 体积 + 排序）通过；\n  危险模式改动必须 `python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`。\n- lint 门不得吞退出码（禁止 `--exit-zero`、禁止 `| tail` 接验收命令）；\n  诊断（ai-doctor）只报告缺失并给修复命令，不隐式安装。\n- 生成物纪律：`graphify-out/graph.json`、`kb/chunks.json`、`.graphify_*`\n  指纹只能经 `make graph / make kb` 重建；有意变更才写盘并审 diff，默认\n  `make graph-check / kb-check` 只读校验。\n- 证据纪律：UI 证据只写 `.ui-evidence/`（ignored）；`make evidence TASK=x`\n  分配的目录里 result.json 如实登记 status 与 images_reviewed，没读图不写\n  true。\n- 脚本兼容 Python 3.10（tomli 回退）；不引入仓库外 Python 依赖（venv 由\n  setup_env.sh 管理）。\n- 上游同步安全：本域对上游文件的修改仅限 `.gitignore`/`Makefile`/\n  `docs/mkdocs-base.yml` 三处带标记追加段；其它上游文件一律不改语义。"
+      "text": "## 不变量\n\n- **并行会话防双写**：写入仓库前复查并行信号（untracked/修改清单短间隔\n  增长、出现非本轮新建的产物目录）；发现并行推进即转只读验收 + 逐项声明\n  的外科修复，不双写。判定进度用 ctime 或文件清单快照，不信 mtime\n  （保留 mtime 的拷贝会漏报）；「命令没有输出」先按产物存在性判断是否\n  真的执行过。\n- 规则/路由改动后必须 `make framework-check`（闭集 + 体积 + 排序）通过；\n  危险模式改动必须 `python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`。\n- lint 门不得吞退出码（禁止 `--exit-zero`、禁止 `| tail` 接验收命令）；\n  诊断（ai-doctor）只报告缺失并给修复命令，不隐式安装。\n- 生成物纪律：`graphify-out/graph.json`、`kb/chunks.json`、`.graphify_*`\n  指纹只能经 `make graph / make kb` 重建；有意变更才写盘并审 diff，默认\n  `make graph-check / kb-check` 只读校验。\n- 证据纪律：UI 证据只写 `.ui-evidence/`（ignored）；`make evidence TASK=x`\n  分配的目录里 result.json 如实登记 status 与 images_reviewed，没读图不写\n  true。\n- 脚本兼容 Python 3.10（tomli 回退）；不引入仓库外 Python 依赖（venv 由\n  setup_env.sh 管理）。\n- hooks 探针纪律：探针必须**按工具配置的原样注册方式**再走一遍入口\n  （含适配器与解释器），只直调引擎会漏掉入口层错误（如 shell 冒充 .py\n  适配器）；`python3` 登记调用的脚本必须是真 Python（unittest 的\n  RegisteredAdapterIntegrity 拦截）；探针输入里的危险命令字面量拆分构造，\n  防宿主会话自身安全门拦截探针文本。\n- 上游同步安全：本域对上游文件的修改仅限 `.gitignore`/`Makefile`/\n  `docs/mkdocs-base.yml` 三处带标记追加段；其它上游文件一律不改语义。"
     },
     {
       "anchor": "禁止项",
@@ -820,7 +826,7 @@
       "anchor": "hooks（PreToolUse 安全门）",
       "id": "docs/AI_TOOLS.md#hooks（PreToolUse 安全门）",
       "source": "docs/AI_TOOLS.md",
-      "text": "## hooks（PreToolUse 安全门）\n\n- 策略真源：`.claude/hooks/dangerous_patterns.conf`（SHELL/FILE 两段，\n  deny/ask 两级）。\n- 适配：`.claude/hooks/block_dangerous.sh` → `pre_tool_use_gate.py`\n  （claude 协议）；`.codex/hooks/pre_tool_use_policy.py`（codex 协议，\n  permissionDecision 字段）；`.zcode/config.json` 直接复用 claude 形\n  （`hooks.enabled: true` + 毫秒 `timeoutMs`，缺失即静默不执行——这是\n  已知坑，配置里两字段都必须在）。\n- Codex 注意：hooks 必须写成数组表 `[[hooks.PreToolUse]]` + 嵌套\n  `[[hooks.PreToolUse.hooks]]`，timeout 按秒；apply_patch 无 file_path\n  字段，FILE 类模式靠 SHELL 重定向规则兜底（已知边界）。\n- 改模式必须跑：`python3 -m unittest discover -s scripts -p\n  test_ai_tool_hooks.py`（含允许/拒绝探针）。"
+      "text": "## hooks（PreToolUse 安全门）\n\n- 策略真源：`.claude/hooks/dangerous_patterns.conf`（SHELL/FILE 两段，\n  deny/ask 两级）。\n- 适配：`.claude/hooks/block_dangerous.sh` → `pre_tool_use_gate.py`\n  （claude 协议）；`.codex/hooks/pre_tool_use_policy.py`（codex 协议，\n  permissionDecision 字段）；`.zcode/config.json` 直接复用 claude 形\n  （`hooks.enabled: true` + 毫秒 `timeoutMs`，缺失即静默不执行——这是\n  已知坑，配置里两字段都必须在）。\n- Codex 注意：hooks 必须写成数组表 `[[hooks.PreToolUse]]` + 嵌套\n  `[[hooks.PreToolUse.hooks]]`，timeout 按秒；apply_patch 无 file_path\n  字段，FILE 类模式靠 SHELL 重定向规则兜底（已知边界）。\n- **适配器语言纪律**：`python3` 登记调用的脚本必须是真 Python（shell\n  冒充 `.py` 只有按注册入口探针才拦得住——2026-09 落地事故沉淀）；\n  `bash` 调用的 `.sh` 过 `bash -n`。两类检查都锁在\n  `scripts/test_ai_tool_hooks.py` 的 RegisteredAdapterIntegrity。\n- 改模式必须跑：`python3 -m unittest discover -s scripts -p\n  test_ai_tool_hooks.py`（含允许/拒绝探针、注册入口探针与配置形状锁）。"
     },
     {
       "anchor": "工具加载差异",
@@ -838,7 +844,7 @@
       "anchor": "逐客户端验证记录",
       "id": "docs/AI_TOOLS.md#逐客户端验证记录",
       "source": "docs/AI_TOOLS.md",
-      "text": "## 逐客户端验证记录\n\n| 项 | ZCode | Claude | Codex | Kimi |\n|---|---|---|---|---|\n| 配置语法解析 | PASS（JSON） | PASS（JSON） | PASS（TOML） | N/A（无目录） |\n| hooks 探针（无副作用 JSON） | PASS（离线探针：`python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`；ZCode 复用 claude 协议形状） | PASS（同左，block_dangerous.sh 直接探针） | PASS（--protocol codex 探针，permissionDecision 形状） | N/A |\n| 新会话规则加载 | PENDING（首次真实会话时补验） | PENDING | PENDING | PENDING |\n| MCP | N/A（本仓无项目级 MCP） | N/A | N/A | N/A |\n\nhooks 探针可离线复验：\n`echo '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git push --force origin x\"}}' | bash .claude/hooks/block_dangerous.sh`\n应输出 deny 决策 JSON；\n`...{\"command\":\"git status\"}...` 应无输出（放行）。\n各工具真实会话内的加载与拦截在首次使用时补验并更新本表。"
+      "text": "## 逐客户端验证记录\n\n| 项 | ZCode | Claude | Codex | Kimi |\n|---|---|---|---|---|\n| 配置语法解析 | PASS（JSON） | PASS（JSON） | PASS（TOML） | N/A（无目录） |\n| hooks 探针（无副作用 JSON） | PASS（离线探针：`python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`；含**注册入口探针**（按配置原样解释器+适配器调用）与 codex/zcode 配置形状锁） | PASS（同左，block_dangerous.sh 直接探针） | PASS（--protocol codex 探针 + python3 注册入口探针） | N/A |\n| 新会话规则加载 | PENDING（首次真实会话时补验） | PENDING | PENDING | PENDING |\n| MCP | N/A（本仓无项目级 MCP） | N/A | N/A | N/A |\n\nhooks 探针可离线复验：\n`echo '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git push --force origin x\"}}' | bash .claude/hooks/block_dangerous.sh`\n应输出 deny 决策 JSON；\n`...{\"command\":\"git status\"}...` 应无输出（放行）。\n各工具真实会话内的加载与拦截在首次使用时补验并更新本表。"
     },
     {
       "anchor": "Workspace 布局（68 包）",
@@ -1050,7 +1056,7 @@
   "source_hashes": {
     "<generated>crate-map": "fe5a2477a3e8a68f0fee68adeb2f744ab485da6d9a13d1b93d5a81a722890a31",
     "AGENTS.md": "ea8a686fbe7ed696bde7b078fdfff11150ecef640e7b72298f8b3e347f3a8bdf",
-    "CHANGELOG.md": "66f2d869ddfb66dfb9532f12b41b0a069a3bf0af5a06637d4d02c8cbd242ae22",
+    "CHANGELOG.md": "7011fba9380cff278e14a2864f670de202e9f5607c71b4008b3c39537414a275",
     "CONTRIBUTING.md": "4b532cb620398e61b342833ee98705afb555abef7a0c9de9390b727d23395ebb",
     "docs/AGENT_RULES/README.md": "3e032c14f9cee9dcf0478cefb576432aecb43ec6a98b66a5b0f04744875a5d0d",
     "docs/AGENT_RULES/build-ci-release.md": "121befbd0463e594e9dc5dc02d29ccd3a813ece9b995dc1455409b422a70395e",
@@ -1058,7 +1064,7 @@
     "docs/AGENT_RULES/code-comments.md": "fc9b0f8eff6afff1c3b5a8b96f138124076f1d61847b613f6dfe0c84c9392aa6",
     "docs/AGENT_RULES/code-review.md": "25e720270c5945f287370784408f1615fa60bb7e13991078c7ec56e7f47e127b",
     "docs/AGENT_RULES/config-lua.md": "93fcf5c68e5b626a62d2ca9242fd5e4e62969ebf8c116665a2d943a405a2d9b0",
-    "docs/AGENT_RULES/development.md": "ca8dcce777820cfea3fb009b41c679cb61f112c6d640a5ef08d63ad6e7706a67",
+    "docs/AGENT_RULES/development.md": "959abf05f5eebeaaae4319dec4c2499eb0a49e64ce76fb46674dd5c140ccd20a",
     "docs/AGENT_RULES/font-shaping.md": "db51515bef42bda5d2291ac3428397565c0d263db61b5ecb2d4d0f426d5851fc",
     "docs/AGENT_RULES/gui-rendering.md": "91da499b3cdc2c717811292890c7bfe55f54cad8ec47542f54380f56c8fa57b8",
     "docs/AGENT_RULES/mux-domain.md": "0148bb1a29360f551db764c136588768da4159f02fa6199e7647e7288003384a",
@@ -1070,7 +1076,7 @@
     "docs/AGENT_RULES/support-crates.md": "554f90fba8388f95775d3503f9280a695704c9f54444d56e90d7069ccaabd19b",
     "docs/AGENT_RULES/terminal-model.md": "e60e18b2854ad719460f45a27de348deacc63e2fa820ee6aaa70cbb32743065a",
     "docs/AGENT_RULES/testing.md": "260826e8f56eb80035b472d0115932a930e4c1900f134f202ab2f8f2be3d6ef9",
-    "docs/AI_TOOLS.md": "a6e33f34c77ff5646ec3339af834e157a6a9ed51fc73dc3c33ce54f3562e80cf",
+    "docs/AI_TOOLS.md": "e6a52d5e8b10b57424931d727b33f5fcc50ea6ecd6f8b60bee820085595b251f",
     "docs/ARCHITECTURE.md": "4a82c062c9f23c099d93fc6220102057424ad0b02020d97af1825a36dae5afc7",
     "docs/DEVELOPMENT.md": "90a8d67b18aeb531aa72bfb3246d496aca207cfe8810ad33ff1354c6c89c86ae",
     "docs/MAKE_COMMANDS.md": "12170b6df3a4f6fb1fe5ba55c87214f0e68c18bceea631f7bd69787f1f942b6f",

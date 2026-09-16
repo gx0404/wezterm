@@ -24,6 +24,11 @@
 
 ## 不变量
 
+- **并行会话防双写**：写入仓库前复查并行信号（untracked/修改清单短间隔
+  增长、出现非本轮新建的产物目录）；发现并行推进即转只读验收 + 逐项声明
+  的外科修复，不双写。判定进度用 ctime 或文件清单快照，不信 mtime
+  （保留 mtime 的拷贝会漏报）；「命令没有输出」先按产物存在性判断是否
+  真的执行过。
 - 规则/路由改动后必须 `make framework-check`（闭集 + 体积 + 排序）通过；
   危险模式改动必须 `python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`。
 - lint 门不得吞退出码（禁止 `--exit-zero`、禁止 `| tail` 接验收命令）；
@@ -36,6 +41,11 @@
   true。
 - 脚本兼容 Python 3.10（tomli 回退）；不引入仓库外 Python 依赖（venv 由
   setup_env.sh 管理）。
+- hooks 探针纪律：探针必须**按工具配置的原样注册方式**再走一遍入口
+  （含适配器与解释器），只直调引擎会漏掉入口层错误（如 shell 冒充 .py
+  适配器）；`python3` 登记调用的脚本必须是真 Python（unittest 的
+  RegisteredAdapterIntegrity 拦截）；探针输入里的危险命令字面量拆分构造，
+  防宿主会话自身安全门拦截探针文本。
 - 上游同步安全：本域对上游文件的修改仅限 `.gitignore`/`Makefile`/
   `docs/mkdocs-base.yml` 三处带标记追加段；其它上游文件一律不改语义。
 

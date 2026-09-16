@@ -36,3 +36,14 @@
 - 代码注释规范：`docs/AGENT_RULES/code-comments.md`（上游英文注释保持、
   fork 新增标记、Lua API rustdoc 约定、`模块路径::符号` 引用），并对核心
   模块头补少量中文导读（仅模块头，不动正文，控制上游同步冲突面）。
+
+### Fixed
+
+- `.codex/hooks/pre_tool_use_policy.py` 适配器语言混装修正为真 Python
+  （此前为 bash 内容冒充 `.py`，直调引擎探针全绿、按注册入口探针才暴露）；
+  注册入口探针、适配器语言完整性（python3→ast.parse、bash→`bash -n`）与
+  codex/zcode hooks 配置形状锁（事件数组表、命令嵌套、timeout 秒制、
+  `config_file` 注册键）已锁进 `scripts/test_ai_tool_hooks.py`。
+- 采纳 skill 更新（2026-09-16）的并行会话纪律：写入仓库前复查并行信号、
+  发现并行推进转只读验收不双写、用 ctime/清单快照判定进度；探针输入中的
+  危险命令字面量拆分构造（development.md 不变量）。

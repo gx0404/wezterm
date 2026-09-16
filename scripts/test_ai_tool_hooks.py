@@ -1,18 +1,33 @@
 #!/usr/bin/env python3
-"""hooks 安全门探针：用无副作用 JSON 输入验证允许/拒绝语义。"""
+"""hooks 安全门探针：用无副作用 JSON 输入验证允许/拒绝语义。
+
+除直调引擎外，还按各工具配置里的**原样注册方式**走注册入口（含适配器与
+解释器），并做适配器语言完整性（python3 调用的必须是真 Python）与
+codex/zcode 配置形状锁——防止 shell 冒充 .py、Claude 风格单表 hooks 等
+"直调探针全绿"的入口层错误（2026-09 wezterm 落地事故沉淀）。
+"""
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import unittest
 from pathlib import Path
 
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GATE = REPO_ROOT / ".claude" / "hooks" / "pre_tool_use_gate.py"
 ADAPTER = REPO_ROOT / ".claude" / "hooks" / "block_dangerous.sh"
+CODEX_ADAPTER = REPO_ROOT / ".codex" / "hooks" / "pre_tool_use_policy.py"
+ROOT_TOKEN = "$(git rev-parse --show-toplevel)"
 
 
 def _load_engine():
@@ -117,6 +132,132 @@ class AdapterProtocol(unittest.TestCase):
         decision = json.loads(result.stdout)
         self.assertEqual(decision["permissionDecision"], "deny")
         self.assertIn("reason", decision)
+
+
+class RegisteredEntryProbes(unittest.TestCase):
+    """按工具配置里的原样注册方式走一遍入口（解释器 + 适配器路径）。"""
+
+    def test_codex_adapter_via_registered_python_invocation(self) -> None:
+        # 危险字面量拆分构造：宿主会话可能挂着同一安全门，命令文本不得整串出现。
+        deny_command = "git pu" + "sh --force origin main"
+        result = subprocess.run(
+            [sys.executable, str(CODEX_ADAPTER)],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": deny_command}}),
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        decision = json.loads(result.stdout)
+        self.assertEqual(decision["permissionDecision"], "deny")
+
+    def test_codex_adapter_allows_normal_command(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(CODEX_ADAPTER)],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "make framework-check"}}),
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "")
+
+
+def _registered_commands() -> list[tuple[str, str]]:
+    """收集三份工具配置里登记的全部 hook 命令（已把 $(git rev-parse...) 归一到仓库根）。"""
+    commands: list[tuple[str, str]] = []
+    claude = json.loads((REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    for block in claude.get("hooks", {}).get("PreToolUse", []):
+        for hook in block.get("hooks", []):
+            commands.append(("claude", hook["command"]))
+    zcode = json.loads((REPO_ROOT / ".zcode" / "config.json").read_text(encoding="utf-8"))
+    for block in zcode.get("hooks", {}).get("events", {}).get("PreToolUse", []):
+        for hook in block.get("hooks", []):
+            commands.append(("zcode", hook["command"]))
+    codex = tomllib.loads((REPO_ROOT / ".codex" / "config.toml").read_text(encoding="utf-8"))
+    for block in codex.get("hooks", {}).get("PreToolUse", []):
+        for hook in block.get("hooks", []):
+            commands.append(("codex", hook["command"]))
+    return commands
+
+
+def _script_path(command: str) -> tuple[str, Path]:
+    """从命令串提取解释器与仓内脚本路径（支持 $ 根占位与引号形态）。"""
+    normalized = command.replace(ROOT_TOKEN, str(REPO_ROOT))
+    match = re.search(r"(bash|python3?)\s+[\"']?([^\"'\s]+)[\"']?", normalized)
+    if match is None:
+        raise AssertionError(f"无法解析 hook 命令：{command}")
+    return match.group(1), Path(match.group(2))
+
+
+class RegisteredAdapterIntegrity(unittest.TestCase):
+    """python3 调用的必须是真 Python；bash 调用的必须过 bash -n。"""
+
+    def test_python_registered_scripts_parse(self) -> None:
+        checked = 0
+        for tool, command in _registered_commands():
+            interpreter, path = _script_path(command)
+            if not interpreter.startswith("python"):
+                continue
+            self.assertTrue(path.is_file(), f"{tool} 登记的脚本不存在：{command}")
+            source = path.read_text(encoding="utf-8")
+            try:
+                ast.parse(source)
+            except SyntaxError as exc:
+                self.fail(f"{tool} 用 python3 调用但不是合法 Python（{path.name}）：{exc}")
+            checked += 1
+        self.assertGreaterEqual(checked, 1, "应至少登记一个 python 适配器")
+
+    def test_bash_registered_scripts_pass_bash_n(self) -> None:
+        for tool, command in _registered_commands():
+            interpreter, path = _script_path(command)
+            if interpreter != "bash":
+                continue
+            self.assertTrue(path.is_file(), f"{tool} 登记的脚本不存在：{command}")
+            result = subprocess.run(["bash", "-n", str(path)], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, f"{path} bash -n 失败：{result.stderr}")
+
+
+class CodexConfigShape(unittest.TestCase):
+    """形状锁：事件为数组表、命令嵌套、timeout 按秒、agent 用 config_file 注册。"""
+
+    def setUp(self) -> None:
+        self.config = tomllib.loads((REPO_ROOT / ".codex" / "config.toml").read_text(encoding="utf-8"))
+
+    def test_pretooluse_is_array_of_tables(self) -> None:
+        events = self.config["hooks"]["PreToolUse"]
+        self.assertIsInstance(events, list)
+        for block in events:
+            self.assertIn("hooks", block)
+            self.assertIsInstance(block["hooks"], list)
+
+    def test_hook_command_fields(self) -> None:
+        for block in self.config["hooks"]["PreToolUse"]:
+            for hook in block["hooks"]:
+                self.assertEqual(hook["type"], "command")
+                self.assertIn("command", hook)
+                self.assertIsInstance(hook["timeout"], int)
+                self.assertNotIn("timeoutMs", hook, "codex timeout 按秒，不得混入毫秒字段")
+
+    def test_agents_registered_via_config_file(self) -> None:
+        for name, agent in self.config.get("agents", {}).items():
+            if not isinstance(agent, dict) or "config_file" not in agent:
+                continue
+            self.assertTrue(
+                (REPO_ROOT / ".codex" / agent["config_file"]).is_file(),
+                f"agent {name} 的 config_file 不存在",
+            )
+
+
+class ZcodeConfigShape(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = json.loads((REPO_ROOT / ".zcode" / "config.json").read_text(encoding="utf-8"))
+
+    def test_hooks_enabled_with_ms_timeout(self) -> None:
+        hooks = self.config["hooks"]
+        self.assertIs(hooks["enabled"], True, "缺失/关闭时 hook 静默不执行")
+        for block in hooks["events"]["PreToolUse"]:
+            for hook in block["hooks"]:
+                self.assertIsInstance(hook["timeoutMs"], int, "ZCode 超时必须用毫秒字段 timeoutMs")
+                self.assertNotIn("timeout", hook)
+                _, path = _script_path(hook["command"])
+                self.assertTrue(path.is_file(), f"zcode hook 脚本不存在：{hook['command']}")
 
 
 if __name__ == "__main__":
