@@ -64,7 +64,6 @@ impl super::TermWindow {
 
     /// Returns the selection text only
     pub fn selection_text(&self, pane: &Arc<dyn Pane>) -> String {
-        let mut s = String::new();
         let rectangular = self.selection(pane.pane_id()).rectangular;
         if let Some(sel) = self
             .selection(pane.pane_id())
@@ -72,36 +71,52 @@ impl super::TermWindow {
             .as_ref()
             .map(|r| r.normalize())
         {
-            let mut last_was_wrapped = false;
-            let first_row = sel.rows().start;
-            let last_row = sel.rows().end;
+            self.selection_range_text(pane, sel.clone(), rectangular)
+        } else {
+            String::new()
+        }
+    }
 
-            for line in pane.get_logical_lines(sel.rows()) {
-                if !s.is_empty() && !last_was_wrapped {
-                    s.push('\n');
-                }
-                let last_idx = line.physical_lines.len().saturating_sub(1);
-                for (idx, phys) in line.physical_lines.iter().enumerate() {
-                    let this_row = line.first_row + idx as StableRowIndex;
-                    if this_row >= first_row && this_row < last_row {
-                        let last_phys_idx = phys.len().saturating_sub(1);
-                        let cols = sel.cols_for_row(this_row, rectangular);
-                        let last_col_idx = cols.end.saturating_sub(1).min(last_phys_idx);
-                        let col_span = phys.columns_as_str(cols);
-                        // Only trim trailing whitespace if we are the last line
-                        // in a wrapped sequence
-                        if idx == last_idx {
-                            s.push_str(col_span.trim_end());
-                        } else {
-                            s.push_str(&col_span);
-                        }
+    /// Returns the text covered by an explicit selection range,
+    /// applying the same wrapping/trailing-blank semantics as
+    /// [`Self::selection_text`].
+    pub fn selection_range_text(
+        &self,
+        pane: &Arc<dyn Pane>,
+        sel: SelectionRange,
+        rectangular: bool,
+    ) -> String {
+        let mut s = String::new();
+        let sel = sel.normalize();
+        let mut last_was_wrapped = false;
+        let first_row = sel.rows().start;
+        let last_row = sel.rows().end;
 
-                        last_was_wrapped = last_col_idx == last_phys_idx
-                            && phys
-                                .get_cell(last_col_idx)
-                                .map(|c| c.attrs().wrapped())
-                                .unwrap_or(false);
+        for line in pane.get_logical_lines(sel.rows()) {
+            if !s.is_empty() && !last_was_wrapped {
+                s.push('\n');
+            }
+            let last_idx = line.physical_lines.len().saturating_sub(1);
+            for (idx, phys) in line.physical_lines.iter().enumerate() {
+                let this_row = line.first_row + idx as StableRowIndex;
+                if this_row >= first_row && this_row < last_row {
+                    let last_phys_idx = phys.len().saturating_sub(1);
+                    let cols = sel.cols_for_row(this_row, rectangular);
+                    let last_col_idx = cols.end.saturating_sub(1).min(last_phys_idx);
+                    let col_span = phys.columns_as_str(cols);
+                    // Only trim trailing whitespace if we are the last line
+                    // in a wrapped sequence
+                    if idx == last_idx {
+                        s.push_str(col_span.trim_end());
+                    } else {
+                        s.push_str(&col_span);
                     }
+
+                    last_was_wrapped = last_col_idx == last_phys_idx
+                        && phys
+                            .get_cell(last_col_idx)
+                            .map(|c| c.attrs().wrapped())
+                            .unwrap_or(false);
                 }
             }
         }

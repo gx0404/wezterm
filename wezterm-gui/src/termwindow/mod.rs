@@ -2713,7 +2713,27 @@ impl TermWindow {
                 window.set_window_level(level.clone());
             }
             CopyTo(dest) => {
-                let text = self.selection_text(pane);
+                let mut text = self.selection_text(pane);
+                if text.is_empty()
+                    && self
+                        .pane_state(pane.pane_id())
+                        .overlay
+                        .as_ref()
+                        .map(|o| Arc::ptr_eq(&o.pane, pane))
+                        .unwrap_or(false)
+                {
+                    // Copying with no selection while an overlay owns the
+                    // input (in practice: copy mode): fall back to the word
+                    // under the overlay cursor, mirroring tmux's behavior of
+                    // copying the match at the cursor
+                    let cursor = pane.get_cursor_position();
+                    let word = crate::selection::SelectionRange::word_around(
+                        crate::selection::SelectionCoordinate::x_y(cursor.x, cursor.y),
+                        &**pane,
+                    )
+                    .normalize();
+                    text = self.selection_range_text(pane, word, false);
+                }
                 self.copy_to_clipboard(*dest, text);
             }
             CopyTextTo { text, destination } => {
