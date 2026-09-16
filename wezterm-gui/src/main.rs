@@ -1178,7 +1178,16 @@ fn run() -> anyhow::Result<()> {
         }
     }
 
-    let opts = Opt::parse();
+    // fork: resolve the interface language (WEZTERM_LANG > gui-settings
+    // > zh-CN default) and localize the clap help texts before parsing
+    // so `--help` output is translated
+    config::i18n::init_cli_early();
+    let opts = {
+        use clap::{CommandFactory, FromArgMatches};
+        let mut cmd = Opt::command();
+        wezterm_gui_subcommands::localize_clap(&mut cmd);
+        Opt::from_arg_matches(&cmd.get_matches()).unwrap_or_else(|e| e.exit())
+    };
 
     // This is a bit gross.
     // In order to not to automatically open a standard windows console when

@@ -129,6 +129,33 @@ pub fn has_translation(key: &str) -> bool {
         .is_ok()
 }
 
+/// Translate a runtime-provided string (clap help texts are built from
+/// doc comments and are not `'static` literals at the call site).
+/// Falls back to the key itself when no translation is recorded.
+pub fn tr_str(key: &str) -> Cow<'_, str> {
+    match lang() {
+        UiLanguage::En => Cow::Borrowed(key),
+        UiLanguage::ZhCn => match zh_cn::ZH_CN.binary_search_by(|(k, _)| (*k).cmp(key)) {
+            Ok(idx) => Cow::Borrowed(zh_cn::ZH_CN[idx].1),
+            Err(_) => Cow::Borrowed(key),
+        },
+    }
+}
+
+/// Early language resolution for CLI processes: `WEZTERM_LANG` env pin
+/// > the `language` key in gui-settings.json (cheap JSON peek, no Lua
+/// execution) > the zh-CN default.
+pub fn init_cli_early() {
+    let pinned = std::env::var(LANG_ENV_VAR)
+        .ok()
+        .as_deref()
+        .and_then(UiLanguage::parse);
+    let lang = pinned
+        .or_else(crate::gui_settings::peek_language)
+        .unwrap_or_default();
+    set_lang(lang);
+}
+
 /// Substitute `{name}` placeholders in a (possibly translated) template.
 /// `format!` cannot take a runtime template, so translated strings with
 /// parameters keep `{name}` placeholders and are filled by this helper.

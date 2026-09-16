@@ -271,3 +271,50 @@ pub struct ShowKeysCommand {
     #[arg(long)]
     pub key_table: Option<String>,
 }
+
+// fork: CLI 帮助文案运行时本地化。clap derive 的帮助文本来自 doc 注释，
+// 不逐条改上游字符串；在 parse 前遍历命令树，把 about/help 过
+// `config::i18n::tr_str`（英文原文即 key，未收录回退英文）。
+pub fn localize_clap(cmd: &mut clap::Command) {
+    // Materialize clap's auto-generated bits (the `help` subcommand and
+    // the per-command `--help`/`--version` args) so they get localized too
+    cmd.build();
+    fn localize_one(cmd: &mut clap::Command) {
+        if let Some(about) = cmd.get_about().map(|s| s.to_string()) {
+            let t = config::i18n::tr_str(&about).into_owned();
+            let owned = std::mem::take(cmd);
+            *cmd = owned.about(t);
+        }
+        if let Some(about) = cmd.get_long_about().map(|s| s.to_string()) {
+            let t = config::i18n::tr_str(&about).into_owned();
+            let owned = std::mem::take(cmd);
+            *cmd = owned.long_about(t);
+        }
+        let args: Vec<(clap::Id, Option<String>, Option<String>)> = cmd
+            .get_arguments()
+            .map(|a| {
+                (
+                    a.get_id().clone(),
+                    a.get_help().map(|s| s.to_string()),
+                    a.get_long_help().map(|s| s.to_string()),
+                )
+            })
+            .collect();
+        for (id, help, long_help) in args {
+            if let Some(h) = help {
+                let t = config::i18n::tr_str(&h).into_owned();
+                let owned = std::mem::take(cmd);
+                *cmd = owned.mut_arg(&id, move |arg| arg.help(t));
+            }
+            if let Some(h) = long_help {
+                let t = config::i18n::tr_str(&h).into_owned();
+                let owned = std::mem::take(cmd);
+                *cmd = owned.mut_arg(&id, move |arg| arg.long_help(t));
+            }
+        }
+        for sub in cmd.get_subcommands_mut() {
+            localize_one(sub);
+        }
+    }
+    localize_one(cmd);
+}

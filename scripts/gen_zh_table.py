@@ -98,6 +98,301 @@ PAIRS = [
     ("Shows the keybinding cheat sheet overlay", "显示快捷键速查浮层"),
     ("Keybindings", "快捷键"),
     ("↑↓ scroll  Esc close", "↑↓ 滚动  Esc 关闭"),
+    # ---- CLI 帮助（clap 运行时本地化）----
+    ("Wez's Terminal Emulator", "Wez 的终端模拟器"),
+    ("Print help", "打印帮助"),
+    ("Start the GUI, optionally running an alternative program [aliases: -e]", "启动 GUI，可选地运行其它程序 [别名: -e]"),
+    ("Wez's Terminal Emulator\nhttp://github.com/wezterm/wezterm", "Wez 的终端模拟器\nhttp://github.com/wezterm/wezterm"),
+    ("Print help (see a summary with '-h')", "打印帮助（用 '-h' 查看摘要）"),
+    ("Print version", "打印版本"),
+    ("Print this message or the help of the given subcommand(s)", "打印本消息或指定子命令的帮助"),
+    ("Skip loading wezterm.lua", "跳过加载 wezterm.lua"),
+    (
+        "Specify the configuration file to use, overrides the normal configuration file resolution",
+        "指定要使用的配置文件，覆盖常规的配置文件查找顺序",
+    ),
+    ("Override specific configuration values", "覆盖指定的配置项"),
+    # 子命令 about
+    ("Start the GUI, optionally running an alternative program", "启动 GUI，可选地运行其它程序"),
+    ("Establish an ssh session", "建立 ssh 会话"),
+    ("Open a serial port", "打开串口"),
+    ("Connect to wezterm multiplexer", "连接到 wezterm 多路复用器"),
+    ("Display information about fonts", "显示字体信息"),
+    ("Show key assignments", "显示键位分配"),
+    ("Interact with experimental mux server", "与实验性 mux 服务端交互"),
+    ("Output an image to the terminal", "在终端中输出图片"),
+    (
+        "Advise the terminal of the current working directory by emitting an OSC 7 escape sequence",
+        "通过发送 OSC 7 转义序列告知终端当前工作目录",
+    ),
+    ("Record a terminal session as an asciicast", "将终端会话录制为 asciicast"),
+    ("Replay an asciicast terminal session", "回放 asciicast 终端会话"),
+    ("Generate shell completion information", "生成 shell 补全信息"),
+    ("list windows, tabs and panes", "列出窗口、标签页和窗格"),
+    ("list clients", "列出客户端"),
+    ("start rpc proxy pipe", "启动 RPC 代理管道"),
+    ("obtain tls credentials", "获取 TLS 凭据"),
+    ("split the current pane.", "拆分当前窗格。"),
+    ("Move a pane into a new tab", "将窗格移入新标签页"),
+    ("Activate (focus) a pane", "激活（聚焦）窗格"),
+    ("Activate an adjacent pane in the specified direction", "激活指定方向上的相邻窗格"),
+    ("Determine the adjacent pane in the specified direction", "确定指定方向上的相邻窗格"),
+    ("Adjust the size of a pane directionally", "按方向调整窗格大小"),
+    ("Activate a tab", "激活标签页"),
+    ("Change the title of a tab", "修改标签页标题"),
+    ("Change the title of a window", "修改窗口标题"),
+    ("Rename a workspace", "重命名工作区"),
+    ("Send text to a pane as though it were pasted. If bracketed paste mode is enabled in the pane, then the text will be sent as a bracketed paste", "向窗格发送文本，如同粘贴。若窗格启用了括号粘贴模式，文本将按括号粘贴发送"),
+    ("Retrieves the textual content of a pane and output it to stdout", "获取窗格的文本内容并输出到标准输出"),
+    ("Kill a pane", "关闭窗格"),
+    ("Spawn a command into a new window or tab", "在新窗口或新标签页中启动命令"),
+    ("Zoom, unzoom, or toggle zoom state", "缩放、取消缩放或切换缩放状态"),
+    # 常用参数 help
+    (
+        "Instead of executing your shell, run PROG. For example: `wezterm start -- bash -l` will spawn bash as if it were a login shell",
+        "不执行你的 shell，而是运行 PROG。例如：`wezterm start -- bash -l` 会以登录 shell 的方式启动 bash",
+    ),
+    (
+        "Instead of executing your shell, run PROG. For example: `wezterm ssh user@host -- bash -l` will spawn bash as if it were a login shell",
+        "不执行你的 shell，而是运行 PROG。例如：`wezterm ssh user@host -- bash -l` 会以登录 shell 的方式启动 bash",
+    ),
+    (
+        "Instead, always start the GUI in this invocation of wezterm so that you can wait for the command to complete by waiting for this wezterm process to finish",
+        "总是在本次 wezterm 调用中直接启动 GUI，这样等待本进程结束即可等待命令完成",
+    ),
+    ("If true, do not connect to domains marked as connect_automatically in your wezterm configuration file", "为 true 时不自动连接配置文件中标记为 connect_automatically 的域"),
+    (
+        "Override the default windowing system class. The default is \"org.wezfurlong.wezterm\". Under X11 and Windows this changes the window class. Under Wayland this changes the app_id. This changes the class for all windows spawned by this instance of wezterm, including error, update and ssh authentication dialogs",
+        "覆盖窗口系统默认的 class。默认为 \"org.wezfurlong.wezterm\"。X11 与 Windows 下修改窗口 class，Wayland 下修改 app_id。此设置影响该 wezterm 实例派生的所有窗口，包括错误、更新与 ssh 认证对话框",
+    ),
+    ("Override the default workspace with the provided name. The default is \"default\"", "用给定名称覆盖默认工作区。默认名为 \"default\""),
+    (
+        "When connecting to a gui instance, if you started the gui with `--class SOMETHING`, you should also pass that same value here in order for the client to find the correct gui instance",
+        "连接 GUI 实例时，若 GUI 以 `--class SOMETHING` 启动，客户端也需传入相同值才能找到正确的 GUI 实例",
+    ),
+    (
+        "When used with --domain, if the domain already has running panes, wezterm will simply attach and will NOT spawn the specified PROG. If you omit --attach when using --domain, wezterm will attach AND then spawn PROG",
+        "与 --domain 同用时，若域中已有运行中的窗格，wezterm 将仅附加而不会启动指定的 PROG；若省略 --attach，wezterm 会先附加再启动 PROG",
+    ),
+    ("Prefer connecting to a background mux server. The default is to prefer connecting to a running wezterm gui instance", "优先连接后台 mux 服务端。默认优先连接运行中的 wezterm GUI 实例"),
+    (
+        "Specifies the remote system using the form: `[username@]host[:port]`. If `username@` is omitted, then your local $USER is used instead. If `:port` is omitted, then the standard ssh port (22) is used instead",
+        "以 `[用户名@]主机[:端口]` 形式指定远程系统。省略 `用户名@` 时使用本地 $USER；省略 `:端口` 时使用标准 ssh 端口（22）",
+    ),
+    (
+        "Instead of executing your shell, run PROG. For example: `wezterm start -- bash -l` will spawn bash as if it were a login shell.",
+        "不执行你的 shell，而是运行 PROG。例如：`wezterm start -- bash -l` 会以登录 shell 的方式启动 bash。",
+    ),
+    (
+        "Override specific SSH configuration options. `wezterm ssh` is able to parse some (but not all!) options from your `~/.ssh/config` and `/etc/ssh/ssh_config` files. This command line switch allows you to override or otherwise specify ssh_config style options.",
+        "覆盖指定的 SSH 配置项。`wezterm ssh` 能解析 `~/.ssh/config` 与 `/etc/ssh/ssh_config` 中的部分（不是全部！）选项，此开关允许你覆盖或补充 ssh_config 风格的选项。",
+    ),
+    ("Enable verbose ssh protocol tracing. The trace information is printed to the stderr stream of the process", "启用 ssh 协议详细跟踪，跟踪信息打印到进程的标准错误流"),
+    (
+        "Specifies the serial device name. On Windows systems this can be a name like `COM0`. On posix systems this will be something like `/dev/ttyUSB0`",
+        "指定串口设备名。Windows 系统上形如 `COM0`，POSIX 系统上形如 `/dev/ttyUSB0`",
+    ),
+    ("Set the baud rate.  The default is 9600 baud", "设置波特率。默认 9600"),
+    (
+        "Name of the multiplexer domain section from the configuration to which you'd like to connect",
+        "要连接的配置文件中多路复用域（domain）小节的名称",
+    ),
+    (
+        "Name of the multiplexer domain section from the configuration to which you'd like to connect. If omitted, the default domain will be used",
+        "要连接的配置文件中多路复用域（domain）小节的名称。省略时使用默认域",
+    ),
+    ("Whether to list all fonts available to the system", "是否列出系统可用的全部字体"),
+    ("Explain which fonts are used to render the supplied text string", "说明用哪些字体渲染给定的文本字符串"),
+    ("Explain which fonts are used to render the specified unicode code point sequence. Code points are comma separated hex values", "说明用哪些字体渲染指定的 Unicode 码点序列。码点为逗号分隔的十六进制值"),
+    ("Show rasterized glyphs for the text in --text or --codepoints using ascii blocks", "用 ASCII 字符块显示 --text 或 --codepoints 文本的光栅化字形"),
+    ("In lua mode, show only the named key table", "lua 模式下仅显示指定名称的键表"),
+    ("Show the keys as lua config statements", "以 lua 配置语句形式显示键位"),
+    (
+        "Start in the specified directory, instead of the default_cwd defined by your wezterm configuration",
+        "在指定目录中启动，而非使用配置中的 default_cwd",
+    ),
+    ("Start prog instead of the default_prog defined by your wezterm configuration", "启动指定程序，而非配置中的 default_prog"),
+    ("Specify the current working directory for the initially spawned program", "为初始启动的程序指定工作目录"),
+    ("The directory to specify. If omitted, will use the current directory of the process itself", "要指定的目录。省略时使用进程自身的当前目录"),
+    ("The hostname to use in the constructed file:// URL. If omitted, the system hostname will be used", "构造 file:// URL 时使用的主机名。省略时使用系统主机名"),
+    ("The name of the image file to be displayed. If omitted, will attempt to read it from stdin", "要显示的图片文件名。省略时尝试从标准输入读取"),
+    ("Wait for enter/escape/ctrl-c/ctrl-d to be pressed after displaying the image", "显示图片后等待按回车/Esc/Ctrl-C/Ctrl-D"),
+    (
+        "Do not move the cursor after displaying the image. Note that when used like this from the shell, there is a very high chance that shell prompt will overwrite the image; you may wish to also use `--hold` in that case",
+        "显示图片后不移动光标。注意：在 shell 中这样使用时，shell 提示符极可能覆盖图片；此时可考虑同时使用 `--hold`",
+    ),
+    (
+        "Set the cursor position prior to displaying the image. The default is to use the current cursor position. Coordinates are expressed in cells with 0,0 being the top left cell position",
+        "显示图片前设置光标位置。默认使用当前光标位置。坐标以单元格表示，(0,0) 为左上角",
+    ),
+    ("Do not respect the aspect ratio.  The default is to respect the aspect ratio", "不保持宽高比。默认保持宽高比"),
+    (
+        "Set the maximum number of pixels per image frame. Images will be scaled down so that they do not exceed this size, unless `--no-resample` is also used. The default value matches the limit set by wezterm. Note that resampling the image here will reduce any animated images to a single frame",
+        "设置每个图片帧的最大像素数。除非同时使用 `--no-resample`，超过该尺寸的图片会被缩小。默认值与 wezterm 内置限制一致。注意：此处重采样会把动图降为单帧",
+    ),
+    (
+        "Do not resample images whose frames are larger than the max-pixels value. Note that this will typically result in the image refusing to display in wezterm",
+        "不重采样超过 max-pixels 的图片帧。注意这通常会导致图片拒绝在 wezterm 中显示",
+    ),
+    ("Save asciicast to the specified file, instead of using a random file name in the temp directory", "将 asciicast 保存到指定文件，而非临时目录中的随机文件名"),
+    ("Don't replay, just show the explanation", "不回放，仅显示说明"),
+    ("Just emit raw escape sequences all at once, with no timing information", "一次性输出原始转义序列，不带时间信息"),
+    ("Explain what is being sent/received", "说明发送/接收的内容"),
+    # cli 子命令参数
+    ("Controls the output format. \"table\" and \"json\" are possible formats", "控制输出格式。可用 \"table\" 与 \"json\""),
+    ("Create tab in a new window, rather than the window currently containing the pane", "在新窗口中创建标签页，而非窗格当前所在的窗口"),
+    ("When spawning into an existing GUI instance, spawn a new tab into the active window rather than spawn a new window", "注入既有 GUI 实例时，在活动窗口中新建标签页而非新窗口"),
+    (
+        "Specify the current pane. The default is to use the current pane based on the environment variable WEZTERM_PANE",
+        "指定当前窗格。默认依据环境变量 WEZTERM_PANE 确定当前窗格",
+    ),
+    (
+        "Specify the current pane. The default is to use the current pane based on the environment variable WEZTERM_PANE.",
+        "指定当前窗格。默认依据环境变量 WEZTERM_PANE 确定当前窗格。",
+    ),
+    (
+        "Specify the current pane. The default is to use the current pane based on the environment variable WEZTERM_PANE. The pane is used to determine the current domain and window",
+        "指定当前窗格。默认依据环境变量 WEZTERM_PANE 确定当前窗格。该窗格用于确定当前域与窗口",
+    ),
+    (
+        "Specify the target pane. The default is to use the current pane based on the environment variable WEZTERM_PANE",
+        "指定目标窗格。默认依据环境变量 WEZTERM_PANE 确定当前窗格",
+    ),
+    (
+        "Specify the pane that should be split. The default is to use the current pane based on the environment variable WEZTERM_PANE",
+        "指定要拆分的窗格。默认依据环境变量 WEZTERM_PANE 确定当前窗格",
+    ),
+    (
+        "Specify the pane that should be moved. The default is to use the current pane based on the environment variable WEZTERM_PANE",
+        "指定要移动的窗格。默认依据环境变量 WEZTERM_PANE 确定当前窗格",
+    ),
+    ("Outputs the pane-id for the newly created pane on success", "成功时输出新建窗格的 pane-id"),
+    ("Split vertically, with the new pane on the top", "垂直拆分，新窗格在上方"),
+    ("Split vertically, with the new pane on the bottom", "垂直拆分，新窗格在下方"),
+    ("Split horizontally, with the new pane on the left", "水平拆分，新窗格在左侧"),
+    ("Split horizontally, with the new pane on the right", "水平拆分，新窗格在右侧"),
+    ("Equivalent to `--right`. If neither this nor any other direction is specified, the default is equivalent to `--bottom`", "等价于 `--right`。若未指定任何方向，默认等价于 `--bottom`"),
+    ("Rather than splitting the active pane, split the entire window", "拆分整个窗口而非仅活动窗格"),
+    ("Instead of spawning a new command, move the specified pane into the newly created split", "不启动新命令，而是把指定窗格移入新创建的拆分"),
+    ("Specify the number of cells that the new split should have, expressed as a percentage of the available space", "以可用空间的百分比指定新拆分的单元格数"),
+    ("The number of cells that the new split should have. If omitted, 50% of the available space is used", "新拆分应有的单元格数。省略时使用可用空间的 50%"),
+    ("You may also use an integer value `N` to specify the number of cells, or `Npx` to specify the number of pixels, or `N%` to size relative to the terminal width", "也可用整数 `N` 指定单元格数、`Npx` 指定像素数、或 `N%` 按终端宽度比例设置"),
+    ("You may also use an integer value `N` to specify the number of cells, or `Npx` to specify the number of pixels, or `N%` to size relative to the terminal height", "也可用整数 `N` 指定单元格数、`Npx` 指定像素数、或 `N%` 按终端高度比例设置"),
+    ("Spawn into a new window, rather than a new tab", "在新窗口而非新标签页中启动"),
+    (
+        "If creating a new window, override the default workspace name with the provided name.  The default name is \"default\"",
+        "创建新窗口时用给定名称覆盖默认工作区名。默认名为 \"default\"",
+    ),
+    (
+        "When creating a new window, override the default workspace name with the provided name.  The default name is \"default\". Requires `--new-window`",
+        "创建新窗口时用给定名称覆盖默认工作区名。默认名为 \"default\"。需要 `--new-window`",
+    ),
+    (
+        "Specify the window into which the new tab will be created. If omitted, the window associated with the current pane is used",
+        "指定在新标签页创建到哪个窗口。省略时使用当前窗格所属窗口",
+    ),
+    (
+        "Specify the window into which to spawn a tab. If omitted, the window associated with the current pane is used. Cannot be used with `--workspace` or `--new-window`",
+        "指定标签页启动到哪个窗口。省略时使用当前窗格所属窗口。不能与 `--workspace` 或 `--new-window` 同用",
+    ),
+    ("Specify the target window by its id", "按 id 指定目标窗口"),
+    (
+        "Specify the target tab by its index within the window that holds the current pane. Indices are 0-based, with 0 being the left-most tab. Negative numbers can be used to reference the right-most tab, so -1 is the right-most tab, -2 is the penultimate tab and so on",
+        "按当前窗格所在窗口内的索引指定目标标签页。索引从 0 开始，0 为最左侧标签页。可用负数从右侧引用：-1 为最右，-2 为倒数第二，依此类推",
+    ),
+    (
+        "Specify the target tab by its relative offset. -1 selects the tab to the left. -2 two tabs to the left. 1 is one tab to the right and so on.",
+        "按相对偏移指定目标标签页。-1 为左侧相邻，-2 为左移两个，1 为右侧相邻，依此类推。",
+    ),
+    ("The new title for the tab", "标签页的新标题"),
+    ("The new title for the window", "窗口的新标题"),
+    ("The pane is used to figure out which tab should be renamed.", "依据该窗格确定要重命名的标签页。"),
+    ("The pane is used to figure out which window should be renamed.", "依据该窗格确定要重命名的窗口。"),
+    ("The pane is used to figure out which window contains appropriate tabs", "依据该窗格确定包含相关标签页的窗口"),
+    ("The pane is used to figure out which workspace should be renamed.", "依据该窗格确定要重命名的工作区。"),
+    ("The new name for the workspace", "工作区的新名称"),
+    ("Specify the workspace to rename", "指定要重命名的工作区"),
+    ("Send the text directly, rather than as a bracketed paste", "直接发送文本，而非按括号粘贴发送"),
+    ("The starting line number. 0 is the first line of terminal screen. Negative numbers proceed backwards into the scrollback. The default value is unspecified is 0, the first line of the terminal screen", "起始行号。0 为终端屏幕第一行，负数向回滚缓冲回溯。未指定时默认为 0（终端屏幕第一行）"),
+    ("The ending line number. 0 is the first line of terminal screen. Negative numbers proceed backwards into the scrollback. The default value if unspecified is the bottom of the the terminal screen", "结束行号。0 为终端屏幕第一行，负数向回滚缓冲回溯。未指定时默认为终端屏幕底部"),
+    ("Include escape sequences that color and style the text. If omitted, unattributed text will be returned", "包含着色与样式转义序列。省略时返回不带属性的文字"),
+    ("The direction to consider", "要考虑的方向"),
+    ("Specify the number of cells to resize by, defaults to 1", "指定调整的单元格数，默认为 1"),
+    ("Prints the pane id in that direction, or nothing if there is no pane in that direction.", "打印该方向上的窗格 id；该方向没有窗格则不输出。"),
+    ("Toggles the zoom state of the pane", "切换窗格的缩放状态"),
+    ("Zooms the pane", "缩放窗格"),
+    ("Unzooms the pane if it was zoomed", "若窗格处于缩放状态则取消缩放"),
+    ("Unless `--no-wrap` is specified, relative moves wrap around from the left-most to right-most and vice versa.", "除非指定 `--no-wrap`，相对移动会在最左与最右之间循环。"),
+    ("When used with tab-relative, prevents wrapping around and will instead clamp to the left-most when moving left or right-most when moving right", "与 tab-relative 同用时禁止循环，向左移动钳制到最左、向右移动钳制到最右"),
+    ("Don't automatically start the server", "不自动启动服务端"),
+    ("How to manage passing the escape through to tmux", "如何把转义序列透传给 tmux"),
+    ("Which shell to generate for", "要为哪个 shell 生成"),
+    # ---- CLI 帮助补遗 ----
+    ("Override the position for the initial window launched by this process.", "覆盖本进程启动的首个窗口的位置。"),
+    (
+        "Note that Wayland does not allow applications to control window positioning.",
+        "注意 Wayland 不允许应用程序控制窗口位置。",
+    ),
+    ("Specify the target tab by its id", "按 id 指定目标标签页"),
+    ("Zooms the pane if it wasn't already zoomed", "若窗格未处于缩放状态则缩放之"),
+    ("Resizing animated images will reduce the image to a single frame.", "调整动图尺寸会将其降为单帧。"),
+    (
+        "Specify the filtering technique used when resizing/resampling images.  The default is a reasonable middle ground of speed and quality.",
+        "指定缩放/重采样图片时使用的过滤算法。默认在速度与质量之间取折中。",
+    ),
+    (
+        "The `--resample-filter` and `--resample-format` options give some control over the quality of the resizing operation and the image format used.",
+        "`--resample-filter` 与 `--resample-format` 选项可对缩放质量与输出图片格式做一定控制。",
+    ),
+    ("Output a PEM file encoded copy of the credentials.", "输出 PEM 编码的凭据副本。"),
+    (
+        "They will be valid for the lifetime of the mux server process.",
+        "凭据在 mux 服务端进程生命周期内有效。",
+    ),
+    (
+        "Take care with them, as anyone with them will be able to connect directly to your mux server via the network and start a shell with no additional authentication.",
+        "请妥善保管：持有凭据者可经网络直连你的 mux 服务端并启动 shell，无需其它认证。",
+    ),
+    (
+        "Instead of executing your shell, run PROG. For example: `wezterm cli split-pane -- bash -l` will spawn bash as if it were a login shell",
+        "不执行你的 shell，而是运行 PROG。例如：`wezterm cli split-pane -- bash -l` 会以登录 shell 的方式启动 bash",
+    ),
+    (
+        "Instead of executing your shell, run PROG. For example: `wezterm cli spawn -- bash -l` will spawn bash as if it were a login shell",
+        "不执行你的 shell，而是运行 PROG。例如：`wezterm cli spawn -- bash -l` 会以登录 shell 的方式启动 bash",
+    ),
+    (
+        "split the current pane.\nOutputs the pane-id for the newly created pane on success",
+        "拆分当前窗格。\n成功时输出新建窗格的 pane-id",
+    ),
+    (
+        "Pre-process the image to resize it to the specified dimensions, expressed as eg: 800x600 (width x height). The resize is independent of other parameters that control the image placement and dimensions in the terminal; this is provided as a convenience preprocessing step.",
+        "预处理图片，缩放到指定尺寸，例如 800x600（宽x高）。该缩放与控制图片在终端中位置和尺寸的其它参数相互独立，仅作为便捷的预处理步骤提供。",
+    ),
+    (
+        "Specify the image format to use to encode resampled/resized images.  The default is to match the input format, but you can choose an alternative format",
+        "指定重采样/缩放后图片的编码格式。默认与输入格式一致，也可选择其它格式",
+    ),
+    (
+        "When resampling or resizing, display some diagnostics around the timing/performance of that operation",
+        "重采样或缩放时显示该操作耗时/性能的诊断信息",
+    ),
+    (
+        "See <https://docs.rs/image/latest/image/imageops/enum.FilterType.html#examples> for examples of the different techniques and their tradeoffs.",
+        "各算法的效果与取舍示例见 <https://docs.rs/image/latest/image/imageops/enum.FilterType.html#examples>。",
+    ),
+    (
+        "Instead of executing your shell, run PROG. For example: `wezterm start -- bash -l` will spawn bash as if it were a login shell. [aliases: -e]",
+        "不执行你的 shell，而是运行 PROG。例如：`wezterm start -- bash -l` 会以登录 shell 的方式启动 bash。[别名: -e]",
+    ),
+    (
+        "Override specific SSH configuration options. `wezterm ssh` is able to parse some (but not all!) options from your `~/.ssh/config` and `/etc/ssh/ssh_config` files. This command line switch allows you to override or otherwise specify ssh_config style options.\n\nFor example:\n\n`wezterm ssh -oIdentityFile=/secret/id_ed25519 some-host`",
+        "覆盖指定的 SSH 配置项。`wezterm ssh` 能解析 `~/.ssh/config` 与 `/etc/ssh/ssh_config` 中的部分（不是全部！）选项，此开关允许你覆盖或补充 ssh_config 风格的选项。\n\n例如：\n\n`wezterm ssh -oIdentityFile=/secret/id_ed25519 some-host`",
+    ),
+    (
+        "Override the position for the initial window launched by this process.\n\n--position 10,20          to set x=10, y=20 in screen coordinates\n--position screen:10,20   to set x=10, y=20 in screen coordinates\n--position main:10,20     to set x=10, y=20 relative to the main monitor\n--position active:10,20   to set x=10, y=20 relative to the active monitor\n--position HDMI-1:10,20   to set x=10, y=20 relative to the monitor named HDMI-1\n\nNote that Wayland does not allow applications to control window positioning.",
+        "覆盖本进程启动的首个窗口的位置。\n\n--position 10,20          屏幕坐标 x=10, y=20\n--position screen:10,20   屏幕坐标 x=10, y=20\n--position main:10,20     相对主显示器的 x=10, y=20\n--position active:10,20   相对当前活动显示器的 x=10, y=20\n--position HDMI-1:10,20   相对名为 HDMI-1 的显示器的 x=10, y=20\n\n注意 Wayland 不允许应用程序控制窗口位置。",
+    ),
     # ---- settings overlay (fork) ----
     ("Settings", "设置"),
     ("Language", "语言"),
@@ -431,7 +726,7 @@ PAIRS = [
 
 
 def esc(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    return (s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n"))
 
 
 def main() -> None:

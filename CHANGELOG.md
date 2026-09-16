@@ -12,6 +12,17 @@
 
 ### Added
 
+- CLI 帮助全面 zh-CN 汉化（wezterm 与 wezterm-gui 两二进制的全部子命令
+  树）：clap derive 的帮助文本来自 doc 注释，采取**运行时本地化**——
+  parse 前经 `wezterm-gui-subcommands::localize_clap` 遍历命令树
+  （先 `build()` 以覆盖自动生成的 help 子命令与 `--help/--version`
+  参数），about/long_about/参数 help 全量过译表（新增 `tr_str`/
+  `init_cli_early`：WEZTERM_LANG > gui-settings.json 的 language 键
+  （免执行 Lua 的 JSON 探针）> zh-CN 默认）；`WEZTERM_LANG=en` 整体
+  回退英文。shell 补全生成钉死英文保持派生文件字节稳定
+  （`generated-check` 无环境依赖，补全零 diff）。遍历校验器
+  （`.ui-evidence/cli_walk.py` 一次性工具）确认两二进制全部帮助
+  缺译键为 0。
 - herdr 式主菜单与 ☰ 按钮：tab 栏右端新增 `☰` 主菜单按钮（fancy 与
   retro 两套 tab bar 均渲染，`show_menu_button_in_tab_bar` 默认开），
   左键/右键点击在按钮下方弹出主菜单——命令面板 / 快捷键 / 设置 /

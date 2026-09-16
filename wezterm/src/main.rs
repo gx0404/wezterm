@@ -735,7 +735,16 @@ fn run() -> anyhow::Result<()> {
 
     let saver = UmaskSaver::new();
 
-    let opts = Opt::parse();
+    // fork: resolve the interface language (WEZTERM_LANG > gui-settings
+    // > zh-CN default) and localize the clap help texts before parsing
+    // so `--help` output is translated
+    config::i18n::init_cli_early();
+    let opts = {
+        use clap::{CommandFactory, FromArgMatches};
+        let mut cmd = Opt::command();
+        wezterm_gui_subcommands::localize_clap(&mut cmd);
+        Opt::from_arg_matches(&cmd.get_matches()).unwrap_or_else(|e| e.exit())
+    };
 
     match opts
         .cmd
@@ -757,9 +766,15 @@ fn run() -> anyhow::Result<()> {
         SubCommand::Replay(cmd) => cmd.run(),
         SubCommand::ShellCompletion { shell } => {
             use clap::CommandFactory;
+            // fork: pin completions to English so the committed derived
+            // files stay byte-stable regardless of WEZTERM_LANG /
+            // gui-settings language (runtime --help stays localized)
+            let prior = config::i18n::lang();
+            config::i18n::set_lang(config::i18n::UiLanguage::En);
             let mut cmd = Opt::command();
             let name = cmd.get_name().to_string();
             generate_completion(shell, &mut cmd, name, &mut std::io::stdout());
+            config::i18n::set_lang(prior);
             Ok(())
         }
     }
