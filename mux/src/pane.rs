@@ -299,13 +299,18 @@ pub trait Pane: Downcast + Send + Sync {
     /// in the result can be used as the start of the next region to search.
     /// You can tell that you have reached the end of the results if the number
     /// of results is smaller than the limit you set.
+    ///
+    /// The default implementation scans the lines returned by
+    /// [`Pane::get_lines`]. It matches per physical row and is not
+    /// wrap-aware across soft-wrapped lines; panes with a richer view
+    /// of the terminal (eg: [`crate::LocalPane`]) override it.
     async fn search(
         &self,
-        _pattern: Pattern,
-        _range: Range<StableRowIndex>,
-        _limit: Option<u32>,
+        pattern: Pattern,
+        range: Range<StableRowIndex>,
+        limit: Option<u32>,
     ) -> anyhow::Result<Vec<SearchResult>> {
-        Ok(vec![])
+        default_search_via_get_lines(self, pattern, range, limit).await
     }
 
     /// Retrieve the set of semantic zones
@@ -547,6 +552,139 @@ pub fn impl_get_lines_via_with_lines<P: Pane + ?Sized>(
 
     pane.with_lines_mut(lines, &mut collector);
     (collector.first, collector.lines)
+}
+
+/// Byte-offset -> cell-index coordinate map for a single physical row,
+/// mirroring the shape of the logical-line version in
+/// `LocalPane::search`
+fn row_line_coords(line: &Line) -> Vec<(usize, usize)> {
+    let mut coords = vec![];
+    let mut byte_idx = 0;
+    for cell in line.visible_cells() {
+        coords.push((byte_idx, cell.cell_index()));
+        byte_idx += cell.str().len();
+    }
+    coords
+}
+
+fn coord_for_byte(idx: usize, coords: &[(usize, usize)]) -> usize {
+    match coords.binary_search_by(|(b, _)| b.cmp(&idx)) {
+        Ok(i) => coords[i].1,
+        Err(i) => coords
+            .get(i)
+            .map(|(_, c)| *c)
+            .unwrap_or_else(|| coords.last().map(|(_, c)| c + 1).unwrap_or(0)),
+    }
+}
+
+/// Fallback [`Pane::search`] implementation that works purely through
+/// [`Pane::get_lines`], so pane types that merely mirror lines (eg: the
+/// tmux domain) get a working copy-mode search instead of a silent
+/// empty result. Matching is per physical row.
+async fn default_search_via_get_lines<P: Pane + ?Sized>(
+    pane: &P,
+    pattern: Pattern,
+    range: Range<StableRowIndex>,
+    limit: Option<u32>,
+) -> anyhow::Result<Vec<SearchResult>> {
+    enum CompiledPattern {
+        CaseSensitiveString(String),
+        CaseInSensitiveString(String),
+        Regex(fancy_regex::Regex),
+    }
+
+    let pattern = match pattern {
+        Pattern::CaseSensitiveString(s) => CompiledPattern::CaseSensitiveString(s),
+        Pattern::CaseInSensitiveString(s) => {
+            // normalize the case so we match everything lowercase
+            CompiledPattern::CaseInSensitiveString(s.to_lowercase())
+        }
+        Pattern::CaseSmartString(s) => {
+            if s.chars().any(|c| c.is_uppercase()) {
+                CompiledPattern::CaseSensitiveString(s)
+            } else {
+                CompiledPattern::CaseInSensitiveString(s.to_lowercase())
+            }
+        }
+        Pattern::Regex(r) => CompiledPattern::Regex(fancy_regex::Regex::new(&r)?),
+    };
+
+    let mut results = vec![];
+    let mut match_ids: HashMap<String, usize> = HashMap::new();
+
+    let (top, lines) = pane.get_lines(range);
+    for (idx, line) in lines.iter().enumerate() {
+        if let Some(limit) = limit {
+            if results.len() == limit as usize {
+                break;
+            }
+        }
+        let y = top + idx as StableRowIndex;
+        let haystack = match &pattern {
+            CompiledPattern::CaseInSensitiveString(_) => {
+                // normalize the case so we match everything lowercase
+                std::borrow::Cow::Owned(line.as_str().to_lowercase())
+            }
+            _ => line.as_str(),
+        };
+        if haystack.is_empty() {
+            continue;
+        }
+
+        let mut coords: Option<Vec<(usize, usize)>> = None;
+        let mut push_result = |text: &str, byte_idx: usize| {
+            let coords = coords.get_or_insert_with(|| row_line_coords(line));
+            let id = match match_ids.get(text).copied() {
+                Some(id) => id,
+                None => {
+                    let id = match_ids.len();
+                    match_ids.insert(text.to_owned(), id);
+                    id
+                }
+            };
+            let start_x = coord_for_byte(byte_idx, coords);
+            let end_x = coord_for_byte(byte_idx + text.len(), coords);
+            results.push(SearchResult {
+                start_x,
+                start_y: y,
+                end_x,
+                end_y: y,
+                match_id: id,
+            });
+        };
+
+        match &pattern {
+            CompiledPattern::CaseInSensitiveString(s) | CompiledPattern::CaseSensitiveString(s) => {
+                for (byte_idx, text) in haystack.match_indices(s) {
+                    push_result(text, byte_idx);
+                }
+            }
+            CompiledPattern::Regex(re) => {
+                // Allow for the regex to contain captures
+                for capture_res in re.captures_iter(&haystack) {
+                    match capture_res {
+                        Ok(c) => {
+                            for cap_idx in (0..c.len()).rev() {
+                                if let Some(m) = c.get(cap_idx) {
+                                    push_result(m.as_str(), m.start());
+                                    break;
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            // fancy_regex doesn't advance the iterator on
+                            // errors such as hitting the backtracking limit;
+                            // stop scanning this row rather than spin
+                            log::warn!("line {y} search error: {err}");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 #[cfg(test)]
@@ -1091,5 +1229,74 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[test]
+    fn default_search_finds_matches_with_coords_and_limit() {
+        let attr = Default::default();
+        let pane = FakePane {
+            lines: Mutex::new(vec![
+                Line::from_text("hello world", &attr, SEQ_ZERO, None),
+                Line::from_text("second hello", &attr, SEQ_ZERO, None),
+                Line::from_text("", &attr, SEQ_ZERO, None),
+            ]),
+        };
+        let results =
+            smol::block_on(pane.search(Pattern::CaseSmartString("hello".to_string()), 0..3, None))
+                .unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!((results[0].start_x, results[0].start_y), (0, 0));
+        assert_eq!((results[0].end_x, results[0].end_y), (5, 0));
+        assert_eq!((results[1].start_x, results[1].start_y), (7, 1));
+        // Identical match text shares a match_id, mirroring LocalPane
+        assert_eq!(results[0].match_id, results[1].match_id);
+
+        let limited = smol::block_on(pane.search(
+            Pattern::CaseSmartString("hello".to_string()),
+            0..3,
+            Some(1),
+        ))
+        .unwrap();
+        assert_eq!(limited.len(), 1);
+
+        // No match yields an empty result rather than an error
+        assert!(smol::block_on(pane.search(
+            Pattern::CaseSmartString("nope".to_string()),
+            0..3,
+            None
+        ))
+        .unwrap()
+        .is_empty());
+    }
+
+    #[test]
+    fn default_search_smart_case() {
+        let attr = Default::default();
+        let pane = FakePane {
+            lines: Mutex::new(vec![
+                Line::from_text("Hello world", &attr, SEQ_ZERO, None),
+                Line::from_text("hello again", &attr, SEQ_ZERO, None),
+            ]),
+        };
+        // Lowercase pattern matches case-insensitively
+        assert_eq!(
+            smol::block_on(pane.search(Pattern::CaseSmartString("hello".to_string()), 0..2, None))
+                .unwrap()
+                .len(),
+            2
+        );
+        // Mixed-case pattern is case-sensitive
+        assert_eq!(
+            smol::block_on(pane.search(Pattern::CaseSmartString("Hello".to_string()), 0..2, None))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            smol::block_on(pane.search(Pattern::CaseSmartString("HELLO".to_string()), 0..2, None))
+                .unwrap()
+                .len(),
+            0
+        );
     }
 }
