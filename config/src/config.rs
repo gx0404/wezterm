@@ -731,6 +731,15 @@ pub struct Config {
     #[dynamic(default)]
     pub notification_handling: NotificationHandling,
 
+    /// Controls when the bell (BEL) triggers its side effects (the
+    /// audible beep and the visual bell flash). Uses the same policy
+    /// values as `notification_handling`; suppression is evaluated
+    /// against the window/tab/pane that currently has focus, and the
+    /// `bell` window event is emitted regardless of this setting.
+    /// Defaults to `AlwaysShow`.
+    #[dynamic(default)]
+    pub bell_notification_handling: NotificationHandling,
+
     #[dynamic(default = "default_true")]
     pub use_dead_keys: bool,
 

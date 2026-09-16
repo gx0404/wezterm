@@ -1242,18 +1242,22 @@ impl TermWindow {
                         return Ok(());
                     }
 
-                    match self.config.audible_bell {
-                        AudibleBell::SystemBeep => {
-                            Connection::get().expect("on main thread").beep();
+                    let suppressed = self.bell_suppressed(pane_id);
+                    if !suppressed {
+                        match self.config.audible_bell {
+                            AudibleBell::SystemBeep => {
+                                Connection::get().expect("on main thread").beep();
+                            }
+                            AudibleBell::Disabled => {}
                         }
-                        AudibleBell::Disabled => {}
+                        let mut per_pane = self.pane_state(pane_id);
+                        per_pane.bell_start.replace(Instant::now());
                     }
 
                     log::trace!("Ding! (this is the bell) in pane {}", pane_id);
+                    // The bell event is emitted even when the side effects
+                    // are suppressed, so that Lua configs stay observable
                     self.emit_window_event("bell", Some(pane_id));
-
-                    let mut per_pane = self.pane_state(pane_id);
-                    per_pane.bell_start.replace(Instant::now());
                     window.invalidate();
                 }
                 MuxNotification::Alert {
@@ -1913,6 +1917,47 @@ impl TermWindow {
         };
 
         return window_id == self.mux_window_id;
+    }
+
+    /// Whether the audible/visual bell side effects should be
+    /// suppressed for `pane_id` under the configured
+    /// `bell_notification_handling` policy. The `bell` Lua event is
+    /// emitted regardless of this.
+    fn bell_suppressed(&self, pane_id: PaneId) -> bool {
+        use config::NotificationHandling as H;
+        let handling = self.config.bell_notification_handling;
+        match handling {
+            H::AlwaysShow => false,
+            H::NeverShow => true,
+            H::SuppressFromFocusedWindow
+            | H::SuppressFromFocusedTab
+            | H::SuppressFromFocusedPane => {
+                // Scope-based suppression only applies while the user
+                // is looking at our own window
+                if self.focused.is_none() {
+                    return false;
+                }
+                let mux = Mux::get();
+                let bell_tab_id = mux.resolve_pane_id(pane_id).map(|(_, _, tab_id)| tab_id);
+                let active_tab = mux.get_active_tab_for_window(self.mux_window_id);
+                let bell_in_focused_tab =
+                    match (bell_tab_id, active_tab.as_ref().map(|tab| tab.tab_id())) {
+                        (Some(bell), Some(active)) => bell == active,
+                        _ => false,
+                    };
+                let bell_in_focused_pane = bell_in_focused_tab
+                    && active_tab
+                        .and_then(|tab| tab.get_active_pane())
+                        .map(|pane| pane.pane_id())
+                        == Some(pane_id);
+                bell_side_effects_suppressed(
+                    handling,
+                    true,
+                    bell_in_focused_tab,
+                    bell_in_focused_pane,
+                )
+            }
+        }
     }
 
     fn emit_user_var_event(&mut self, pane_id: PaneId, name: String, value: String) {
@@ -3682,6 +3727,64 @@ impl Drop for TermWindow {
             if let Some(fe) = try_front_end() {
                 fe.forget_known_window(&window);
             }
+        }
+    }
+}
+
+/// Pure policy decision for bell side-effect suppression: whether the
+/// audible beep and visual bell should fire, given the configured
+/// handling mode and the relationship between the bell's pane and the
+/// window/tab/pane the user is currently looking at.
+fn bell_side_effects_suppressed(
+    handling: config::NotificationHandling,
+    window_focused: bool,
+    bell_in_focused_tab: bool,
+    bell_in_focused_pane: bool,
+) -> bool {
+    use config::NotificationHandling as H;
+    match handling {
+        H::AlwaysShow => false,
+        H::NeverShow => true,
+        H::SuppressFromFocusedWindow => window_focused,
+        H::SuppressFromFocusedTab => window_focused && bell_in_focused_tab,
+        H::SuppressFromFocusedPane => window_focused && bell_in_focused_pane,
+    }
+}
+
+#[cfg(test)]
+mod bell_suppression_tests {
+    use super::bell_side_effects_suppressed;
+    use config::NotificationHandling as H;
+
+    #[test]
+    fn bell_suppression_matrix() {
+        let cases = [
+            // (handling, window_focused, in_tab, in_pane, expected)
+            (H::AlwaysShow, true, true, true, false),
+            (H::AlwaysShow, false, false, false, false),
+            (H::NeverShow, true, true, true, true),
+            (H::NeverShow, false, false, false, true),
+            // Window-scoped: any bell in the focused window is suppressed
+            (H::SuppressFromFocusedWindow, true, false, false, true),
+            (H::SuppressFromFocusedWindow, false, false, false, false),
+            // Tab-scoped: suppressed only when the bell comes from the
+            // focused tab
+            (H::SuppressFromFocusedTab, true, true, false, true),
+            (H::SuppressFromFocusedTab, true, true, true, true),
+            (H::SuppressFromFocusedTab, true, false, false, false),
+            (H::SuppressFromFocusedTab, false, true, true, false),
+            // Pane-scoped: suppressed only from the focused pane itself
+            (H::SuppressFromFocusedPane, true, true, true, true),
+            (H::SuppressFromFocusedPane, true, true, false, false),
+            (H::SuppressFromFocusedPane, true, false, false, false),
+            (H::SuppressFromFocusedPane, false, true, true, false),
+        ];
+        for (handling, window_focused, in_tab, in_pane, expected) in cases {
+            assert_eq!(
+                bell_side_effects_suppressed(handling, window_focused, in_tab, in_pane),
+                expected,
+                "case {handling:?} focused={window_focused} in_tab={in_tab} in_pane={in_pane}"
+            );
         }
     }
 }
