@@ -55,8 +55,11 @@ kill -0 "${XVFB_PID}" 2>/dev/null || fail "Xvfb 启动即退出（显示号 ${DI
 MARKER="WEZTERM-UI-SMOKE-OK-1234567890-终端冒烟"
 mkdir -p "${EVIDENCE}"
 note "启动 wezterm-gui（证据目录 ${EVIDENCE#$ROOT/}）"
-"${GUI}" start --always-new-process --class wezterm-smoke \
-    --config 'font_size=14;warn_about_missing_glyphs=false' \
+# --config 是全局参数，必须放在 start 子命令之前（放在子命令后会被
+# clap 当作 PROG 参数拒绝）。-n 跳过用户配置：本机配置可能在无 WM 的
+# Xvfb 上无法渲染（壁纸/插件），冒烟需要确定性环境。
+"${GUI}" -n --config 'font_size=14;warn_about_missing_glyphs=false' \
+    start --always-new-process --class wezterm-smoke \
     -- /bin/sh -c "printf '%s\n\n%s\n' '${MARKER}' '${MARKER}'; sleep 600" &
 GUI_PID=$!
 
