@@ -118,7 +118,27 @@ impl crate::TermWindow {
             let is_bottom = self.config.tab_bar_at_bottom;
 
             match item.item {
-                TabBarItem::RightStatus | TabBarItem::LeftStatus | TabBarItem::None => element
+                // Preserve the per-item identity in the hit map so that
+                // region-scoped mouse bindings can target the status
+                // areas independently from the rest of the tab bar.
+                TabBarItem::RightStatus | TabBarItem::LeftStatus => element
+                    .item_type(UIItemType::TabBar(item.item.clone()))
+                    .line_height(Some(1.75))
+                    .margin(BoxDimension {
+                        left: Dimension::Cells(0.),
+                        right: Dimension::Cells(0.),
+                        top: Dimension::Cells(0.0),
+                        bottom: Dimension::Cells(0.),
+                    })
+                    .padding(BoxDimension {
+                        left: Dimension::Cells(0.5),
+                        right: Dimension::Cells(0.),
+                        top: Dimension::Cells(0.),
+                        bottom: Dimension::Cells(0.),
+                    })
+                    .border(BoxDimension::new(Dimension::Pixels(0.)))
+                    .colors(bar_colors.clone()),
+                TabBarItem::None => element
                     .item_type(UIItemType::TabBar(TabBarItem::None))
                     .line_height(Some(1.75))
                     .margin(BoxDimension {
