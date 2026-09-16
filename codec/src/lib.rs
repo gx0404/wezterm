@@ -1,3 +1,7 @@
+// fork(zh): mux 客户端/服务端帧协议：leb128 长度（高位=压缩标记）+
+// leb128 serial（单调，用于丢弃过期响应）+ ident + bincode payload。
+// `Pdu` 枚举由宏生成，是跨进程兼容契约；新增/变更变体需考虑新旧版本
+// 共存（GetCodecVersion/Ping 通道），见 docs/AGENT_RULES/mux-domain.md。
 //! encode and decode the frames for the mux protocol.
 //! The frames include the length of a PDU as well as an identifier
 //! that informs us how to decode it.  The length, ident and serial

@@ -1,3 +1,8 @@
+// fork(zh): 终端仿真的组合入口。`Terminal` = `TerminalState`（模型）+ escape
+// `Parser`（解析），Deref 到状态。字节进入模型的唯一常规入口是
+// `advance_bytes`（先递增 seqno 再经 Performer 应用 Action）；
+// `perform_actions` 用于重放。生命周期与线程模型见
+// docs/AGENT_RULES/terminal-model.md。
 use super::*;
 use crate::terminalstate::performer::Performer;
 use std::sync::Arc;

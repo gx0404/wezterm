@@ -1,0 +1,21 @@
+{
+  "hooks": {
+    "enabled": true,
+    "timeoutMs": 30000,
+    "maxOutputBytes": 32768,
+    "events": {
+      "PreToolUse": [
+        {
+          "matcher": "Bash|Edit|Write",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/block_dangerous.sh\"",
+              "timeoutMs": 30000
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

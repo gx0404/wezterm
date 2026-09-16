@@ -1,0 +1,1081 @@
+{
+  "chunks": [
+    {
+      "anchor": "fork 治理",
+      "id": "AGENTS.md#fork 治理",
+      "source": "AGENTS.md",
+      "text": "## fork 治理\n\n- 本仓库是 `gx0404/wezterm` fork（upstream `wezterm/wezterm`，日常活跃）。\n  同步上游用普通 merge/rebase 产生的新提交；**永不 force push、永不推送\n  upstream**（hooks 与本节双保险）。\n- 控制上游同步冲突面：除 `.gitignore`、`Makefile`、`docs/mkdocs-base.yml`\n  三处带标记的追加段外，框架文件一律是上游不存在的新路径；上游文件的语义\n  改动只在随上游同步时产生，不主动重排/重注释上游正文（见 code-comments.md）。\n- 上游 issue/PR 由人类操作；agent 不代为提交。发布链（ci/tag.sh、\n  ci/create-release.sh、ci/deploy.sh）只在上游仓库运行，本 fork 不复建。\n- fork 层面的可观察变更记录在根 `CHANGELOG.md`；上游产品变更在\n  `docs/changelog.md`（随上游同步产生，不手写）。"
+    },
+    {
+      "anchor": "wezterm（gx0404 fork）",
+      "id": "AGENTS.md#wezterm（gx0404 fork）",
+      "source": "AGENTS.md",
+      "text": "# wezterm（gx0404 fork）\n\nWez's Terminal Emulator 的 fork：GPU 加速、Lua 配置、内建 mux 的跨平台终端模拟器。\n\n本文件是跨工具启动协议（≤16 KiB）。领域规则正文在 `docs/AGENT_RULES/*.md`，\n由路由器按路径解析；本文件的索引仅为导航，实际必读集合以路由器输出为准。"
+    },
+    {
+      "anchor": "完成门",
+      "id": "AGENTS.md#完成门",
+      "source": "AGENTS.md",
+      "text": "## 完成门\n\n1. `python3 scripts/resolve_agent_rules.py --check` 通过（scope 扩大后重跑）。\n2. `make framework-ready` 通过；改动命令配置后 `make ai-doctor` 无缺项。\n3. 格式与静态检查：`make lint`（或说明 nightly 缺失并给出补装命令）；涉及\n   类型改动跑 `make check`。\n4. 最小针对性测试：`cargo nextest run -p <受影响 crate>`；动了 ssh e2e 相关\n   跑 `make test-integration`；全量 `make ci-check` 在合并前跑。\n5. 触到生成物（补全/键表/文档索引/图谱/KB/scheme_data）必须重建并审 diff，\n   或说明为何无影响。\n6. GUI 可见行为变更：`make ui-smoke` 截图并**读回图片**核对，证据留在\n   `.ui-evidence/`（ignored）。\n7. `git diff --check` 干净；交付说明列出：改动、真源、实际通过的检查、\n   未运行项（PENDING）与理由。"
+    },
+    {
+      "anchor": "常用命令",
+      "id": "AGENTS.md#常用命令",
+      "source": "AGENTS.md",
+      "text": "## 常用命令\n\n| 命令 | 用途 |\n|---|---|\n| `make check` / `make build` | 快速类型检查 / 构建四个发布二进制 |\n| `make test` | cargo nextest 全量（含 escape-parser no_std 轮） |\n| `cargo nextest run -p <crate>` | 定向测试（日常迭代首选） |\n| `make fmt` / `make lint` | nightly rustfmt 格式化 / --check |\n| `make setup` / `make ai-doctor` | 安装项目钉版工具 / 只读诊断 |\n| `make framework-check` / `make framework-ready` | 规则闭集守门 / 配置完整门 |\n| `make ci-check` | resolver+版本+lint+typecheck+test 聚合门 |\n| `make generated-check` | 派生文件（补全/键表/文档索引）只读校验 |\n| `make ui-smoke` / `make evidence TASK=x` | Xvfb 截图冒烟 / 分配证据目录 |\n| `make graph` / `make graph-check` / `make kb` / `make kb-check` | 图谱与知识库 |\n| `make framework-test` | 框架脚本自身 unittest |\n\n全表与前置/副作用见 `docs/MAKE_COMMANDS.md`。"
+    },
+    {
+      "anchor": "提交规范",
+      "id": "AGENTS.md#提交规范",
+      "source": "AGENTS.md",
+      "text": "## 提交规范\n\nconventional commit 格式：小写英文 type 前缀（可带 scope），冒号后的描述用\n中文；无 emoji，无 AI co-author 行：\n\n```text\nfix(term): 修复 DECSTBC 边界行的清除范围\n```\n\n只精确暂存本轮相关文件（不 `git add -A`/`-f`）；不 push 除非被明确要求；\npush 目标只允许 origin。提交前提出 commit message 并对齐。"
+    },
+    {
+      "anchor": "规则加载协议",
+      "id": "AGENTS.md#规则加载协议",
+      "source": "AGENTS.md",
+      "text": "## 规则加载协议\n\n任务开始时对本轮全部触及路径运行 resolver（目录自动展开为 Git 可见文件，多路径\n取并集；scope 扩大后必须用完整集合重跑）：\n\n```bash\npython3 scripts/resolve_agent_rules.py <paths...>\npython3 scripts/resolve_agent_rules.py --task review <paths...>  # 审核任务\npython3 scripts/resolve_agent_rules.py --check                   # 闭集/体积守门\n```\n\n读完输出列出的每份文档再动手。未知路径/任务、路由缺失以退出码 2 失败是有意\n设计。禁止在子目录新增 AGENTS.md；禁止把领域规则正文复制进工具私有目录。"
+    },
+    {
+      "anchor": "语言与协作",
+      "id": "AGENTS.md#语言与协作",
+      "source": "AGENTS.md",
+      "text": "## 语言与协作\n\n- 与人类用其使用的语言交流；代码、标识符保持英文；commit message 的描述用\n  中文（`type(scope): 中文描述`，type 前缀保持英文 conventional 格式）。\n- 规则真源唯一：领域规则只维护在 `docs/AGENT_RULES/`；工具适配层与 reviewer\n  只引用 resolver，不复制清单。\n- 先读代码再下结论；长期引用写 `模块路径::符号`，不钉行号。\n- 完成前对照「完成门」自检；不确定就报告，不猜测。"
+    },
+    {
+      "anchor": "跨域硬边界",
+      "id": "AGENTS.md#跨域硬边界",
+      "source": "AGENTS.md",
+      "text": "## 跨域硬边界\n\n各条详情见括号内领域文档：\n\n- **行号类型纪律**：`PhysRowIndex/VisibleRowIndex/ScrollbackOrVisibleRowIndex/StableRowIndex`\n  刻意不同宽不同号，禁止随手转换；scrollback 物理行只归 `Screen` 所有\n  （terminal-model.md）。\n- **escape 分层**：`vtparse` 只做状态机分类、`wezterm-escape-parser` 赋语义、\n  `term` 应用到模型，三层不得越层引用；escape-parser 保持 no_std 可构建，\n  `Action` 枚举有 size_of 断言（escape-parsing 归 terminal-model.md 统述）。\n- **mux 单例与生命周期**：pane 输出只在 parse 线程→`perform_actions`→\n  `notify_from_any_thread` 链路上推进；pty EOF 清理由 `exit_behavior` 决定且\n  必须回主线程执行；`MuxNotification::Empty` 驱动 GUI 退出\n  （mux-domain.md）。\n- **Lua 线程与重载**：Lua Send 但 !Sync，只允许主线程引用；配置重载失败保留\n  旧配置仅更新错误；`TerminalConfiguration::generation` 每次变更必须递增\n  （config-lua.md）。\n- **GUI 渲染不变量**：pane 树属于 mux，`TermWindow` 只存视口/选区/overlay 缓存；\n  纹理耗尽按 `AllowImage` 降级链处理；每类窗口 Lua 事件最多 1 执行 + 1 挂起\n  （gui-rendering.md）。\n- **平台隔离**：跨平台核心不得出现 `#[cfg(target_os)]`，平台实现只进既定\n  `os/`、`locator/`、`win/` 位置；Linux X11/Wayland 走枚举分发\n  （platform-window.md）。\n- **依赖纪律**：新依赖必须走根 `Cargo.toml` 的 `[workspace.dependencies]` 并\n  过 `deny.toml` 许可检查；生成数据表只能经各自 codegen/同步工具重建，不手改\n  （build-ci-release.md、code-comments.md）。\n- **生成物纪律**：受控产物（shell 补全、键表 markdown、docs 索引、图谱、KB）\n  默认只检查（`make generated-check / graph-check / kb-check`），有意变更才\n  重建并审 diff（development.md）。"
+    },
+    {
+      "anchor": "项目模型",
+      "id": "AGENTS.md#项目模型",
+      "source": "AGENTS.md",
+      "text": "## 项目模型\n\n- Cargo workspace 68 包、约 20 万行手写 Rust + 约 21 万行生成数据表\n  （`wezterm-gui/src/unicode_names.rs`、`wezterm-char-props/src/emoji_variation.rs`、\n  `nerdfonts_data.rs`、`config/src/scheme_data.rs` 等；再生成命令见\n  build-ci-release.md 的生成物清单）。\n- 数据流主线：PTY 字节 → `term::Terminal::advance_bytes` → escape 解析\n  （`vtparse` 状态机 → `wezterm-escape-parser::Action`）→\n  `term::terminalstate::TerminalState`/`Screen`（行存 `wezterm-surface::Line`，\n  格子 `wezterm-cell::Cell`）→ `MuxNotification::PaneOutput` →\n  `wezterm-gui` `TermWindow::paint_impl`（形状缓存→GlyphCache→纹理 atlas）。\n- 状态所有者：终端模型在 `term/src/terminalstate/mod.rs::TerminalState`\n  （seqno 每次 advance 递增；行号用四种不同类型防混用）；mux 全局单例\n  `mux/src/lib.rs::MUX`（pane 树在 `Tab` 的 bintree，GUI 只缓存视口/选区）；\n  GUI 窗口状态在 `wezterm-gui/src/termwindow/mod.rs::TermWindow`。\n- 配置链：wezterm.lua → `config::lua::make_lua_context`（15 个 lua-api-crates\n  经 env-bootstrap 注册）→ `wezterm_dynamic::Value` → `Config::from_dynamic` →\n  `ConfigHandle`（generation 计数；Lua 仅主线程，重载经 `LuaPipe` 回主线程）。\n- 平台抽象：`window` crate（Linux 上 Connection/Window 是 X11|Wayland 枚举）；\n  平台代码只进 `window/os/`、`wezterm-font/locator|shaper`、`pty/src/win` 等\n  既定位置。`wezterm-ssh` 构建期 feature 二选一（libssh-rs/ssh2）。\n- 工具链：cargo + cargo-nextest（项目钉版装 `.local/tools/`，`make setup`）；\n  fmt 需 nightly；测试断言用 k9（`K9_UPDATE=1` 更新快照）。"
+    },
+    {
+      "anchor": "领域规则索引",
+      "id": "AGENTS.md#领域规则索引",
+      "source": "AGENTS.md",
+      "text": "## 领域规则索引\n\n| 域 | 覆盖 |\n|---|---|\n| `build-ci-release` | ci/、.github/、nix/、workspace 依赖与版本、生成物清单 |\n| `cli-main` | wezterm/ 主 CLI 与 clap 子命令定义 |\n| `config-lua` | config/、lua-api-crates/、wezterm-dynamic、Lua 加载与热重载 |\n| `development` | 框架自身：scripts/、AGENT_RULES、Makefile、工具面 |\n| `font-shaping` | wezterm-font/、wezterm-char-props/、deps/ 构建辅助 |\n| `gui-rendering` | wezterm-gui/ 渲染、overlay、输入处理 |\n| `mux-domain` | mux/、wezterm-client/、mux-server、codec 帧协议 |\n| `platform-window` | window/、wezterm-input-types/ 平台抽象 |\n| `process-io` | pty/、procinfo/、filedescriptor/、umask/ |\n| `product-assets` | assets/ 资源（shell-integration 除外） |\n| `product-docs` | docs/ 产品文档站（AGENT_RULES 除外） |\n| `ssh-domain` | wezterm-ssh/ 与双后端 feature |\n| `support-crates` | promise/bidi/lfucache 等支撑库 |\n| `terminal-model` | term/、wezterm-cell/、wezterm-surface/、shell-integration |\n| `testing` | test-data/ 手动 fixtures 与测试数据纪律 |\n| `code-review` | 审核任务专用（`--task review`） |"
+    },
+    {
+      "anchor": "0.1.0(TBD)",
+      "id": "CHANGELOG.md#0.1.0(TBD)",
+      "source": "CHANGELOG.md",
+      "text": "## 0.1.0(TBD)"
+    },
+    {
+      "anchor": "Added",
+      "id": "CHANGELOG.md#Added",
+      "source": "CHANGELOG.md",
+      "text": "### Added\n\n- 初始化 AI 协作开发框架：根 `AGENTS.md` 启动协议 + `docs/AGENT_RULES/`\n  领域规则与 `routes.toml` 路由闭集 + `scripts/resolve_agent_rules.py`\n  （多路径并集、目录展开、review 任务、只读 `--check`）。\n- 命令层：Makefile 追加框架目标（`make help / framework-check /\n  framework-ready / ai-doctor / ci-check / setup / evidence / graph / kb /\n  ui-smoke` 等），`docs/dev-framework.json` 绑定真实命令；\n  `scripts/setup_env.sh` 将 cargo-nextest 与 graphifyy 钉版安装到仓库内\n  `.local/tools/`（幂等，`--check` 只读诊断）。\n- 文档：`docs/{README,ARCHITECTURE,DEVELOPMENT,MAKE_COMMANDS,TESTING,\n  AI_TOOLS,RELEASE}.md` 中文手册；`docs/mkdocs-base.yml` 追加 `exclude_docs`\n  使框架文档不进公共文档站。\n- 测试与证据：`scripts/generated_check.sh`（派生文件只读校验）、\n  `scripts/ui_smoke.sh`（Xvfb 隔离显示 + xwd 截图 + ffmpeg 转 PNG，证据写\n  ignored 的 `.ui-evidence/<分支>/<任务>/<批次>/`）；框架脚本自带 unittest\n  （`make framework-test`）。\n- 图谱与知识库：`scripts/graphify.sh`（钉版 graphifyy，代码-only AST 索引，\n  排除生成数据表；指纹新鲜度 `make graph-check`）；`scripts/build_agent_kb.py`\n  （受控语料切块 + source_hashes，`make kb / kb-check`）。\n- AI 工具面：ZCode / Claude Code / Codex 共享配置（`.zcode/config.json`、\n  `.claude/settings.json`、`.codex/config.toml`）与共享 PreToolUse 安全门；\n  Kimi 经根 `AGENTS.md` 工作。\n- 代码注释规范：`docs/AGENT_RULES/code-comments.md`（上游英文注释保持、\n  fork 新增标记、Lua API rustdoc 约定、`模块路径::符号` 引用），并对核心\n  模块头补少量中文导读（仅模块头，不动正文，控制上游同步冲突面）。"
+    },
+    {
+      "anchor": "Changelog（gx0404/wezterm fork）",
+      "id": "CHANGELOG.md#Changelog（gx0404/wezterm fork）",
+      "source": "CHANGELOG.md",
+      "text": "# Changelog（gx0404/wezterm fork）\n\n本文件记录 fork 层面已实现的可观察变更（AI 协作框架、开发流程、定制功能）。\n上游 WezTerm 的产品级变更见 `docs/changelog.md`（随上游同步，不在本文件重复维护，\n避免同步上游时产生冲突）。\n\n版本真源：本文件 `## X.Y.Z(日期|TBD)` 标题中的最大 SemVer（`scripts/version.py`，\n`make version` 只读查询）。WezTerm 产品自身的版本号由 `wezterm-version/build.rs`\n按 git 提交时间与哈希生成，两套体系互不干扰（见 docs/RELEASE.md）。"
+    },
+    {
+      "anchor": "Before you submit your code",
+      "id": "CONTRIBUTING.md#Before you submit your code",
+      "source": "CONTRIBUTING.md",
+      "text": "### Before you submit your code\n\nMake sure that the tests are working and that the code is correctly\nformatted otherwise the continuous integration system will fail your build:\n\n```console\n$ rustup component add rustfmt-preview          # you only need to do this once\n$ cargo test --all\n$ cargo fmt --all\n```"
+    },
+    {
+      "anchor": "Building from source",
+      "id": "CONTRIBUTING.md#Building from source",
+      "source": "CONTRIBUTING.md",
+      "text": "### Building from source\n\nTo build wezterm from source, you will need a local Rust toolchain, and a few platform-specific dependencies.\nFollow the [Install from Source](https://wezfurlong.org/wezterm/install/source.html) guide to get started!\n\nSome platforms like Windows have a few specific steps, make sure to check the dedicated sections in the guide."
+    },
+    {
+      "anchor": "Contributing Documentation",
+      "id": "CONTRIBUTING.md#Contributing Documentation",
+      "source": "CONTRIBUTING.md",
+      "text": "## Contributing Documentation\n\nThere's never enough!  Pretty much anything is fair game to improve here."
+    },
+    {
+      "anchor": "Contributing code",
+      "id": "CONTRIBUTING.md#Contributing code",
+      "source": "CONTRIBUTING.md",
+      "text": "## Contributing code\n\nYes please!\n\nIf you are new to the Rust language check out <https://doc.rust-lang.org/rust-by-example/>."
+    },
+    {
+      "anchor": "Contributing to wezterm",
+      "id": "CONTRIBUTING.md#Contributing to wezterm",
+      "source": "CONTRIBUTING.md",
+      "text": "# Contributing to wezterm\n\nThanks for considering donating your time and energy!  I value any contribution,\neven if it is just to highlight a typo.\n\nIncluded here are some guidelines that can help streamline taking in your contribution.\nThey are just guidelines and not hard-and-fast rules. Things will probably go faster\nand smoother if you have the time and energy to read and follow these suggestions."
+    },
+    {
+      "anchor": "Iterating",
+      "id": "CONTRIBUTING.md#Iterating",
+      "source": "CONTRIBUTING.md",
+      "text": "### Iterating\n\nI tend to iterate and sanity check as I develop using `cargo check`; it\nwill type-check your code without generating code which is much faster\nthan building everything in release mode:\n\n```console\n$ cargo check\n```\n\nLikewise, if you want to quickly check that something works, you can run it\nin debug mode using:\n\n```console\n$ cargo run\n```\n\nThis will produce a debug-instrumented binary with poor optimization. This will\ngive you more detail in the backtrace produced if you run `RUST_BACKTRACE=1 cargo run`.\n\nIf you get a panic and want to examine local variables, you'll need to use gdb:\n\n```console\n$ cargo build\n$ gdb ./target/debug/wezterm\n$ break rust_panic               # hit tab to complete the name of the panic symbol!\n$ run\n$ bt\n```\n\nStarting WezTerm with `wezterm-gui start --always-new-process` is useful to ensure Mux logs are not\nhidden in an background process started in an earlier test.\n\nStart WezTerm with `wezterm-gui --config-file ./test-conf.lua ……` to test a custom config file."
+    },
+    {
+      "anchor": "Operating system specific installation instructions?",
+      "id": "CONTRIBUTING.md#Operating system specific installation instructions?",
+      "source": "CONTRIBUTING.md",
+      "text": "### Operating system specific installation instructions?\n\nThere are a lot of targets out there.  Today we have docs that are Ubuntu biased\nand I know that there are a lot of flavors of Linux. Rather than expand the README\nwith instructions for those, please translate the instructions into steps that\ncan be run in the [`get-deps`](https://github.com/wezterm/wezterm/blob/master/get-deps)\nscript."
+    },
+    {
+      "anchor": "Please also include documentation if you are adding or changing behavior",
+      "id": "CONTRIBUTING.md#Please also include documentation if you are adding or changing behavior",
+      "source": "CONTRIBUTING.md",
+      "text": "### Please also include documentation if you are adding or changing behavior\n\nThis helps to keep things well-understood and working in the long term.\nDon't worry if you're not a wordsmith or English isn't your first language as\nI can help with that. It is more important to capture the intent of the\nfeature and having this written out in English also helps when it comes\nto reviewing the code."
+    },
+    {
+      "anchor": "Please include tests to cover your changes!",
+      "id": "CONTRIBUTING.md#Please include tests to cover your changes!",
+      "source": "CONTRIBUTING.md",
+      "text": "### Please include tests to cover your changes!\n\nThis will help ensure that your contributions keep working as things change.\n\nYou can run the existing tests using:\n\n```console\n$ cargo test --all\n```\n\nThere are some helper classes for writing tests for terminal behavior.\nHere's [an example of a test to verify that the terminal contents\nmatch expectations](https://github.com/wezterm/wezterm/blob/fd532a8c2fb3b56593597cf8be1775da1feda0a3/term/src/test/mod.rs#L314).\n\nPlease also make a point of adding comments to your tests to help\nclarify the intent of the test!"
+    },
+    {
+      "anchor": "Running the doc build yourself",
+      "id": "CONTRIBUTING.md#Running the doc build yourself",
+      "source": "CONTRIBUTING.md",
+      "text": "### Running the doc build yourself\n\nTo check your documentation additions, you can optionally build the docs yourself and see how the changes will look on the webpage. \n\nTo serve them up, and then automatically rebuild and refresh the docs in your browser, run:\n```console\n$ ci/build-docs.sh serve\n```\nAnd then click on the URL that it prints out after it has performed the first build.\n\nAny arguments passed to `build-docs.sh` are passed down to the underlying `mkdocs` utility.\n\nLook at [mkdocs serve](https://www.mkdocs.org/user-guide/cli/#mkdocs-serve) for more information on additional parameters."
+    },
+    {
+      "anchor": "Submitting a Pull Request",
+      "id": "CONTRIBUTING.md#Submitting a Pull Request",
+      "source": "CONTRIBUTING.md",
+      "text": "## Submitting a Pull Request\n\nAfter considering all of the above, and once you've prepared your contribution\nand are ready to submit it, you'll need to create a pull request.\n\nIf you're new to GitHub Pull Requests, read through\nhttps://help.github.com/articles/creating-a-pull-request/ to understand\nhow the process works."
+    },
+    {
+      "anchor": "Testing in a NixOS VM",
+      "id": "CONTRIBUTING.md#Testing in a NixOS VM",
+      "source": "CONTRIBUTING.md",
+      "text": "### Testing in a NixOS VM\n\nIf you need to test WezTerm in a clean desktop environment (e.g. to reproduce a\ndisplay server bug or verify a desktop integration), you can use the provided\nNixOS VM configurations.\n\nTwo desktop variants are available:\n- GNOME (`testing-on-gnome`)\n- KDE Plasma (`testing-on-plasma`).\n\n**Prerequisites:** Nix is installed, with flakes enabled (`experimental-features = nix-command flakes`).\n\n**Workflow:**\n\n```console\n$ cargo build                                            # build wezterm locally\n$ nixos-rebuild build-vm --flake ./nix#testing-on-plasma # build the Plasma VM image\n$ REPO=$PWD ./result/bin/run-nixos-vm                    # start the VM\n```\n\n> [!NOTE]\n> You might need to tweak desktop settings (e.g. the keyboard layout) on first VM start.\n>\n> The VM state is stored in `nixos.qcow2` in the current working directory on the host.\n\nInside the VM, open a terminal (e.g. _Console_ on GNOME, _Konsole_ on Plasma), then:\n\n```console\n$ cd repo                      # go into ~/repo\n$ ./target/debug/wezterm-gui   # run wezterm for your tests\n```\n\nThe host repository is mounted into the VM at `/home/dev/repo` via a 9p shared directory,\nso changes on the host (rebuilds, test config file, ..) are immediately visible inside the VM.\n\nKeep the VM running and make your changes locally, re-build wezterm on your host and kill/start\nwezterm again in the VM for your tests."
+    },
+    {
+      "anchor": "Testing in a NixOS VM",
+      "id": "CONTRIBUTING.md#Testing in a NixOS VM[1]",
+      "source": "CONTRIBUTING.md",
+      "text": "> [!WARNING]\n> The host repo is supposed to be mounted in read-write but I (@bew) don't know why changes in the\n> repo are not actually propagated to the host. (PR welcome!)"
+    },
+    {
+      "anchor": "Where to find things?",
+      "id": "CONTRIBUTING.md#Where to find things?",
+      "source": "CONTRIBUTING.md",
+      "text": "### Where to find things?\n\nThe `term` directory holds the core terminal model code. This is agnostic\nof any windowing system. If you want to add support for terminal escape\nsequences and that sort of thing, you probably want to be in the `term` directory.\nKeep in mind that for maximal compatibility and utility `wezterm` aims to\nbe compatible with the `xterm` behavior.\nhttps://invisible-island.net/xterm/ctlseqs/ctlseqs.html is a useful resource!\n\nThe `src` directory holds the code for the `wezterm` program. This is\nthe GUI renderer for the terminal model.  If you want to change something\nabout the GUI you want to be in the `src` dir."
+    },
+    {
+      "anchor": "Crate 地图（生成）",
+      "id": "crate-map#Crate 地图（生成）",
+      "source": "crate-map",
+      "text": "# Crate 地图（生成）\n\n由 scripts/build_agent_kb.py 从根 Cargo.toml 生成；每行是目录与包描述。\n\n- `bidi/` (wezterm-bidi)：The Unicode Bidi Algorithm (UBA)\n- `bidi/generate/` (generate-bidi)\n- `deps/cairo/` (cairo-sys-rs)：FFI bindings to libcairo\n- `strip-ansi-escapes/` (strip-ansi-escapes)\n- `sync-color-schemes/` (sync-color-schemes)\n- `wezterm/` (wezterm)\n- `wezterm-blob-leases/` (wezterm-blob-leases)：Manage image blob caching/leasing for wezterm\n- `wezterm-cell/` (wezterm-cell)：Model a Cell in a Terminal display\n- `wezterm-dynamic/` (wezterm-dynamic)：config serialization for wezterm via dynamic json-like data values\n- `wezterm-escape-parser/` (wezterm-escape-parser)：Escape Sequence Parser\n- `wezterm-gui/` (wezterm-gui)\n- `wezterm-mux-server/` (wezterm-mux-server)\n- `wezterm-open-url/` (wezterm-open-url)\n- `wezterm-ssh/` (wezterm-ssh)：More convenient higher level wrapper around libssh2\n- `wezterm-surface/` (wezterm-surface)：Surface and Line types for terminals\n- `wezterm-uds/` (wezterm-uds)：Portable unix domain sockets"
+    },
+    {
+      "anchor": "AGENT_RULES 索引与维护约定",
+      "id": "docs/AGENT_RULES/README.md#AGENT_RULES 索引与维护约定",
+      "source": "docs/AGENT_RULES/README.md",
+      "text": "# AGENT_RULES 索引与维护约定\n\n本目录是领域规则的唯一正文存放处；`routes.toml` 是唯一机器真源。\n使用方式见根 `AGENTS.md` 的规则加载协议（resolver 按路径解析，`--check`\n守门闭集与体积）。"
+    },
+    {
+      "anchor": "维护约定",
+      "id": "docs/AGENT_RULES/README.md#维护约定",
+      "source": "docs/AGENT_RULES/README.md",
+      "text": "## 维护约定\n\n- 新增领域规则：建 `<id>.md`（≤16 KiB，含范围/符号真源/不变量/禁止项/验证\n  五要素）并在 `routes.toml` 登记 `[[rules]]`，然后跑\n  `python3 scripts/resolve_agent_rules.py --check` 直到闭集通过。\n- 移动/新增源码文件不需要改本目录，除非引入了新的顶层目录或新领域；此时\n  必须让全仓文件仍恰好命中一个领域或 root_only。\n- `root_only` 只登记真正没有领域约束的仓库元文件；禁止用宽模式把源码路径\n  挂进 root_only 规避规则加载。\n- 领域规则只写 `模块路径::符号` 与不变量，不抄字面值、不钉行号；现场手册\n  （docs/MAKE_COMMANDS.md 等）允许数字但须注明真源符号。\n- 正文不要写 lua 代码块（docs/ 全目录被 gelatyx --check 扫描，lua 块必须\n  stylua 格式）；shell/toml 块不受影响。\n- 本目录文档不进公共文档站（docs/mkdocs-base.yml 的 exclude_docs 已排除）。"
+    },
+    {
+      "anchor": "领域清单一览",
+      "id": "docs/AGENT_RULES/README.md#领域清单一览",
+      "source": "docs/AGENT_RULES/README.md",
+      "text": "## 领域清单一览\n\n人工预览用；实际匹配以 `routes.toml` 与 resolver 输出为准：\n\n| id | 覆盖 | 主题 |\n|---|---|---|\n| build-ci-release | ci/ .github/ nix/ Cargo.* deny.toml wezterm-version | 构建、CI、依赖、版本、生成物清单 |\n| cli-main | wezterm/ wezterm-gui-subcommands/ | CLI 入口与子命令 |\n| code-review | （task=review） | 只读审核规程 |\n| config-lua | config/ lua-api-crates/ wezterm-dynamic/ env-bootstrap/ 等 | Lua 配置链 |\n| development | scripts/ AGENT_RULES Makefile 工具面 | 框架自身 |\n| font-shaping | wezterm-font/ wezterm-char-props/ deps/ | 字体与 shaping |\n| gui-rendering | wezterm-gui/ | GUI 前端 |\n| mux-domain | mux/ wezterm-client/ mux-server codec/ | 多路复用与协议 |\n| platform-window | window/ wezterm-input-types/ | 平台窗口抽象 |\n| process-io | pty/ procinfo/ filedescriptor/ umask/ | 进程与 IO |\n| product-assets | assets/（shell-integration 除外） | 静态资源 |\n| product-docs | docs/（AGENT_RULES 除外） | 产品文档站 |\n| ssh-domain | wezterm-ssh/ | SSH 会话 |\n| support-crates | promise bidi lfucache 等 | 支撑库 |\n| terminal-model | term/ wezterm-cell/ wezterm-surface/ vtparse/ escape-parser | 终端模型 |\n| testing | test-data/ | 测试数据 |"
+    },
+    {
+      "anchor": "build-ci-release：构建、CI、依赖与生成物",
+      "id": "docs/AGENT_RULES/build-ci-release.md#build-ci-release：构建、CI、依赖与生成物",
+      "source": "docs/AGENT_RULES/build-ci-release.md",
+      "text": "# build-ci-release：构建、CI、依赖与生成物"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/build-ci-release.md#不变量",
+      "source": "docs/AGENT_RULES/build-ci-release.md",
+      "text": "## 不变量\n\n- gen_*.yml 是生成物：CI 行为改动只能改 `ci/generate-workflows.py` 然后\n  重新生成全部 gen workflow，并审 diff。\n- ssh e2e（wezterm-ssh/tests）在 CI 由工作流装 openssh-server 提供；本地跑\n  需要 `/usr/sbin/sshd` 存在（`make test-integration` 会真实起 sshd 子进程）。\n- fmt 用 nightly（`.rustfmt.toml`）；lint 门是 `cargo +nightly fmt --check`。\n- 发布链（tag.sh/create-release.sh/deploy.sh/appimage.sh/windows-installer.iss\n  及分发渠道脚本）只在上游仓库运行；本 fork 改这些文件仅为了上游同步后可\n  复用，不在本地执行发布动作（hooks 会拦）。"
+    },
+    {
+      "anchor": "生成物清单（改了生成器必须重建并审 diff）",
+      "id": "docs/AGENT_RULES/build-ci-release.md#生成物清单（改了生成器必须重建并审 diff）",
+      "source": "docs/AGENT_RULES/build-ci-release.md",
+      "text": "## 生成物清单（改了生成器必须重建并审 diff）\n\n| 产物 | 生成器 | 检查 |\n|---|---|---|\n| `assets/shell-completion/{bash,zsh,fish,…}` | `ci/update-derived-files.sh`（用 target/debug/wezterm） | `make generated-check` |\n| `docs/examples/default-*-key-table.markdown` | 同上（show-keys --lua） | 同上 |\n| `docs/cli/**` 各子命令 help | 同上 | 同上 |\n| `docs/config/lua/**`、`docs/SUMMARY.md`、`../mkdocs.yml` | `ci/generate-docs.py` + rustdoc 注释 | `make generated-check` |\n| `config/src/scheme_data.rs` | `sync-color-schemes`（联网） | 触发式重建 |\n| `wezterm-char-props/src/{emoji_variation,nerdfonts_data}.rs` | `wezterm-char-props/codegen`（`cargo run`） | 触发式重建 |\n| `wezterm-gui/src/unicode_names.rs` | 上游 codegen | 不在 fork 重建 |\n\n`make generated-check`（scripts/generated_check.sh）只读比对；有意更新用\n`make generated-write`（= ci/update-derived-files.sh，需先构建 debug 二进制）。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/build-ci-release.md#禁止项",
+      "source": "docs/AGENT_RULES/build-ci-release.md",
+      "text": "## 禁止项\n\n- 不手改 Cargo.lock 里钉版的子模块内容；不为绕过检查降级 deny.toml 规则。\n- 不在 fork 里启用 cargo-cooldown/发布类 workflow 的凭据。\n- 新依赖三步走：workspace.dependencies 登记 → cargo check 确认 feature 面\n  → `cargo deny check` 通过；并在交付说明里给出理由。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/build-ci-release.md#符号真源",
+      "source": "docs/AGENT_RULES/build-ci-release.md",
+      "text": "## 符号真源\n\n- 命令入口：根 `Makefile`（上游段：test/check/build/fmt/docs/servedocs；\n  框架段见 development 域）。CI 矩阵由 `ci/generate-workflows.py` 生成\n  （gen_*.yml 不要手改——改生成器再重新生成）。\n- 版本：`wezterm-version/build.rs`——存在 `../.tag`（CI 注入）则用之，否则\n  `git show --format=%cd-%h` 生成 `WEZTERM_CI_TAG`（形如 20260915-135123-\n  2658f629c）；fork 的流程版本另见根 CHANGELOG.md（development 域）。\n- 依赖：全部经根 `[workspace.dependencies]`（约 240 项）；许可检查\n  `deny.toml`；自动升级走 `cooldown.toml` + cargo-cooldown（仅上游仓库启用）。\n- 子模块：`deps/harfbuzz/harfbuzz`、`deps/freetype/{freetype2,libpng,zlib}`\n  ——只能 `git submodule update` 同步，不手改内部。\n- NixOS VM：`nix/flake.nix#testing-on-gnome|plasma`（人工 GUI 冒烟用；\n  nix 构建会移除 wezterm-ssh/tests，因沙箱内 sshd 密钥交换失败）。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/build-ci-release.md#范围",
+      "source": "docs/AGENT_RULES/build-ci-release.md",
+      "text": "## 范围\n\n`ci/`、`.github/`、`.cirrus.yml`、`nix/`、根 `Cargo.toml`/`Cargo.lock`、\n`deny.toml`、`cooldown.toml`、`get-deps`、`.cargo/`、`.rustfmt.toml`、\n`mkdocs_macros.py`、`wezterm-version/`。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/build-ci-release.md#验证",
+      "source": "docs/AGENT_RULES/build-ci-release.md",
+      "text": "## 验证\n\n- 定向：`make check`；CI 形态本地复现 `make ci-check`。\n- 改 workflow 生成器后：`python3 ci/generate-workflows.py` 重生成并\n  `git diff` 审阅（确认只改了预期矩阵）。\n- 改构建脚本后：`make build` 在改动平台可用（跨平台改动无环境时记 PENDING，\n  借上游 CI 结果佐证并注明）。"
+    },
+    {
+      "anchor": "cli-main：主 CLI 与子命令",
+      "id": "docs/AGENT_RULES/cli-main.md#cli-main：主 CLI 与子命令",
+      "source": "docs/AGENT_RULES/cli-main.md",
+      "text": "# cli-main：主 CLI 与子命令"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/cli-main.md#不变量",
+      "source": "docs/AGENT_RULES/cli-main.md",
+      "text": "## 不变量\n\n- `--config name=value` 覆盖经 `config::common_init` 的 overrides 生效；\n  cli 输出格式 `table|json` 的字段是脚本契约，改名/删列是破坏性变更。\n- `delegate_to_gui` 假设 wezterm-gui 与 wezterm 同目录同版本；不要引入\n  跨版本混用的查找逻辑。\n- cli 子命令都依赖 `wezterm-client::Client`（连 GUI socket 或 mux server）；\n  连不上时的错误信息要可操作（提示 `wezterm start` 或 unix domain 路径）。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/cli-main.md#禁止项",
+      "source": "docs/AGENT_RULES/cli-main.md",
+      "text": "## 禁止项\n\n- 不在 CLI 进程里链接 GUI 渲染栈（保持 headless 可用、启动快）。\n- 不复制子命令定义到 wezterm/（改 wezterm-gui-subcommands 共享源）。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/cli-main.md#符号真源",
+      "source": "docs/AGENT_RULES/cli-main.md",
+      "text": "## 符号真源\n\n- 入口：`wezterm/src/main.rs::main → run`——`designate_this_as_the_main_thread`\n  → `env_bootstrap::bootstrap()` → UmaskSaver → clap `Opt`；结束 `Mux::shutdown()`。\n- GUI 类子命令（start/ssh/serial/connect/ls-fonts/show-keys）经\n  `delegate_to_gui` **exec 同目录 wezterm-gui 二进制并透传参数**（Windows 加\n  `--attach-parent-console`）。\n- cli 子命令：`wezterm/src/cli/mod.rs::CliSubCommand`（list、list-clients、\n  proxy、tlscreds、move-pane-to-new-tab、split-pane、send-text、get-text、\n  activate-pane-direction、get-pane-direction、kill-pane、activate-pane、\n  adjust-pane-size、activate-tab、set-tab-title、set-window-title、\n  rename-workspace、zoom-pane），每命令一个同名文件，`cmd.run(client).await`。\n- 录制回放：`wezterm/src/asciicast.rs`（Record/Play + 平台 TTY 包装）。\n- 子命令契约：`wezterm-gui-subcommands` 是 GUI 与 CLI 子命令一致性的单一\n  事实源（`DEFAULT_WINDOW_CLASS`、`name_equals_value` 解析等）。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/cli-main.md#范围",
+      "source": "docs/AGENT_RULES/cli-main.md",
+      "text": "## 范围\n\n`wezterm/`（主 CLI 二进制：21 个 cli 子命令、asciicast 录制回放、tls 凭据）、\n`wezterm-gui-subcommands/`（GUI/CLI 共用的 clap 定义）。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/cli-main.md#验证",
+      "source": "docs/AGENT_RULES/cli-main.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p wezterm`。\n- cli 行为：起 `make dev`（GUI）后 `wezterm cli list/split-pane/get-text`\n  冒烟；输出格式变更在交付说明中列出新旧对照。"
+    },
+    {
+      "anchor": "code-comments：代码注释与文档注释规范（--task code）",
+      "id": "docs/AGENT_RULES/code-comments.md#code-comments：代码注释与文档注释规范（--task code）",
+      "source": "docs/AGENT_RULES/code-comments.md",
+      "text": "# code-comments：代码注释与文档注释规范（--task code）"
+    },
+    {
+      "anchor": "fork 新增文件",
+      "id": "docs/AGENT_RULES/code-comments.md#fork 新增文件",
+      "source": "docs/AGENT_RULES/code-comments.md",
+      "text": "## fork 新增文件\n\n- 新文件（本框架引入或 fork 功能新增）模块头可用中文导读：说明模块职责、\n  状态所有者、与相邻模块的边界；正文注释中英不限，但标识符、日志、错误\n  消息保持英文（与代码库一致）。\n- 导读注释控制在模块头部，不逐行注释翻译代码。"
+    },
+    {
+      "anchor": "rustdoc 与 Lua API 文档（关键生成链）",
+      "id": "docs/AGENT_RULES/code-comments.md#rustdoc 与 Lua API 文档（关键生成链）",
+      "source": "docs/AGENT_RULES/code-comments.md",
+      "text": "## rustdoc 与 Lua API 文档（关键生成链）\n\n- `docs/config/lua/**` 由 Rust doc 注释生成：Lua API 面上的公开项（config\n  字段、wezterm.* 函数、KeyAssignment 等）的 doc comment 就是产品文档。\n  修改这些注释等于修改文档，必须：\n  1. 写清语义、取值、默认值与 `{{since('<version>')}}` 标注；\n  2. 跑 `make generated-check` 确认派生文档同步（或有意重建后审 diff）。\n- 例子代码用 mdbook 风格 fenced block；**docs 内 lua 块必须 stylua 格式**\n  （gelatyx --check 门）。"
+    },
+    {
+      "anchor": "上游文件（上游已存在的文件）",
+      "id": "docs/AGENT_RULES/code-comments.md#上游文件（上游已存在的文件）",
+      "source": "docs/AGENT_RULES/code-comments.md",
+      "text": "## 上游文件（上游已存在的文件）\n\n- 保持英文注释；不批量翻译、不重排既有注释、不做\"顺手\"注释美化——这些\n  会让下次同步上游时产生无意义冲突。\n- 必须在上游文件里补充说明时：写在紧邻代码处，用英文；fork 特有的语义\n  用行注释加 `fork:` 前缀标记，便于同步时快速识别，例如：\n\n```rust\n// fork: we route OSC 52 to the pane's own window rather than the\n// most recently focused one.\n```\n\n- **例外：模块头中文导读**。经用户授权，对少数核心上游文件允许在模块头\n  （文件最顶部、原有头注释之后）加一段 `// fork(zh):` 开头的中文导读，\n  说明模块职责、状态所有者与边界；每文件一段、控制在 10 行内，不进正文。\n  当前登记的导读文件见本文件末尾清单。\n\n- 提交给上游的修复，注释按上游惯例（英文、解释 why 而非 what）。"
+    },
+    {
+      "anchor": "中文导读登记（fork(zh)，保持小而准）",
+      "id": "docs/AGENT_RULES/code-comments.md#中文导读登记（fork(zh)，保持小而准）",
+      "source": "docs/AGENT_RULES/code-comments.md",
+      "text": "## 中文导读登记（fork(zh)，保持小而准）\n\n- `term/src/terminal.rs`：Terminal 组合入口\n- `term/src/terminalstate/mod.rs`：终端状态所有者\n- `wezterm-escape-parser/src/parser/mod.rs`：解析分层\n- `mux/src/lib.rs`：mux 全局单例与输出泵\n- `wezterm-gui/src/termwindow/mod.rs`：GUI 窗口状态所有者\n- `config/src/lib.rs`：配置加载与重载线程模型\n- `codec/src/lib.rs`：客户端/服务端帧协议\n- `window/src/lib.rs`：平台窗口抽象"
+    },
+    {
+      "anchor": "引用约定",
+      "id": "docs/AGENT_RULES/code-comments.md#引用约定",
+      "source": "docs/AGENT_RULES/code-comments.md",
+      "text": "## 引用约定\n\n- 长期文档与规则引用代码用 `模块路径::符号`（如 `term/src/screen.rs::Screen`），\n  不钉行号；审核发现可用当时行号，但注明符号名。\n- 注释解释\"为什么\"与约束（不变量、线程边界、兼容性陷阱），不复述代码\n  字面行为；能由类型/测试表达的约束优先落在类型与测试里。"
+    },
+    {
+      "anchor": "生成文件标记",
+      "id": "docs/AGENT_RULES/code-comments.md#生成文件标记",
+      "source": "docs/AGENT_RULES/code-comments.md",
+      "text": "## 生成文件标记\n\n- 生成数据表（`wezterm-gui/src/unicode_names.rs`、\n  `wezterm-char-props/src/{emoji_variation,nerdfonts_data}.rs`、\n  `config/src/scheme_data.rs` 等）头部自带生成器说明；不要手改正文，也不\n  要往里加手写注释（下次重建即丢）。"
+    },
+    {
+      "anchor": "适用",
+      "id": "docs/AGENT_RULES/code-comments.md#适用",
+      "source": "docs/AGENT_RULES/code-comments.md",
+      "text": "## 适用\n\n所有 Rust/shell/python 源码的注释与 rustdoc。本仓是与上游每日同步的\nfork，注释策略的第一目标是**不放大 rebase 冲突面**，第二目标才是可读性。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/code-comments.md#验证",
+      "source": "docs/AGENT_RULES/code-comments.md",
+      "text": "## 验证\n\n- `make lint`（rustfmt 会检查部分注释排版）；Lua API 注释改动跑\n  `make generated-check`。\n- 新增 fork 导读注释的文件清单在交付说明列出（控制总量，避免噪音）。"
+    },
+    {
+      "anchor": "code-review：审核任务规程（--task review）",
+      "id": "docs/AGENT_RULES/code-review.md#code-review：审核任务规程（--task review）",
+      "source": "docs/AGENT_RULES/code-review.md",
+      "text": "# code-review：审核任务规程（--task review）"
+    },
+    {
+      "anchor": "检查清单",
+      "id": "docs/AGENT_RULES/code-review.md#检查清单",
+      "source": "docs/AGENT_RULES/code-review.md",
+      "text": "## 检查清单\n\n按涉及域取舍（领域细则见对应规则文档）：\n\n1. **正确性**：状态所有者是否被绕过（TerminalState/MUX 单例/TermWindow/\n   FontConfigInner）；线程边界（Lua 主线程、事件循环线程、parse 线程）；\n   seqno/generation 是否正确递增；行号类型是否混用。\n2. **契约**：codec Pdu 与 cli 输出格式是兼容面——破坏性变更是否已声明；\n   CellCluster/Texture2d/FontShaper/MasterPty 等 trait 是否被实现完整。\n3. **平台**：是否引入了越界的 `#[cfg(...)]`；X11/Wayland 枚举路径两侧\n   是否同审；无环境侧是否如实标注 PENDING。\n4. **上游同步面**：对上游文件的修改是否最小化（追加式、带 fork 标记）；\n   是否动了生成物（shell-completion/键表/docs 索引/scheme_data/emoji 表）\n   而没有走再生成命令。\n5. **依赖与安全**：新依赖是否经 workspace.dependencies + deny.toml；\n   unsafe/FFI 边界理由；凭据是否可能进日志/快照。\n6. **测试**：新行为是否有失败路径覆盖；快照更新是否被逐个说明；被跳过\n   的层是否有 PENDING 说明而非静默绿。\n7. **框架一致性**（涉 scripts/AGENT_RULES/Makefile 时）：resolver --check\n   是否仍过；命令绑定是否 argv 化；hooks 模式改动是否跑了探针测试。"
+    },
+    {
+      "anchor": "角色与边界",
+      "id": "docs/AGENT_RULES/code-review.md#角色与边界",
+      "source": "docs/AGENT_RULES/code-review.md",
+      "text": "## 角色与边界\n\n- reviewer 只读：不修改源码、不维护白名单/字段词表副本、不代跑会改状态\n  的命令（setup/graph/kb/generated-write 等）。\n- 开始前：读根 `AGENTS.md`；对涉及路径跑\n  `python3 scripts/resolve_agent_rules.py --task review <paths...>` 并读完\n  输出文档；再看 `git diff`（含暂存与未暂存）与相关调用方。"
+    },
+    {
+      "anchor": "输出格式",
+      "id": "docs/AGENT_RULES/code-review.md#输出格式",
+      "source": "docs/AGENT_RULES/code-review.md",
+      "text": "## 输出格式\n\n- 严重：必须修复才能合入（正确性/安全/数据丢失/契约破坏）\n- 中：应修复，可有理由地延后\n- 轻：风格与改进建议\n\n每条给 `文件:行`、原因、修复建议；最后结论二选一：可合入 / 需修复后\n复审。发现的问题即使当场被作者修复，也要在报告中列出（含修复方式）。"
+    },
+    {
+      "anchor": "config-lua：Lua 配置系统",
+      "id": "docs/AGENT_RULES/config-lua.md#config-lua：Lua 配置系统",
+      "source": "docs/AGENT_RULES/config-lua.md",
+      "text": "# config-lua：Lua 配置系统"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/config-lua.md#不变量",
+      "source": "docs/AGENT_RULES/config-lua.md",
+      "text": "## 不变量\n\n- **Lua 线程模型**：Lua 是 Send 但 !Sync，只允许主线程引用；后台 fs-watch\n  线程经 `LuaPipe`（smol channel）把新上下文运回主线程\n  （`with_lua_config_on_main_thread` 在非主线程调用会 panic）。任何\"在别的\n  线程碰 Lua\"的改动都是错的。\n- **重载失败语义**：成功才替换配置并清错；失败保留旧配置、仅更新错误消息\n  （`ConfigInner::reload` 注释）。不得让坏配置清空运行时行为。\n- **generation 计数**：`TerminalConfiguration::generation` 每次配置变更必须\n  递增，消费方（终端缓存、GUI 字体缓存）靠它刷新。\n- **严格 builder**：config_builder 的 `__newindex` 即时校验新值；新增配置\n  字段必须带 FromDynamic 语义（unknown/deprecated 字段行为显式声明），否则\n  用户拼写错误将被静默吞掉。\n- **事件返回值**：`wezterm.on` 的 handler 返回 false 可阻断默认动作；\n  `EventState` 队列上限见 gui-rendering 域。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/config-lua.md#禁止项",
+      "source": "docs/AGENT_RULES/config-lua.md",
+      "text": "## 禁止项\n\n- 不手改 `config/src/scheme_data.rs` 与 `docs/colorschemes/**`——只能经\n  `sync-color-schemes` 重建（它抓取上游主题仓库生成）。\n- 不在 lua-api-crates 之间互相 import 造成注册顺序耦合；注册顺序唯一真源\n  是 env-bootstrap。\n- 新 Lua API 必须同时考虑：rustdoc 注释（docs/config/lua 由其生成，见\n  code-comments）+ `since` 标注 + config-builder 严格校验。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/config-lua.md#符号真源",
+      "source": "docs/AGENT_RULES/config-lua.md",
+      "text": "## 符号真源\n\n- 加载链：`config/src/lib.rs::Config::load → load_with_overrides`；候选路径\n  次序 = exe 同目录（Windows）→ `WEZTERM_CONFIG_FILE` → `--config-file` →\n  `$HOME/.wezterm.lua` → XDG `wezterm/wezterm.lua`（`xdg_config_home()`）。\n- Lua 上下文：`config/src/lua.rs::make_lua_context`——mlua 0.9；注册\n  `wezterm` 模块、config_builder（严格 metatable：`__newindex` 即时\n  `Config::from_dynamic` 校验并打印栈回溯）、`wezterm.on/emit`、\n  `action_callback`；`package.searchers[2]` 被替换以把 require 的文件加入\n  reload 监视列表。\n- 注册中心：`env-bootstrap/src/lib.rs::register_lua_modules` 把 15 个\n  lua-api-crates push 进 `config::lua::add_context_setup_func`；window-funcs\n  例外，由 wezterm-gui 单独注册（GUI 进程才可用）。\n- 动态值层：`wezterm-dynamic/src/value.rs::Value`（对齐 Lua 类型集且为\n  TOML/JSON 超集）+ `FromDynamic/ToDynamic`（含 UnknownFieldAction）。\n  Lua↔Rust 一律经 `luahelper::to_lua/from_lua` 的 Dynamic 往返。\n- 句柄与重载：`config/src/lib.rs::ConfigHandle{config, generation}`；\n  `reload()` 由 notify watcher（200ms 去抖）触发；监视集合 = 配置文件 +\n  父目录（HOME 除外）+ `add_to_config_reload_watch_list` 登记。\n- 配色数据：`config/src/scheme_data.rs::SCHEMES` 由 sync-color-schemes\n  生成（见下方禁止项）；`build_default_schemes()` 消费。\n- derive：`config/derive` 的 `ConfigMeta`（文档/字段元信息，供\n  docs/config/lua 参考生成）。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/config-lua.md#范围",
+      "source": "docs/AGENT_RULES/config-lua.md",
+      "text": "## 范围\n\n`config/`（含 derive/）、`luahelper/`、`lua-api-crates/`（15 个 crate）、\n`wezterm-dynamic/`、`env-bootstrap/`、`sync-color-schemes/`。\n从 wezterm.lua 到 `ConfigHandle` 的完整链路与 Lua API 面。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/config-lua.md#验证",
+      "source": "docs/AGENT_RULES/config-lua.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p config -p wezterm-dynamic`。\n- 配置解析改动：用 `--config 'key=value'` 内联覆盖冒烟（无需写文件）；\n  重载行为用 `WEZTERM_CONFIG_FILE` 指向临时文件 + touch 触发 watcher 人工\n  核对。\n- Lua API 面变更：`ci/generate-docs.py` 相关索引重建走 `make generated-check`\n  比对；新增公开函数的文档锚点要进 KB（`make kb`）。"
+    },
+    {
+      "anchor": "development：AI 协作框架自身",
+      "id": "docs/AGENT_RULES/development.md#development：AI 协作框架自身",
+      "source": "docs/AGENT_RULES/development.md",
+      "text": "# development：AI 协作框架自身"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/development.md#不变量",
+      "source": "docs/AGENT_RULES/development.md",
+      "text": "## 不变量\n\n- 规则/路由改动后必须 `make framework-check`（闭集 + 体积 + 排序）通过；\n  危险模式改动必须 `python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`。\n- lint 门不得吞退出码（禁止 `--exit-zero`、禁止 `| tail` 接验收命令）；\n  诊断（ai-doctor）只报告缺失并给修复命令，不隐式安装。\n- 生成物纪律：`graphify-out/graph.json`、`kb/chunks.json`、`.graphify_*`\n  指纹只能经 `make graph / make kb` 重建；有意变更才写盘并审 diff，默认\n  `make graph-check / kb-check` 只读校验。\n- 证据纪律：UI 证据只写 `.ui-evidence/`（ignored）；`make evidence TASK=x`\n  分配的目录里 result.json 如实登记 status 与 images_reviewed，没读图不写\n  true。\n- 脚本兼容 Python 3.10（tomli 回退）；不引入仓库外 Python 依赖（venv 由\n  setup_env.sh 管理）。\n- 上游同步安全：本域对上游文件的修改仅限 `.gitignore`/`Makefile`/\n  `docs/mkdocs-base.yml` 三处带标记追加段；其它上游文件一律不改语义。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/development.md#禁止项",
+      "source": "docs/AGENT_RULES/development.md",
+      "text": "## 禁止项\n\n- 不把领域规则正文复制进工具目录或 AGENTS.md（唯一真源 docs/AGENT_RULES/）。\n- 不绕过 resolver 直接猜规则文档；不用 `**` 万能路由。\n- 不提交 `.local/`、`.ui-evidence/`、`.graphify-memory/` 等运行态。\n- 不在 hooks 里做静默源码修改（PostToolUse 自动格式化之类）。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/development.md#符号真源",
+      "source": "docs/AGENT_RULES/development.md",
+      "text": "## 符号真源\n\n- resolver：`scripts/resolve_agent_rules.py`（多路径并集、目录展开、\n  `--task`、只读 `--check`；退出码 2 = 路由/闭集违规）。\n- 命令调度：`scripts/dev_framework.py` 读 `docs/dev-framework.json`\n  （schema 1；evidence_root 必须是隐藏且 ignored 的独立目录；ci 只含检查类\n  目标且 lint/test 不可 N/A；configured 命令必须 argv 数组 + 仓内 cwd）。\n- 版本：`scripts/version.py`——根 CHANGELOG.md 的最大 SemVer 为真源，\n  `--check` 校验镜像、`--write` 原子写入（本仓 version_targets 为空，见\n  docs/RELEASE.md 的两套版本体系说明）。\n- 工具钉版：`scripts/setup_env.sh` → `.local/tools/`（nextest 预编译包\n  sha256 钉版 + venv{graphifyy, tomli}）；Makefile 已把其 bin 前置 PATH。\n- hooks：`.claude/hooks/dangerous_patterns.conf` 是危险模式唯一真源，\n  `pre_tool_use_gate.py` 消费（claude/codex 协议适配；ZCode 复用 claude 形）。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/development.md#范围",
+      "source": "docs/AGENT_RULES/development.md",
+      "text": "## 范围\n\n`scripts/`、`docs/AGENT_RULES/**`、`docs/dev-framework.json`、\n`docs/{README,ARCHITECTURE,DEVELOPMENT,MAKE_COMMANDS,TESTING,AI_TOOLS,RELEASE}.md`、\n`Makefile`、`.gitignore`、`CHANGELOG.md`、`CONTRIBUTING.md`、工具面目录\n（`.claude/ .codex/ .zcode/ .agents/`）、图谱与 KB 产物（`graphify-out/`、`kb/`）。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/development.md#验证",
+      "source": "docs/AGENT_RULES/development.md",
+      "text": "## 验证\n\n- `make framework-check && make framework-ready && make ai-doctor`。\n- 框架脚本自身：`make framework-test`（unittest：resolver 拒绝边界、\n  hooks 探针、KB 契约）。\n- 改命令绑定：`make ci-check` 实跑；改工具面：按 docs/AI_TOOLS.md 的\n  逐客户端验证清单执行并登记结果。"
+    },
+    {
+      "anchor": "font-shaping：字体加载与整形",
+      "id": "docs/AGENT_RULES/font-shaping.md#font-shaping：字体加载与整形",
+      "source": "docs/AGENT_RULES/font-shaping.md",
+      "text": "# font-shaping：字体加载与整形"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/font-shaping.md#不变量",
+      "source": "docs/AGENT_RULES/font-shaping.md",
+      "text": "## 不变量\n\n- **异步 fallback 链**：shape 发现缺字形 → `schedule_fallback_resolve` 投\n  专用线程（locator+font_dirs+built_in 三路、按 coverage 排序去重）→ 结果\n  回 `pending_fallback` → 下次 shape 重建 shaper 并返回\n  `Err(ClearShapeCache{})`，GUI 收到后清形状缓存重排。不得在渲染线程同步\n  做字体搜索。\n- **缓存失效**：`FontConfiguration::change_scaling/config_changed` 负责清\n  缓存；新增缓存字段必须接进这两个入口。\n- **字形聚类契约**：`wezterm-surface::CellCluster`（byte_to_cell_idx 映射）\n  是 shaping 的输入；bidi run 方向来自 `wezterm-bidi`（support-crates）。\n- **生成表**：emoji/宽度/nerdfonts 数据只能经 codegen 重建；手改会在下次\n  重建时丢失并污染 diff。\n- vendored 字体 feature 与 `assets/fonts` 资源（product-assets 域）联动：\n  改 vendor 开关要同步核对打包脚本引用。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/font-shaping.md#禁止项",
+      "source": "docs/AGENT_RULES/font-shaping.md",
+      "text": "## 禁止项\n\n- 不在通用 shaping 代码里出现平台 cfg——平台只进 locator/rasterizer 既定\n  位置。\n- 不新增同步阻塞的字体网络/磁盘全盘扫描路径。\n- 不手改 deps/ 子模块与生成数据表。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/font-shaping.md#符号真源",
+      "source": "docs/AGENT_RULES/font-shaping.md",
+      "text": "## 符号真源\n\n- 状态所有者：`wezterm-font/src/lib.rs::FontConfiguration`（壳）+\n  私有 `FontConfigInner`（TextStyle→`Rc<LoadedFont>` 缓存、字体库、locator、\n  专用实体字体）；`LoadedFont`（fallback 链 + `Box<dyn FontShaper>` +\n  惰性光栅化器）。\n- shaping 接口：`wezterm-font/src/shaper/mod.rs::FontShaper` trait\n  （`shape/metrics/metrics_for_idx`），harfbuzz 实现 `shaper/harfbuzz.rs`。\n- 风格匹配：`FontConfiguration::match_style`（config 的 font_rules 把\n  CellAttributes 映射到 TextStyle）。\n- 平台门控：`locator/`（unix fontconfig / macos core_text / windows gdi，\n  `new_locator()` 分发）、`rasterizer/`（freetype/colr）、mac 依赖在\n  Cargo.toml target 段；features `vendor-jetbrains/roboto/noto-emoji/\n  nerd-fonts-symbols`。\n- 属性表：`wezterm-char-props/src/{emoji_variation,nerdfonts_data,widechar_width,\n  emoji_presentation}.rs`——emoji_variation/nerdfonts_data 是 codegen 产物\n  （`wezterm-char-props/codegen`：`cargo run > ../src/emoji_variation.rs`）。\n- deps/：`deps/cairo` 是 cairo-sys-rs 补丁版（[patch.crates-io] 指向）；\n  其余为静态链接系统图形库的 build 辅助；子模块内容不手改。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/font-shaping.md#范围",
+      "source": "docs/AGENT_RULES/font-shaping.md",
+      "text": "## 范围\n\n`wezterm-font/`、`wezterm-char-props/`（含 codegen/）、`deps/`（cairo、\nfontconfig、freetype、harfbuzz 的构建辅助 crate 与上游子模块）。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/font-shaping.md#验证",
+      "source": "docs/AGENT_RULES/font-shaping.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p wezterm-font -p wezterm-char-props`。\n- 视觉回归：`make ui-smoke` 截图读回；`wezterm-gui ls-fonts` 输出冒烟。\n- codegen 改动：在 codegen 目录重跑生成 → `git diff` 审数据表变化。"
+    },
+    {
+      "anchor": "gui-rendering：GUI 前端",
+      "id": "docs/AGENT_RULES/gui-rendering.md#gui-rendering：GUI 前端",
+      "source": "docs/AGENT_RULES/gui-rendering.md",
+      "text": "# gui-rendering：GUI 前端"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/gui-rendering.md#不变量",
+      "source": "docs/AGENT_RULES/gui-rendering.md",
+      "text": "## 不变量\n\n- **pane 树归属 mux**：TermWindow 只缓存视口/选区/overlay；布局事实（Tab 的\n  bintree、zoom）以 `mux::Tab` 为准，GUI 不得自建第二份布局真源。\n- **事件只在平台事件循环线程派发**（`window/src/lib.rs::WindowEventSender`\n  契约）；其它线程一律 `Window::notify` 投递 `TermWindowNotif::Apply`。\n- **Lua 事件队列**：`EventState::{None,InProgress,InProgressWithQueued}` 每\n  类窗口事件最多 1 执行 + 1 挂起；不要绕过该状态直接 emit。\n- **前端二选一**：`config.front_end` 决定 glium（OpenGL）或 WebGPU；\n  `RenderContext/RenderFrame` 是双后端抽象，改动需两后端同审（无对应环境\n  时另一侧记 PENDING，不得声称已验证）。\n- **缓存失效代数**：`quad_generation/shape_generation` 递增驱动 LfuCache\n  失效；config reload 走 `config_was_reloaded` 刷新字体与形状缓存，新增\n  配置相关缓存必须挂进这条链。\n- **纹理耗尽降级链**：`AllowImage::Yes→Scale(2/4/8)→No`；新图像路径要接进\n  该链而不是自行吞错。\n- **wezterm.gui 只在 GUI 进程注册**（window-funcs crate 由 main.rs 单独\n  add_context_setup_func）；config-lua 域的注册中心不含它。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/gui-rendering.md#禁止项",
+      "source": "docs/AGENT_RULES/gui-rendering.md",
+      "text": "## 禁止项\n\n- 不在渲染循环里做布局/状态变更（渲染只读 pane 视口）。\n- 不新增 `#[cfg(target_os)]` 于本域通用代码——平台差异下沉到 `window/os/`。\n- 不直接写 `TerminalState`；GUI 侧选区模型在 `src/selection.rs`，经\n  `SelectionCoordinate` 体系操作。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/gui-rendering.md#符号真源",
+      "source": "docs/AGENT_RULES/gui-rendering.md",
+      "text": "## 符号真源\n\n- 入口：`wezterm-gui/src/main.rs::run_terminal_gui`（建 mux、尝试让既有\n  GUI 实例代生、`GuiFrontEnd`、`run_forever`）；子命令定义在\n  `wezterm-gui-subcommands`（cli-main 域共享）。\n- 窗口状态所有者：`wezterm-gui/src/termwindow/mod.rs::TermWindow`——窗口\n  句柄、`ConfigHandle` 与 `config_overrides`、字体 `Rc<FontConfiguration>`、\n  `RenderState`（GL 或 WebGPU 二选一）、形状/行缓存（LfuCache）、\n  `tab_state`/`pane_state`（每 pane 视口/选区/overlay 缓存）、`modal`。\n  跨线程通知统一走 `TermWindowNotif`（`Window::notify` → 主线程\n  `dispatch_notif`）。\n- 渲染：`termwindow/render/paint.rs::paint_impl`（'pass 循环处理\n  `OutOfTextureSpace`：重建/增长 atlas → 图像按 AllowImage 链降级）；\n  `renderstate.rs::RenderState/TripleLayerQuadAllocator`；webgpu 后端在\n  `termwindow/webgpu.rs::WebGpuState`。字形缓存 `glyphcache.rs::GlyphCache`。\n- overlay/modal：`termwindow/overlay/`（selector/launcher/copy/quickselect/\n  confirm/prompt/debug）与 `termwindow/modal.rs::Modal` trait；overlay pane\n  用 `mux::termwiztermtab::allocate` 造内存终端，跑在独立线程，结束经\n  `schedule_cancel_overlay` 回主线程。\n- 输入：`termwindow/keyevent.rs`（leader 键 → `inputmap.rs::InputMap` 命中\n  → `perform_key_assignment` 大分派；未命中经 dead-key/compose 编码写入\n  pane）；鼠标在 `mouseevent.rs`（选区、超链接 `UIItem::hit_test`）。\n- 前端映射：`frontend.rs::GuiFrontEnd`——`known_windows` 是 GUI Window ↔\n  mux window 的映射所有者；订阅 `MuxNotification` 驱动重绘与退出。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/gui-rendering.md#范围",
+      "source": "docs/AGENT_RULES/gui-rendering.md",
+      "text": "## 范围\n\n`wezterm-gui/`：TermWindow 状态、渲染管线、overlay/modal、输入处理、\nLua gui 命名空间。平台窗口与事件抽象在 platform-window 域（`window/`）。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/gui-rendering.md#验证",
+      "source": "docs/AGENT_RULES/gui-rendering.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p wezterm-gui`（少量单测）；类型改动跑\n  `make check`。\n- 任何可见行为变更：`make ui-smoke`（Xvfb + xwd 截图）并读回图片核对；\n  证据目录 `make evidence TASK=<任务名>` 分配，结果登记 images_reviewed。\n- 字体/整形相关联动 font-shaping 域验证；窗口行为在 NixOS VM\n  （`nix#testing-on-gnome/plasma`）人工核对（见 docs/TESTING.md）。"
+    },
+    {
+      "anchor": "mux-domain：多路复用与客户端/服务端协议",
+      "id": "docs/AGENT_RULES/mux-domain.md#mux-domain：多路复用与客户端/服务端协议",
+      "source": "docs/AGENT_RULES/mux-domain.md",
+      "text": "# mux-domain：多路复用与客户端/服务端协议"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/mux-domain.md#不变量",
+      "source": "docs/AGENT_RULES/mux-domain.md",
+      "text": "## 不变量\n\n- **生命周期**：pty EOF 后按 `exit_behavior`（Hold/CloseOnCleanExit/Close）\n  在**主线程异步**执行清理；`prune_dead_windows` 在 `Activity::count()>0`\n  （有启动中任务）时跳过；mux 变空发 `MuxNotification::Empty` 驱动 GUI 退出。\n  改退出路径必须保留\"启动中不清理\"的保护。\n- **通知线程边界**：`MuxWindowBuilder` 的 Drop 发 `WindowCreated` 时区分\n  主线程直发与 spawn_into_main_thread（Wayland 时序敏感）；不要从任意线程\n  直接触碰窗口对象。\n- **GUI 内嵌 listener**：GUI 总是起 `gui-sock-{pid}` 的 LocalListener；\n  `wezterm start` 先 `discovery::resolve_gui_sock_path` 尝试让既有实例代生\n  （SpawnV2，校验 exe/config 一致性）。改动 spawn 协议要同审两端版本兼容\n  （`verify_version_compat`）。\n- **PDU 兼容**：`codec::Pdu` 是跨进程契约；新增/变更字段考虑旧客户端共存，\n  依赖 `GetCodecVersion/Ping` 通道；不要复用 serial。\n- **TLS 证书**：`pki.rs::Pki::init` 用 rcgen 每次生成 CA/服务端证书；客户端\n  证书经 `GetTlsCreds` 申请。不要把证书/私钥写入仓库或日志。\n- **限流**：pane 推流经 `ratelim::RateLimiter`（config 可调）；新推流路径\n  必须挂限流，防止远端客户端被淹没。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/mux-domain.md#禁止项",
+      "source": "docs/AGENT_RULES/mux-domain.md",
+      "text": "## 禁止项\n\n- 不在 mux 层引用 GUI/窗口类型（保持 headless 可用：mux-server、CLI 依赖它）。\n- 不绕过 `Pane` trait 直接操作 LocalPane 内部 term（跨 crate 用 TerminalView\n  等只读接口）。\n- 不引入 tokio/多运行时——异步骨架是 `promise` + smol（见 support-crates）。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/mux-domain.md#符号真源",
+      "source": "docs/AGENT_RULES/mux-domain.md",
+      "text": "## 符号真源\n\n- 全局单例：`mux/src/lib.rs::MUX`（`Mux::get/set_mux/shutdown`）。状态所有者\n  `Mux::tabs/panes/windows`（RwLock）、domains、subscribers、clients。\n- 通知：`mux/src/lib.rs::MuxNotification`（PaneOutput/PaneAdded/…/Empty），\n  经 `notify_from_any_thread` 发布；GUI 前端与 CLI 都靠它驱动。\n- 输出泵：`read_from_pane_pty`（阻塞读线程）→ socketpair →\n  `parse_buffered_data`（escape 解析，含 DECSET 2026 同步输出 hold/flush 与\n  coalesce 延迟）→ `send_actions_to_mux` → `Pane::perform_actions`。\n- 域与 pane：`mux/src/domain.rs::Domain` trait（LocalDomain、\n  `ssh.rs::RemoteSshDomain`）；`pane.rs::Pane` trait +\n  `localpane.rs::LocalPane`；`tab.rs::Tab`（`TabInner` 内 bintree pane 树 +\n  zoomed）；`termwiztermtab.rs::TermWizTerminal`（overlay 用的内存终端，\n  `allocate()` 工厂）。\n- 客户端：`wezterm-client/src/client.rs::Client`（unix/TLS/ssh 三种构造；\n  RPC 经 `send_pdu`）；`domain.rs::ClientDomain`/`pane/clientpane.rs::ClientPane`\n  把远端 mux 镜像成本地 Pane；GUI socket 发现 `discovery.rs`。\n- 服务端：`wezterm-mux-server-impl/src/{local,dispatch,sessionhandler,pki}.rs`；\n  daemonize 会 re-exec 自身（fork 破坏 smol reactor，见 main.rs 注释）。\n- 帧协议：`codec/src/lib.rs::Pdu`（宏生成）与\n  `encode_raw_as_vec/decode_raw_async`——leb128 长度（含压缩标记）+ serial +\n  ident + bincode payload；serial 单调用于丢弃过期响应。\n- ssh agent 转发：`mux/src/ssh_agent.rs::AgentProxy`。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/mux-domain.md#范围",
+      "source": "docs/AGENT_RULES/mux-domain.md",
+      "text": "## 范围\n\n`mux/`、`wezterm-client/`、`wezterm-mux-server/`、`wezterm-mux-server-impl/`、\n`codec/`、`wezterm-uds/`。GUI 内嵌 mux、独立 mux server、远程客户端共用\n同一套 Domain/Pane 抽象。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/mux-domain.md#验证",
+      "source": "docs/AGENT_RULES/mux-domain.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p mux -p codec`（tab/pane 树与帧编码单测）。\n- 协议变更：`-p wezterm-client` + 手动起 mux-server 连一轮（`wezterm cli list`）。\n- TLS 域：`wezterm cli tlscreds` 流程人工核对；证书生成逻辑改动的证据留在\n  `.ui-evidence/` 或交付说明（不截图命令行凭据）。"
+    },
+    {
+      "anchor": "platform-window：平台窗口与事件抽象",
+      "id": "docs/AGENT_RULES/platform-window.md#platform-window：平台窗口与事件抽象",
+      "source": "docs/AGENT_RULES/platform-window.md",
+      "text": "# platform-window：平台窗口与事件抽象"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/platform-window.md#不变量",
+      "source": "docs/AGENT_RULES/platform-window.md",
+      "text": "## 不变量\n\n- **事件线程**：事件只能在平台事件循环线程派发（WindowEventSender 契约）；\n  其它线程用 `WindowOps::notify` 投递任意 `Any + Send + Sync` 通知。\n- **枚举分发**：Linux 双后端的行为差异封在枚举 match 里；不得让上层直接\n  触碰 x11/wayland 私有类型。\n- **键盘映射一致性**：keycode→KeyCode 的表是输入兼容面；修键映射必须带\n  平台与布局说明（回归风险高，先查上游 issue）。\n- **DPI/外观**：`default_dpi` 与 `get_appearance` 是缩放与深浅色的依据，\n  改动会全局影响渲染尺寸计算。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/platform-window.md#禁止项",
+      "source": "docs/AGENT_RULES/platform-window.md",
+      "text": "## 禁止项\n\n- 通用代码不得出现 `#[cfg(target_os)]`/`#[cfg(windows)]`——平台实现只进\n  `os/` 子目录（wezterm-gui 同样约束，见 gui-rendering）。\n- 不在本 crate 引入终端模型概念（Cell/Grid）；它只服务窗口/输入/位图。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/platform-window.md#符号真源",
+      "source": "docs/AGENT_RULES/platform-window.md",
+      "text": "## 符号真源\n\n- 连接层：`window/src/connection.rs::ConnectionOps`（thread-local `CONN`、\n  消息循环、DPI：macOS 72 其余 96、外观、屏幕枚举）。\n- 窗口层：`window/src/lib.rs::WindowOps` trait + `WindowEvent` 枚举 +\n  `WindowState` bitflags（can_resize/can_paint 门）；`WindowEventSender`\n  把事件回调挂到 wezterm-gui 的 `dispatch_window_event`。\n- 平台选择：`window/src/os/x_and_wayland.rs`——Linux 上 `Connection`/\n  `Window` 是 `X11(..)|Wayland(..)` 枚举，`create_new()` 先 Wayland（config\n  `enable_wayland` + feature）失败回落 X11；其余平台 `os/{macos,windows}`。\n- 键盘编码：`os/x11/keyboard.rs::XKeymap`（xkbcommon+compose；X keycode 有\n  +8 偏移）、`os/xkeysyms.rs::keysym_to_keycode`、各平台 keycodes.rs；\n  输入类型真源在 `wezterm-input-types`（window 直接 re-export）。\n- 纹理契约：`window/src/bitmaps/atlas.rs::Atlas`（`allocate()` 失败给\n  `OutOfTextureSpace`）+ `bitmaps/mod.rs::Texture2d` trait——GUI 的 atlas\n  降级链依赖该契约。\n- promise 调度：`window/src/spawn.rs::SPAWN_QUEUE` + \n  `connection.rs::register_promise_schedulers`（future 排队到主循环）。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/platform-window.md#范围",
+      "source": "docs/AGENT_RULES/platform-window.md",
+      "text": "## 范围\n\n`window/`（X11/Wayland/Windows/macOS 窗口与事件循环、位图 atlas）、\n`wezterm-input-types/`（KeyCode/KeyEvent/Modifiers/MouseEvent 定义）、\n`wezterm-toast-notification/`（系统通知）。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/platform-window.md#验证",
+      "source": "docs/AGENT_RULES/platform-window.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p window`（用例少）；`make check`。\n- 平台行为：本机 X11 冒烟 `make ui-smoke`；Wayland/macOS/Windows 无环境时\n  记 PENDING 并注明由上游 CI（gen 工作流矩阵）佐证。"
+    },
+    {
+      "anchor": "process-io：PTY、进程与文件描述符",
+      "id": "docs/AGENT_RULES/process-io.md#process-io：PTY、进程与文件描述符",
+      "source": "docs/AGENT_RULES/process-io.md",
+      "text": "# process-io：PTY、进程与文件描述符"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/process-io.md#不变量",
+      "source": "docs/AGENT_RULES/process-io.md",
+      "text": "## 不变量\n\n- **抽象优先**：上游消费方（mux、wezterm-ssh 经 re-export）只依赖 trait；\n  新平台能力先扩 trait 再实现，不允许 cfg 泄漏到调用方。\n- **ConPTY 兼容**：Windows 实现依赖系统 conpty 可用性探测；改动需在\n  WinPty 回退路径上同样验证（无环境记 PENDING）。\n- **CommandBuilder 语义**：env 继承与登录 shell 修饰的规则影响所有 spawn\n  路径（含 ssh 域）；改动要有针对性测试并列出受影响域。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/process-io.md#禁止项",
+      "source": "docs/AGENT_RULES/process-io.md",
+      "text": "## 禁止项\n\n- 不在 PTY 层做策略（exit_behavior、进程组回收归属 mux）。\n- 不引入阻塞式同步等待进 GUI 主循环（子进程等待都在 mux 线程）。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/process-io.md#符号真源",
+      "source": "docs/AGENT_RULES/process-io.md",
+      "text": "## 符号真源\n\n- PTY 抽象：`pty/src/lib.rs`——`PtySize`、`MasterPty`（resize/take_writer/\n  try_clone_reader）、`Child`/`ChildKiller`、`SlavePty`、`PtySystem`\n  （`local_pty_system()`）；unix openpty+fork、Windows ConPTY/WinPty 在\n  `src/win/`；**串口实现同一 MasterPty 抽象**（`src/serial.rs`，LocalDomain\n  的 serial 域基础）。\n- 进程描述：`pty/src/cmdbuilder.rs::CommandBuilder`（argv/env/cwd/登录\n  shell 组装）——mux `Domain::spawn`/`fixup_command` 与 GUI start 的契约。\n- 进程信息：`procinfo/src/lib.rs::LocalProcessInfo`（进程树/cwd/exe，pane\n  foreground process 的来源）。\n- FD 抽象：`filedescriptor/src/lib.rs::FileDescriptor/OwnedHandle/Pipe` +\n  可移植 poll（macOS 实际是 select 包装）。\n- umask：`umask/` 的 `UmaskSaver`（spawn/daemonize 前保存恢复）。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/process-io.md#范围",
+      "source": "docs/AGENT_RULES/process-io.md",
+      "text": "## 范围\n\n`pty/`（portable-pty）、`procinfo/`、`filedescriptor/`、`umask/`。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/process-io.md#验证",
+      "source": "docs/AGENT_RULES/process-io.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p portable-pty -p procinfo -p filedescriptor`。\n- 串口/Windows 无真实设备环境：相关行为记 PENDING，不伪造通过。"
+    },
+    {
+      "anchor": "product-assets：静态资源",
+      "id": "docs/AGENT_RULES/product-assets.md#product-assets：静态资源",
+      "source": "docs/AGENT_RULES/product-assets.md",
+      "text": "# product-assets：静态资源"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/product-assets.md#不变量",
+      "source": "docs/AGENT_RULES/product-assets.md",
+      "text": "## 不变量\n\n- 二进制资源的替换必须说明来源与许可（字体/图标各有 LICENSE 归属）。\n- 引用路径改动要与打包脚本/安装器同步（一处改漏=发布产物缺文件）。\n- `.desktop` 的 `Exec`/`TryExec` 与实际二进制名强耦合。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/product-assets.md#禁止项",
+      "source": "docs/AGENT_RULES/product-assets.md",
+      "text": "## 禁止项\n\n- 不手改生成型资产（shell-completion）；不提交无关格式化 diff。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/product-assets.md#符号真源",
+      "source": "docs/AGENT_RULES/product-assets.md",
+      "text": "## 符号真源\n\n- shell 补全：`assets/shell-completion/{bash,zsh,fish,elvish,powershell,\n  fig…}` 由 `ci/update-derived-files.sh` 从 `wezterm shell-completion`\n  生成——不手改（hooks 亦拦直接写 docs/changelog 之外的重点生成物，补全\n  走 `make generated-check` 把关）。\n- 打包引用：`ci/appimage.sh`、`ci/windows-installer.iss`、flatpak/与\n  macos/ 资源被对应发布脚本引用（上游执行）；`.desktop`/appdata 的图标\n  路径与 `assets/icon/` 联动。\n- vendored 字体：`assets/fonts/SymbolsNerdFontMono-Regular.ttf` 等被\n  wezterm-font 的 vendor feature 与 docs 构建（favicon/字体复制）引用。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/product-assets.md#范围",
+      "source": "docs/AGENT_RULES/product-assets.md",
+      "text": "## 范围\n\n`assets/` 除 shell-integration（归 terminal-model）外的全部：`fonts/`、\n`icon/`、`flatpak/`、`macos/`、`open-wezterm-here/`、`shell-completion/`、\n`windows/`、`wezterm.desktop`、`wezterm.appdata.xml`、`wezterm-nautilus.py`。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/product-assets.md#验证",
+      "source": "docs/AGENT_RULES/product-assets.md",
+      "text": "## 验证\n\n- `make generated-check`（补全一致性）。\n- 引用改动：`grep` 全仓引用点 + 对应平台打包脚本人工核对（无环境记\n  PENDING）。"
+    },
+    {
+      "anchor": "product-docs：产品文档站",
+      "id": "docs/AGENT_RULES/product-docs.md#product-docs：产品文档站",
+      "source": "docs/AGENT_RULES/product-docs.md",
+      "text": "# product-docs：产品文档站"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/product-docs.md#不变量",
+      "source": "docs/AGENT_RULES/product-docs.md",
+      "text": "## 不变量\n\n- **strict 构建**：mkdocs strict=true，警告即失败；新增页面必须进 nav\n  （由 generate-docs.py 管）或列入 exclude_docs。\n- **gelatyx 扫描**：docs/ 全部 md 的 lua 代码块被 `ci/build-docs.sh` 用\n  stylua --check 校验；框架文档（AGENT_RULES 等）因此不写 lua 块。\n- **上游文档不手改语义**：本 fork 对 docs/ 的改动限于随上游同步；fork 特有\n  说明写在自己的手册（docs/{ARCHITECTURE,DEVELOPMENT,…}.md，已 exclude），\n  避免同步冲突。错误修正应走上游 PR（由人类操作）。\n- **exclude_docs 维护**：新增框架侧 docs 顶层文件必须同步加进\n  mkdocs-base.yml 的 exclude_docs 列表，否则污染公共站。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/product-docs.md#禁止项",
+      "source": "docs/AGENT_RULES/product-docs.md",
+      "text": "## 禁止项\n\n- 不手改 `docs/config/lua/**` 与索引页（走 make generated-write 链）。\n- 不把 AI 会话链接/内部流程说明写进产品文档。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/product-docs.md#符号真源",
+      "source": "docs/AGENT_RULES/product-docs.md",
+      "text": "## 符号真源\n\n- 站点配置：`docs/mkdocs-base.yml`（strict: true；fork 追加了 exclude_docs\n  段排除框架文档）；生成的 `mkdocs.yml`（gitignored）INHERIT 它。\n- 导航生成：`ci/generate-docs.py` 扫描 docs/ 与 lua-api-crates 生成索引页\n  与 nav；`docs/SUMMARY.md`（mdbook）同源生成。\n- Lua API 参考：`docs/config/lua/**`（542 个文件）由 Rust doc 注释经文档\n  链路生成——**不是手写文档**。\n- changelog：`docs/changelog.md`（上游产品变更，`### Continuous/Nightly`\n  未发布段 + `#### Changed/Added/Fixed`；版本名=日期-时间-hash）。\n- 宏：`mkdocs_macros.py` 提供 `since` 宏（版本标注，配合\n  `docs/releases.json`）。\n- 截图：`docs/screenshots/`（静态资产）；配色页由\n  `ci/make-color-screen-shots.sh` 手动流程生成。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/product-docs.md#范围",
+      "source": "docs/AGENT_RULES/product-docs.md",
+      "text": "## 范围\n\n`docs/`（除 AGENT_RULES 与框架手册外）、`docs-internal/`。上游 mkdocs\n（material 主题）+ mdbook 双形态文档站，发布到 wezterm.org（上游 GH Pages）。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/product-docs.md#验证",
+      "source": "docs/AGENT_RULES/product-docs.md",
+      "text": "## 验证\n\n- `make generated-check`（索引/TOC 派生一致）。\n- 文档站构建需 docker/podman（ci/build-docs.sh），本地无容器环境时记\n  PENDING，上游 pages CI 会最终把关。"
+    },
+    {
+      "anchor": "ssh-domain：SSH 会话",
+      "id": "docs/AGENT_RULES/ssh-domain.md#ssh-domain：SSH 会话",
+      "source": "docs/AGENT_RULES/ssh-domain.md",
+      "text": "# ssh-domain：SSH 会话"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/ssh-domain.md#不变量",
+      "source": "docs/AGENT_RULES/ssh-domain.md",
+      "text": "## 不变量\n\n- **feature 矩阵**：改动必须分别在 libssh-rs、ssh2 单开下编译\n  （上游 CI wezterm_ssh.yml 就是这个矩阵）；封装层不得把某后端私有类型\n  泄漏出 crate。\n- **非阻塞线程模型**：SessionInner 用 filedescriptor::poll 驱动，不引入\n  tokio；唤醒靠 socketpair 管道。改 I/O 路径保持该模型。\n- **凭据纪律**：密钥/口令只经 ConfigMap 与认证回调流转；不写日志、不落盘、\n  不进测试快照。测试密钥全部由 Sshd fixture 临时生成。\n- **e2e 前置**：本机需 `/usr/sbin/sshd` 可执行（CI 由工作流安装）；\n  `make test-integration` = `cargo nextest run -p wezterm-ssh`。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/ssh-domain.md#禁止项",
+      "source": "docs/AGENT_RULES/ssh-domain.md",
+      "text": "## 禁止项\n\n- 不在 SSH 层做 UI/连接向导（connui 在 mux-domain）。\n- 不悄悄放宽主机密钥校验（HostVerify 必须经事件决策）。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/ssh-domain.md#符号真源",
+      "source": "docs/AGENT_RULES/ssh-domain.md",
+      "text": "## 符号真源\n\n- 会话入口：`wezterm-ssh/src/session.rs::Session`（Clone 的轻句柄，Drop 发\n  `SessionDropped`）+ `connect(ConfigMap) -> (Session, Receiver<SessionEvent>)`\n  ——内部线程跑 `sessioninner.rs::SessionInner::run()`（poll 循环管理\n  channels/files/dirs 与 keepalive）。\n- 事件驱动认证：`SessionEvent::{Banner,HostVerify,Authenticate,\n  HostVerificationFailed,Error,Authenticated}`；交互式逻辑在 `auth.rs`。\n- 配置解析：`config.rs` 是 openssh 兼容解析器——支持 ProxyCommand（token\n  展开 %h %n %p %r），**不支持 ProxyJump**（%j 展开为空，见代码注释）；\n  选项兼容性以 tests 里的解析用例为准。\n- 双后端：Cargo features `libssh-rs` 与 `ssh2`（默认都开，可单独关）；\n  运行时由 config `wezterm_ssh_backend` 选择；统一封装层\n  `sessionwrap/channelwrap/filewrap/dirwrap/sftpwrap.rs`。\n- e2e 设施：`tests/sshd.rs::Sshd::spawn`（TempDir 生成密钥/config，起\n  `/usr/sbin/sshd -D -p <port>`，端口探测重试）+ rstest fixture\n  `sshd()/session()`；e2e 在 `tests/e2e/{sftp,agent_forward}.rs`。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/ssh-domain.md#范围",
+      "source": "docs/AGENT_RULES/ssh-domain.md",
+      "text": "## 范围\n\n`wezterm-ssh/`：SSH 客户端协议实现（认证、配置解析、sftp、agent 转发）、\n双后端封装、e2e 测试设施。mux 侧的 RemoteSshDomain/ClientDomain 归\nmux-domain 域。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/ssh-domain.md#验证",
+      "source": "docs/AGENT_RULES/ssh-domain.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p wezterm-ssh`（含 e2e，自动起 sshd）。\n- feature 矩阵：`cargo check -p wezterm-ssh --no-default-features\n  --features libssh-rs` 与 `--features ssh2` 各一轮。\n- 改 openssh 配置解析：补 config.rs 解析测试用例（对照 openssh 行为）。"
+    },
+    {
+      "anchor": "support-crates：支撑库",
+      "id": "docs/AGENT_RULES/support-crates.md#support-crates：支撑库",
+      "source": "docs/AGENT_RULES/support-crates.md",
+      "text": "# support-crates：支撑库"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/support-crates.md#不变量",
+      "source": "docs/AGENT_RULES/support-crates.md",
+      "text": "## 不变量\n\n- **异步骨架唯一**：全仓只用 promise+smol；新代码不得引入 tokio/async-std。\n- **no_std 面**：bidi 是 no_std；保持 alloc-only。\n- **纯库纪律**：这些 crate 不依赖 term/mux/GUI（依赖方向只能向下/向旁）；\n  它们多数可独立发布，公开 API 变更按破坏性变更对待。\n- **语义稳定**：bidi/conformance、rangeset、base91 属于\"跨实现 oracle\"性质\n  ——行为变更必须带对应用例更新与理由，不许顺手改。"
+    },
+    {
+      "anchor": "各自一句话",
+      "id": "docs/AGENT_RULES/support-crates.md#各自一句话",
+      "source": "docs/AGENT_RULES/support-crates.md",
+      "text": "## 各自一句话\n\n- `promise`：单线程 promise/future + `spawn/spawn_into_main_thread/\n  ScopedExecutor/block_on`——**全仓异步骨架**（基于 smel/async-io，不是\n  tokio）。\n- `bidi`：UAX#9 双向文本（`BidiContext::resolve_paragraph`），\n  `ParagraphDirectionHint` 供 term/字体/GUI 消费；tests/conformance.rs 跑\n  Unicode 官方 BidiTest/BidiCharacterTest。\n- `bintree`：Zipper 二叉树——mux Tab 的 pane 布局数据结构。\n- `rangeset`：相邻整数合并的区间集合——字体 coverage 判断。\n- `lfucache`：LFU 缓存（容量可从 ConfigHandle 读、命中率上报）；GUI 形状/\n  行/四边形缓存都用它。\n- `frecency`：频率+新近打分——选择器历史排序。\n- `tabout`：文本表格对齐；`base91`：basE91 编解码（Lua/插件数据）。\n- `ratelim`：令牌桶限流（mux 推流）。\n- `async_ossl`：openssl 流的 async 适配（TLS mux 域）。\n- `color-types`（crate wezterm-color-types）：SrgbaPixel/SrgbaTuple/\n  LinearRgba 颜色数学（sRGB↔linear）。\n- `strip-ansi-escapes`：ANSI 过滤（bin + lib）。\n- `wezterm-open-url`：跨平台打开 URL/文件。\n- `wezterm-blob-leases`：大数据 blob 租约（imgcat/Sixel 图片存 mux 侧，\n  lease id 传 GUI 解码）。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/support-crates.md#禁止项",
+      "source": "docs/AGENT_RULES/support-crates.md",
+      "text": "## 禁止项\n\n- 不为局部需求 fork/复制这些库的语义到调用方。\n- 不在支撑库里加 config 具体字段的直接读取（除了 lfucache 既有的容量\n  约定）。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/support-crates.md#范围",
+      "source": "docs/AGENT_RULES/support-crates.md",
+      "text": "## 范围\n\n`promise/`、`filedescriptor` 之外的小型支撑库：`bidi/`、`bintree/`、\n`rangeset/`、`lfucache/`、`frecency/`、`tabout/`、`base91/`、`ratelim/`、\n`async_ossl/`、`color-types/`、`strip-ansi-escapes/`、`wezterm-open-url/`、\n`wezterm-blob-leases/`。（filedescriptor/procinfo/umask 在 process-io 域。）"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/support-crates.md#验证",
+      "source": "docs/AGENT_RULES/support-crates.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p wezterm-bidi -p lfucache -p rangeset -p base91`。\n- bidi 行为变更：conformance 数据不得裁剪来\"修\"失败。"
+    },
+    {
+      "anchor": "terminal-model：终端仿真核心",
+      "id": "docs/AGENT_RULES/terminal-model.md#terminal-model：终端仿真核心",
+      "source": "docs/AGENT_RULES/terminal-model.md",
+      "text": "# terminal-model：终端仿真核心"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/terminal-model.md#不变量",
+      "source": "docs/AGENT_RULES/terminal-model.md",
+      "text": "## 不变量\n\n- **seqno**：`Terminal::advance_bytes` 每次调用先 `increment_seqno()`；\n  `wezterm-surface::SequenceNo` 只在单个 Surface 实例内有意义。消费方靠\n  seqno 判断行脏与否，禁止跳号或复用。\n- **行号类型系统**：`PhysRowIndex=usize`（0=scrollback 顶）、\n  `VisibleRowIndex=i64`、`ScrollbackOrVisibleRowIndex=i32`、\n  `StableRowIndex=isize`（逻辑行号，purge 后仍稳定）。刻意不同宽不同号，\n  让编译器拦截混用；换算只经 `Screen` 上的 `phys_row/stable_row_to_phys/\n  visible_row_to_stable_row` 家族。\n- **写侧线程模型**：`TerminalState.writer` 是 `ThreadedWriter`——把响应写\n  侧挪到独立线程，避免大粘贴进 vim 时与输出互锁；不得改回同步写。\n- **no_std 面**：`vtparse`、`wezterm-escape-parser`、`wezterm-surface`、\n  `wezterm-cell`、`bidi` 保持 `no_std` 可构建（escape-parser 无 default\n  feature；`make test` 第二轮就是 no_std 检查）。给这些 crate 加依赖必须\n  核对 feature 矩阵（std/alloc/use_serde/use_image/tmux_cc/kitty-shm）。\n- **枚举尺寸**：`wezterm-escape-parser/src/lib.rs::Action` 及其变体有\n  `size_of` 断言测试（64 位目标）；新增变体注意别把尺寸改爆。\n- **Surface resize**：`wezterm-surface::Surface::resize` 使变更流失效\n  （seqno+1 清空 changes，下次全量重绘）；`DiffState` 会合并相邻文本、抑制\n  冗余光标/属性变更，别在渲染层重复做这类合并。\n- **vtparse 上限**：OSC 缓冲有 `MAX_OSC` 上限；加长 OSC 语义时同步评估两端。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/terminal-model.md#禁止项",
+      "source": "docs/AGENT_RULES/terminal-model.md",
+      "text": "## 禁止项\n\n- 不在 `term` 之外的地方直接改 `TerminalState`（GUI/CLI 一律经公开 API 或\n  `Change` 流）。\n- 不把平台/窗口概念引进本域（输入用 `wezterm_input_types` 的类型即可）。\n- 不手改生成数据表（`config/src/scheme_data.rs` 等，见 build-ci-release）；\n  本域无生成表，但 emoji/宽度表在 `wezterm-char-props`（font-shaping 域）。\n- 选区模型在 GUI 侧（`wezterm-gui/src/selection.rs`）；不要往 term 里加选区。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/terminal-model.md#符号真源",
+      "source": "docs/AGENT_RULES/terminal-model.md",
+      "text": "## 符号真源\n\n- 入口：`term/src/terminal.rs::Terminal`（`state: TerminalState` + escape\n  `Parser` 的组合，Deref 到状态）；`Terminal::advance_bytes` 是字节进入模型的\n  唯一常规入口，`perform_actions` 用于重放。\n- 状态所有者：`term/src/terminalstate/mod.rs::TerminalState`（屏幕、光标、\n  margins、鼠标/键盘编码、palette、image_cache、title、bidi 标记等约 60 字段）。\n  动作应用只经 `terminalstate/performer.rs::Performer::perform`（VTActor 桥）。\n- 屏幕与行：`term/src/screen.rs::Screen`（scrollback 物理所有者，\n  `ScreenOrAlt` 主/备屏）；行存 `wezterm-surface/src/lib.rs::Line`（Vec 与\n  ClusteredLine 两种存储，`compress_for_scrollback`/`coerce_vec_storage`）；\n  格子 `wezterm-cell/src/lib.rs::Cell`/`CellAttributes`。\n- 解析分层：`vtparse/src/lib.rs::VTParser`（DEC 状态机，只分类不赋义）→\n  `wezterm-escape-parser/src/parser/mod.rs::Parser`（组装语义 `Action`，可\n  编解码回转义序列）→ `term` 的 Performer 应用。`OneBased` 包装 CSI 参数。\n- 语义区：`term/src/lib.rs::SemanticZone` 与\n  `TerminalState::get_semantic_zones`（SemanticType 为 Output/Input/Prompt）。\n- shell-integration：`assets/shell-integration/` 的脚本注入 OSC 133 等序列，\n  是 SemanticZone 的上游约定；改脚本要同时核对 escape-parser 的 OSC 分派。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/terminal-model.md#范围",
+      "source": "docs/AGENT_RULES/terminal-model.md",
+      "text": "## 范围\n\n`term/`（wezterm-term）、`wezterm-cell/`、`wezterm-surface/`、\n`wezterm-escape-parser/`、`vtparse/`、`assets/shell-integration/`。\n数据流：PTY 字节 → escape 解析 → 终端模型 → 供 mux/GUI 消费的行与格子。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/terminal-model.md#验证",
+      "source": "docs/AGENT_RULES/terminal-model.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p wezterm-term`（TestTerm 脚手架在\n  `term/src/test/mod.rs`，k9 快照用 `K9_UPDATE=1` 更新）；\n  escape 解析：`cargo nextest run -p wezterm-escape-parser`（含 no_std 轮与\n  round-trip 编解码测试）；surface：`-p wezterm-surface`。\n- 新增转义/OSC 行为：同时补 performer 侧单测与（若影响 shell-integration）\n  人工核对脚本注入序列。\n- 影响渲染路径（CellCluster/Line 压缩）时联动 `make ui-smoke` 截图读回。"
+    },
+    {
+      "anchor": "testing：测试数据与测试纪律",
+      "id": "docs/AGENT_RULES/testing.md#testing：测试数据与测试纪律",
+      "source": "docs/AGENT_RULES/testing.md",
+      "text": "# testing：测试数据与测试纪律"
+    },
+    {
+      "anchor": "不变量",
+      "id": "docs/AGENT_RULES/testing.md#不变量",
+      "source": "docs/AGENT_RULES/testing.md",
+      "text": "## 不变量\n\n- **新行为必须有失败路径覆盖**：修 bug 先写会失败的用例（或 snapshot 前\n  后对照），再修；不许只加\"恰好通过\"的用例。\n- **快照是契约**：更新 k9 快照属于行为变更，交付说明必须列出并给出理由；\n  禁止批量刷新快照混进无关改动。\n- **conformance/oracle 数据不得裁剪**：bidi 的 Unicode 测试数据、escape\n  的 round-trip 用例是跨实现 oracle，失败只能修实现。\n- **e2e 隔离**：sshd fixture 全部用 TempDir 临时密钥与高位端口，端口占用\n  即失败重试，不杀不明进程；不依赖宿主 sshd 配置。\n- **必要工具缺失不得静默 skip**：缺 sshd/显示/工具链时该层记 PENDING 并\n  给补验命令，不许整族 skip 后报告绿。"
+    },
+    {
+      "anchor": "禁止项",
+      "id": "docs/AGENT_RULES/testing.md#禁止项",
+      "source": "docs/AGENT_RULES/testing.md",
+      "text": "## 禁止项\n\n- 不把网络依赖引进单测（sync-color-schemes 的联网同步是显式生成器，不是\n  测试）。\n- 不用 `--no-fail-fast` 掩盖局部失败（它是 CI 收集完整信号用的，本地定位\n  时逐个看）。"
+    },
+    {
+      "anchor": "符号真源",
+      "id": "docs/AGENT_RULES/testing.md#符号真源",
+      "source": "docs/AGENT_RULES/testing.md",
+      "text": "## 符号真源\n\n- `test-data/` 下的 .sh/.txt/.py 是**手动测试 fixtures**（对照真实终端\n  行为的样本），不被自动测试引用；修改要说明来源场景。\n- 自动测试分布：以 crate 内联 `#[cfg(test)]` 为主（term 的\n  `term/src/test/`、escape-parser、surface、termwiz、config 等）；集成\n  测试目录仅 `wezterm-ssh/tests`（sshd e2e）、`bidi/tests/conformance.rs`\n  （Unicode 官方数据）、`wezterm-dynamic/tests`。\n- 断言库：k9（`k9::snapshot!` 结构快照 + `assert_equal` 别名）；快照更新\n  用 `K9_UPDATE=1 cargo test`（只更新受影响断言，更新后必须人工审 diff）。\n- 运行器：cargo-nextest（`make test` 上游语义：全量 + escape-parser\n  no_std 第二轮）。"
+    },
+    {
+      "anchor": "范围",
+      "id": "docs/AGENT_RULES/testing.md#范围",
+      "source": "docs/AGENT_RULES/testing.md",
+      "text": "## 范围\n\n`test-data/`（手动 fixtures）与全仓测试组织约定。各域的定向测试命令在\n各自规则文档；本文件管数据与通用纪律。"
+    },
+    {
+      "anchor": "验证",
+      "id": "docs/AGENT_RULES/testing.md#验证",
+      "source": "docs/AGENT_RULES/testing.md",
+      "text": "## 验证\n\n- 定向：`cargo nextest run -p <受影响 crate>`；数据文件改动跑引用它的\n  手动场景并在交付说明记录。\n- 全量：`make test`；CI 形态：`make test-heavy`。"
+    },
+    {
+      "anchor": "AI 工具面",
+      "id": "docs/AI_TOOLS.md#AI 工具面",
+      "source": "docs/AI_TOOLS.md",
+      "text": "# AI 工具面\n\n共享策略（shared）：无凭据配置入库，个人状态本机保留。规则真源唯一：\n根 `AGENTS.md` + `docs/AGENT_RULES/`（resolver 解析）。"
+    },
+    {
+      "anchor": "hooks（PreToolUse 安全门）",
+      "id": "docs/AI_TOOLS.md#hooks（PreToolUse 安全门）",
+      "source": "docs/AI_TOOLS.md",
+      "text": "## hooks（PreToolUse 安全门）\n\n- 策略真源：`.claude/hooks/dangerous_patterns.conf`（SHELL/FILE 两段，\n  deny/ask 两级）。\n- 适配：`.claude/hooks/block_dangerous.sh` → `pre_tool_use_gate.py`\n  （claude 协议）；`.codex/hooks/pre_tool_use_policy.py`（codex 协议，\n  permissionDecision 字段）；`.zcode/config.json` 直接复用 claude 形\n  （`hooks.enabled: true` + 毫秒 `timeoutMs`，缺失即静默不执行——这是\n  已知坑，配置里两字段都必须在）。\n- Codex 注意：hooks 必须写成数组表 `[[hooks.PreToolUse]]` + 嵌套\n  `[[hooks.PreToolUse.hooks]]`，timeout 按秒；apply_patch 无 file_path\n  字段，FILE 类模式靠 SHELL 重定向规则兜底（已知边界）。\n- 改模式必须跑：`python3 -m unittest discover -s scripts -p\n  test_ai_tool_hooks.py`（含允许/拒绝探针）。"
+    },
+    {
+      "anchor": "工具加载差异",
+      "id": "docs/AI_TOOLS.md#工具加载差异",
+      "source": "docs/AI_TOOLS.md",
+      "text": "## 工具加载差异\n\n| 工具 | 入口 | 领域规则获得方式 | 项目配置 |\n|---|---|---|---|\n| ZCode | 根 AGENTS.md（不经 CLAUDE.md） | resolver（显式跑） | `.zcode/config.json`（hooks） |\n| Claude Code | `CLAUDE.md` 首行 `@AGENTS.md` | resolver + `.claude/rules/*.md` 薄提醒（带 paths frontmatter） | `.claude/settings.json`（权限+hooks） |\n| Codex | 根 AGENTS.md（原生读取） | resolver（显式跑） | `.codex/config.toml`（审批+env 清洗+hooks+reviewer） |\n| Kimi | 根 AGENTS.md | resolver（显式跑） | 无目录需求；`.kimi-code/` 本机 |"
+    },
+    {
+      "anchor": "权限面（Claude settings.json 要点）",
+      "id": "docs/AI_TOOLS.md#权限面（Claude settings.json 要点）",
+      "source": "docs/AI_TOOLS.md",
+      "text": "## 权限面（Claude settings.json 要点）\n\n- allow：只读 git、resolver、框架检查类 make、cargo check/nextest/fmt --check。\n- ask：push/commit、setup/graph/kb（写产物）、ci-check/build/test（耗时长、\n  会起 sshd）、cargo run/build、rm。\n- deny：读 .env/.pem/.git。"
+    },
+    {
+      "anchor": "逐客户端验证记录",
+      "id": "docs/AI_TOOLS.md#逐客户端验证记录",
+      "source": "docs/AI_TOOLS.md",
+      "text": "## 逐客户端验证记录\n\n| 项 | ZCode | Claude | Codex | Kimi |\n|---|---|---|---|---|\n| 配置语法解析 | PASS（JSON） | PASS（JSON） | PASS（TOML） | N/A（无目录） |\n| hooks 探针（无副作用 JSON） | PASS（离线探针：`python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`；ZCode 复用 claude 协议形状） | PASS（同左，block_dangerous.sh 直接探针） | PASS（--protocol codex 探针，permissionDecision 形状） | N/A |\n| 新会话规则加载 | PENDING（首次真实会话时补验） | PENDING | PENDING | PENDING |\n| MCP | N/A（本仓无项目级 MCP） | N/A | N/A | N/A |\n\nhooks 探针可离线复验：\n`echo '{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git push --force origin x\"}}' | bash .claude/hooks/block_dangerous.sh`\n应输出 deny 决策 JSON；\n`...{\"command\":\"git status\"}...` 应无输出（放行）。\n各工具真实会话内的加载与拦截在首次使用时补验并更新本表。"
+    },
+    {
+      "anchor": "Workspace 布局（68 包）",
+      "id": "docs/ARCHITECTURE.md#Workspace 布局（68 包）",
+      "source": "docs/ARCHITECTURE.md",
+      "text": "## Workspace 布局（68 包）\n\n- **终端仿真核心**：`term/`（wezterm-term，模型与状态机应用层）、\n  `wezterm-escape-parser/`（转义序列→语义 Action，no_std）、`vtparse/`\n  （DEC 状态机，no_std）、`wezterm-cell/`（Cell/CellAttributes）、\n  `wezterm-surface/`（Line/Surface/Change，no_std）、`termwiz/`\n  （可独立发布的终端基础库，re-export 上述 crate）。\n- **GUI**：`wezterm-gui/`（TermWindow、渲染管线、overlay/modal、输入）、\n  `window/`（平台窗口抽象：X11/Wayland 枚举 + macos + windows）、\n  `wezterm-font/`（字体加载/shaping/fallback）、`wezterm-input-types/`。\n- **多路复用**：`mux/`（全局单例 Mux、Domain/Pane/Tab）、\n  `wezterm-client/`（RPC 客户端与 GUI socket 发现）、\n  `wezterm-mux-server{,-impl}/`（服务端与 TLS pki）、`codec/`（帧协议）、\n  `wezterm-uds/`。\n- **配置**：`config/`（+`derive/`）、`luahelper/`、`lua-api-crates/`\n  （15 个 Lua API 面 crate）、`wezterm-dynamic/`（动态值层）、\n  `env-bootstrap/`、`sync-color-schemes/`（配色数据生成器）。\n- **进程/IO**：`pty/`（portable-pty，含串口）、`procinfo/`、\n  `filedescriptor/`、`umask/`。\n- **SSH**：`wezterm-ssh/`（libssh-rs/ssh2 双后端）。\n- **CLI**：`wezterm/`（主 CLI + 21 个 cli 子命令）、\n  `wezterm-gui-subcommands/`（GUI/CLI 共享 clap 定义）。\n- **支撑**：`promise`（异步骨架，smol 系）、`bidi`（UAX#9）、`bintree`\n  （pane 布局树）、`lfucache`、`rangeset`、`ratelim`、`base91`、\n  `color-types`、`wezterm-blob-leases`（图片租约）等。\n- **构建辅助**：`deps/`（cairo 补丁版 cairo-sys-rs、freetype/harfbuzz/\n  fontconfig 静态链接辅助 + 4 个上游子模块）、`wezterm-version/`\n  （版本 build.rs）。"
+    },
+    {
+      "anchor": "关键不变量（摘要）",
+      "id": "docs/ARCHITECTURE.md#关键不变量（摘要）",
+      "source": "docs/ARCHITECTURE.md",
+      "text": "## 关键不变量（摘要）\n\n- seqno：每次 `advance_bytes` 递增；`SequenceNo` 只在单个 Surface 内有意义。\n- 行号四类型（Phys/Visible/ScrollbackOrVisible/Stable）防混用。\n- 事件只在平台事件循环线程派发；跨线程用 `Window::notify`。\n- Lua Send 但 !Sync：主线程专用，重载经 `LuaPipe` 回运。\n- 异步骨架唯一：promise + smol；不引入 tokio。\n- 平台代码只进 `os/`、`locator/`、`rasterizer/`、`win/` 既定位置。"
+    },
+    {
+      "anchor": "图谱与知识库",
+      "id": "docs/ARCHITECTURE.md#图谱与知识库",
+      "source": "docs/ARCHITECTURE.md",
+      "text": "## 图谱与知识库\n\n- 代码图谱：`make graph`（graphifyy 钉版，代码-only AST，排除表\n  `.graphifyignore`）；查询 `scripts/graphify.sh query \"...\"`。\n- 知识库：`kb/chunks.json`（`make kb` 重建，语料=规则+手册+CHANGELOG+\n  crate 地图）。"
+    },
+    {
+      "anchor": "定位",
+      "id": "docs/ARCHITECTURE.md#定位",
+      "source": "docs/ARCHITECTURE.md",
+      "text": "## 定位\n\nWezTerm：GPU 加速、Lua 配置、内建多路复用（mux）的跨平台终端模拟器。\n本 fork（gx0404/wezterm）与上游 wezterm/wezterm 保持同步，叠加 AI 协作\n开发框架与少量定制。"
+    },
+    {
+      "anchor": "数据流主线",
+      "id": "docs/ARCHITECTURE.md#数据流主线",
+      "source": "docs/ARCHITECTURE.md",
+      "text": "## 数据流主线\n\n1. **输出（PTY→屏幕）**：子进程字节 → `mux` 读线程\n   （`read_from_pane_pty` → socketpair → `parse_buffered_data`，含\n   DECSET 2026 同步输出与合并延迟）→ `Pane::perform_actions` →\n   `term::Terminal::advance_bytes`（escape 解析 →\n   `terminalstate::Performer::perform` → `TerminalState`/`Screen`）→\n   `MuxNotification::PaneOutput` → GUI 失效 → `TermWindow::paint_impl`\n   （CellCluster 聚类 → 字体 shaping（bidi run 方向）→ GlyphCache →\n   纹理 atlas → quad）。\n2. **输入（键盘→PTY）**：平台事件（xkbcommon/Win32/Cocoa）→\n   `window::WindowEvent::KeyEvent` → `TermWindow` keyevent（leader →\n   `InputMap` → `KeyAssignment` 或编码写入 pane.writer）→ pty/ssh。\n3. **配置**：wezterm.lua → `config::lua::make_lua_context`（15 个\n   lua-api-crates 注册；严格 config_builder 即时校验）→\n   `wezterm_dynamic::Value` → `Config::from_dynamic` → `ConfigHandle`\n   （generation；fs-watch 200ms 去抖重载，失败保留旧配置）。\n4. **进程拓扑**：GUI 总是内嵌 mux + `gui-sock-{pid}` listener；\n   `wezterm start` 先试让既有实例代生（discovery + SpawnV2，校验\n   exe/config 一致）；远端域经 `codec` 帧协议（leb128 len/serial/ident +\n   bincode，可 zstd 压缩）复用同一 Domain/Pane 抽象。"
+    },
+    {
+      "anchor": "架构（fork 维护）",
+      "id": "docs/ARCHITECTURE.md#架构（fork 维护）",
+      "source": "docs/ARCHITECTURE.md",
+      "text": "# 架构（fork 维护）\n\n> 事实以当前 checkout 源码为准；本文给导航与主线。符号引用格式\n> `模块路径::符号`。"
+    },
+    {
+      "anchor": "状态所有者（改状态前先对表）",
+      "id": "docs/ARCHITECTURE.md#状态所有者（改状态前先对表）",
+      "source": "docs/ARCHITECTURE.md",
+      "text": "## 状态所有者（改状态前先对表）\n\n| 状态 | 所有者 |\n|---|---|\n| 终端模型（屏幕/光标/margins/palette/图像缓存） | `term/src/terminalstate/mod.rs::TerminalState` |\n| scrollback 物理行 | `term/src/screen.rs::Screen` |\n| pane/tab/window 拓扑 | `mux/src/lib.rs::MUX`（单例）+ `tab.rs::Tab`（bintree） |\n| GUI 窗口/视口/选区缓存 | `wezterm-gui/src/termwindow/mod.rs::TermWindow` |\n| Window↔mux window 映射 | `wezterm-gui/src/frontend.rs::GuiFrontEnd::known_windows` |\n| 字体解析与缓存 | `wezterm-font/src/lib.rs::FontConfigInner` |\n| 配置与重载 | `config/src/lib.rs::ConfigInner`（Lua 仅主线程） |"
+    },
+    {
+      "anchor": "生成物（不手改）",
+      "id": "docs/ARCHITECTURE.md#生成物（不手改）",
+      "source": "docs/ARCHITECTURE.md",
+      "text": "## 生成物（不手改）\n\n| 产物 | 生成器 |\n|---|---|\n| `wezterm-gui/src/unicode_names.rs` | 上游 codegen |\n| `wezterm-char-props/src/{emoji_variation,nerdfonts_data}.rs` | `wezterm-char-props/codegen` |\n| `config/src/scheme_data.rs` | `sync-color-schemes`（联网） |\n| `assets/shell-completion/*`、`docs/examples/*key-table*`、`docs/cli/*` help | `ci/update-derived-files.sh`（用构建出的 wezterm） |\n| `docs/**/index.md`、`docs/SUMMARY.md`、`mkdocs.yml` | `ci/generate-docs.py` |\n| `docs/config/lua/**` | Rust doc 注释链 |\n| `graphify-out/*`、`kb/chunks.json` | `make graph` / `make kb`（fork） |"
+    },
+    {
+      "anchor": "1. 明确验收点",
+      "id": "docs/DEVELOPMENT.md#1. 明确验收点",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "## 1. 明确验收点\n\n先写下\"做完长什么样\"：行为、命令、截图、测试。没有可验证验收点的任务\n先和人对齐。"
+    },
+    {
+      "anchor": "2. 加载规则",
+      "id": "docs/DEVELOPMENT.md#2. 加载规则",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "## 2. 加载规则\n\n```bash\npython3 scripts/resolve_agent_rules.py <本轮触及路径...>"
+    },
+    {
+      "anchor": "3. 实现与文档",
+      "id": "docs/DEVELOPMENT.md#3. 实现与文档",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "## 3. 实现与文档\n\n- 先读代码再改（`docs/ARCHITECTURE.md` 的状态所有者表）。\n- 新依赖走 `[workspace.dependencies]` + `deny.toml`。\n- 注释遵守 code-comments（上游文件英文、fork 标记、Lua API rustdoc）。\n- 行为变更同步 CHANGELOG.md（fork 段）。"
+    },
+    {
+      "anchor": "4. 针对性检查",
+      "id": "docs/DEVELOPMENT.md#4. 针对性检查",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "## 4. 针对性检查\n\n```bash\ncargo nextest run -p <受影响 crate>   # 最小测试面\nmake check                             # 类型面\nmake lint                              # nightly rustfmt --check\n```"
+    },
+    {
+      "anchor": "5. 适用集成与截图",
+      "id": "docs/DEVELOPMENT.md#5. 适用集成与截图",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "## 5. 适用集成与截图\n\n- GUI 可见行为：`make evidence TASK=<任务>` 分配证据目录 →\n  `make ui-smoke`（或带 --out 指向该目录）→ **读回 before.png** 核对 →\n  更新 result.json（status=PASS/FAIL、images_reviewed=true）。\n- 触到生成物：`make generated-check`；有意更新 `make generated-write`\n  后审 diff。\n- 触到规则/路由/图谱语料：`make framework-check` / `make graph` / `make kb`。"
+    },
+    {
+      "anchor": "6. 修复复测",
+      "id": "docs/DEVELOPMENT.md#6. 修复复测",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "## 6. 修复复测\n\n失败证据保留在同一批次目录；修复另开批次复测，不覆盖历史。"
+    },
+    {
+      "anchor": "7. 生成物与版本",
+      "id": "docs/DEVELOPMENT.md#7. 生成物与版本",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "## 7. 生成物与版本\n\n- 图谱/KB 漂移：`make graph-check / kb-check` 红了就重建并审 diff。\n- fork 版本：CHANGELOG.md 的 `## X.Y.Z(TBD)`；`make version` 查询。"
+    },
+    {
+      "anchor": "8. 复审",
+      "id": "docs/DEVELOPMENT.md#8. 复审",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "## 8. 复审\n\n- `python3 scripts/resolve_agent_rules.py --task review <paths...>`\n  按输出规程执行（或用 .claude/agents/code-reviewer、\n  .codex/agents/wezterm-reviewer 只读评审员）。"
+    },
+    {
+      "anchor": "9. 交付",
+      "id": "docs/DEVELOPMENT.md#9. 交付",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "## 9. 交付\n\n按根 AGENTS.md 完成门自检后，交付说明包含：改动清单、真源、实际通过的\n检查、未运行项（PENDING）与补验命令、证据路径。commit 用\n`type(scope): 中文描述`，只精确暂存相关文件。"
+    },
+    {
+      "anchor": "审核任务：--task review；写代码任务会额外交付 code-comments 规则",
+      "id": "docs/DEVELOPMENT.md#审核任务：--task review；写代码任务会额外交付 code-comments 规则",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "# 审核任务：--task review；写代码任务会额外交付 code-comments 规则\n```\n\nscope 扩大后用完整集合重跑。读输出文档再动手。"
+    },
+    {
+      "anchor": "开发流程（闭环）",
+      "id": "docs/DEVELOPMENT.md#开发流程（闭环）",
+      "source": "docs/DEVELOPMENT.md",
+      "text": "# 开发流程（闭环）\n\n从任务到交付的标准路径。每步的\"必须\"由领域规则与完成门把关。"
+    },
+    {
+      "anchor": "Make 命令手册",
+      "id": "docs/MAKE_COMMANDS.md#Make 命令手册",
+      "source": "docs/MAKE_COMMANDS.md",
+      "text": "# Make 命令手册\n\n命令真源：根 `Makefile`；框架命令经 `scripts/dev_framework.py` 调度\n（配置 `docs/dev-framework.json`）。工具解析序：`.local/tools` > PATH\n（安装 `make setup`）。诊断用 `make ai-doctor`（只读，不安装）。"
+    },
+    {
+      "anchor": "上游目标（语义随上游）",
+      "id": "docs/MAKE_COMMANDS.md#上游目标（语义随上游）",
+      "source": "docs/MAKE_COMMANDS.md",
+      "text": "## 上游目标（语义随上游）\n\n| 目标 | 作用 | 前置/副作用 |\n|---|---|---|\n| `make all` / `make build` | 依次构建 wezterm、wezterm-gui、wezterm-mux-server、strip-ansi-escapes（release） | 需系统图形依赖（`./get-deps`）；耗时 |\n| `make check` | cargo check + 4 个指定包（escape-parser/cell/surface/ssh） | 只读 |\n| `make test` | cargo nextest 全量 + escape-parser no_std 轮 | 需 nextest（make setup）；ssh e2e 需本机 sshd |\n| `make fmt` | cargo +nightly fmt（**会改文件**） | 需 nightly 工具链 |\n| `make docs` / `make servedocs` | 构建文档站（docker/podman + gelatyx + 网络） | 上游流程，本地无容器时不可用 |"
+    },
+    {
+      "anchor": "已知边界",
+      "id": "docs/MAKE_COMMANDS.md#已知边界",
+      "source": "docs/MAKE_COMMANDS.md",
+      "text": "## 已知边界\n\n- `make docs` 依赖 docker/podman 与 GitHub API（release 信息注入），fork\n  日常不做文档站构建；上游 pages CI 把关。\n- Windows/macOS 平台门在本机无环境时以 PENDING 记录，由上游 CI 矩阵\n  佐证（gen_* 工作流）。"
+    },
+    {
+      "anchor": "框架目标（fork 维护）",
+      "id": "docs/MAKE_COMMANDS.md#框架目标（fork 维护）",
+      "source": "docs/MAKE_COMMANDS.md",
+      "text": "## 框架目标（fork 维护）\n\n| 目标 | 作用 | 前置/副作用 |\n|---|---|---|\n| `make help` | 目标总览 | 无 |\n| `make setup` | 钉版安装 nextest + venv(graphifyy/tomli) 到 `.local/tools/` | 联网下载；幂等 |\n| `make ai-doctor` | 只读诊断命令入口 | 无 |\n| `make framework-check` | resolver --check（规则闭集/体积/排序守门） | 无 |\n| `make framework-ready` | 配置完整门（拒绝 pending 命令） | 无 |\n| `make framework-test` | 框架脚本 unittest | 无 |\n| `make ci-check` | resolver --check → version --check → lint → typecheck → test | 编译+全量测试，耗时 |\n| `make version` / `version-check` / `version-write` | fork 版本（CHANGELOG 最大 SemVer） | write 才写盘 |\n| `make evidence TASK=x` | 分配 `.ui-evidence/<分支>/<任务>/<批次>/` | 建目录+初始 result.json |\n| `make lint` | cargo +nightly fmt --check | 需 nightly |\n| `make typecheck` | = make check | 只读 |\n| `make test-integration` | cargo nextest run -p wezterm-ssh | 需 /usr/sbin/sshd |\n| `make test-heavy` | nextest --all --no-fail-fast（CI 形态） | 同 make test |\n| `make generated-check` | 派生文件只读比对（补全/键表/docs 索引） | 二进制链需 target/debug/wezterm，缺则跳过该段并注明 |\n| `make generated-write` | = ci/update-derived-files.sh（有意重建派生文件） | **改文件**；需 target/debug/wezterm |\n| `make ui-smoke` | Xvfb 隔离显示截图冒烟 | 需 target/debug/wezterm-gui、Xvfb、xwd、ffmpeg |\n| `make graph` / `make graph-check` | 重建/校验代码图谱 | graph 需 venv（make setup） |\n| `make kb` / `make kb-check` | 重建/校验知识库 | kb 写盘，kb-check 只读 |\n| `make dev` | cargo run -p wezterm-gui（交互起 GUI） | 需显示；编译耗时 |"
+    },
+    {
+      "anchor": "环境变量",
+      "id": "docs/MAKE_COMMANDS.md#环境变量",
+      "source": "docs/MAKE_COMMANDS.md",
+      "text": "## 环境变量\n\n- `WEZTERM_TOOLCHAIN_ROOT`：重定向 `.local/tools`（CI/离线复用）。\n- `WEZTERM_GRAPHIFY_CLI` / `WEZTERM_GRAPHIFY_ALLOW_ANY_VERSION=1`：\n  图谱 CLI 覆盖/版本放行（升级比对时用）。\n- `TASK=`：`make evidence TASK=<任务名>`（缺省 ui-smoke）。"
+    },
+    {
+      "anchor": "wezterm fork 开发文档索引（AI 协作框架）",
+      "id": "docs/README.md#wezterm fork 开发文档索引（AI 协作框架）",
+      "source": "docs/README.md",
+      "text": "# wezterm fork 开发文档索引（AI 协作框架）\n\n本目录下的这组文档服务 fork 的开发与 AI 协作，**不进公共文档站**\n（`docs/mkdocs-base.yml` 的 `exclude_docs` 已排除）。产品用户文档见\n`docs/` 其余部分与 wezterm.org。\n\n| 文档 | 职责 |\n|---|---|\n| [ARCHITECTURE.md](ARCHITECTURE.md) | 架构：crate 地图、数据流主线、状态所有者、生成物 |\n| [DEVELOPMENT.md](DEVELOPMENT.md) | 开发流程：从验收点到交付的闭环 |\n| [MAKE_COMMANDS.md](MAKE_COMMANDS.md) | 全部 make 目标的语义、前置与副作用 |\n| [TESTING.md](TESTING.md) | 测试分层、前置、补跑与证据 |\n| [AI_TOOLS.md](AI_TOOLS.md) | AI 工具面：规则加载差异、hooks、验证记录 |\n| [RELEASE.md](RELEASE.md) | 版本与发布：两套版本体系的边界 |\n| `AGENT_RULES/` | 领域规则闭集（`routes.toml` 路由，resolver 解析） |\n\n规则如何加载、领域如何路由，见根 `AGENTS.md` 与 `docs/AGENT_RULES/README.md`。\n框架配置真源：`docs/dev-framework.json`。"
+    },
+    {
+      "anchor": "fork changelog 纪律",
+      "id": "docs/RELEASE.md#fork changelog 纪律",
+      "source": "docs/RELEASE.md",
+      "text": "## fork changelog 纪律\n\n- 记录 fork 层面已实现的可观察变更（框架、流程、定制功能）：行为、影响、\n  验证。\n- 上游产品变更在 `docs/changelog.md`，随上游同步产生，**不手写**\n  （hooks 拦截；见 build-ci-release.md）。"
+    },
+    {
+      "anchor": "两套版本体系（互不干扰）",
+      "id": "docs/RELEASE.md#两套版本体系（互不干扰）",
+      "source": "docs/RELEASE.md",
+      "text": "## 两套版本体系（互不干扰）\n\n1. **产品版本（上游体系）**：`wezterm-version/build.rs` 在编译期生成——\n   CI 打 tag 时读 `../.tag`，否则 `git show --format=%cd-%h` 得到形如\n   `20260915-135123-2658f629c` 的 `WEZTERM_CI_TAG`；各 crate Cargo.toml\n   的 version 只是占位。**不要**给 crate 手写语义版本。\n2. **fork 流程版本（本框架）**：根 `CHANGELOG.md` 的\n   `## X.Y.Z(日期|TBD)` 标题，最大数值 SemVer 为真源\n   （`scripts/version.py`，`make version` 只读）。当前无镜像文件\n   （`docs/dev-framework.json` 的 version_targets 为空），发布打包需求\n   出现时再登记。"
+    },
+    {
+      "anchor": "发布（本 fork 不执行）",
+      "id": "docs/RELEASE.md#发布（本 fork 不执行）",
+      "source": "docs/RELEASE.md",
+      "text": "## 发布（本 fork 不执行）\n\n上游发布链：`ci/tag-name.sh` → `ci/tag.sh` → gen_*_tag 工作流构建 →\n`ci/create-release.sh`（gh release --prerelease）→ `ci/deploy.sh` 按平台\n打包（macOS 签名公证/deb/AppImage/Inno Setup）→ 分发渠道（flathub/\nwinget/homebrew/copr）。这些只在上游仓库由维护者运行；本 fork 的 hooks\n对 `gh release`/`cargo publish`/推 upstream 直接 deny。\n\n若 fork 需要自用构建：`make build` 产出 release 二进制即可，不追加上游\n分发链。"
+    },
+    {
+      "anchor": "版本与发布",
+      "id": "docs/RELEASE.md#版本与发布",
+      "source": "docs/RELEASE.md",
+      "text": "# 版本与发布"
+    },
+    {
+      "anchor": "CI（上游）",
+      "id": "docs/TESTING.md#CI（上游）",
+      "source": "docs/TESTING.md",
+      "text": "## CI（上游）\n\ngen_* 工作流（由 `ci/generate-workflows.py` 生成）在 PR/push 时构建矩阵\n（centos/debian/fedora/macos/ubuntu/windows）并跑 `cargo nextest run\n--all --no-fail-fast`；fmt.yml（nightly rustfmt --check）、termwiz.yml、\nwezterm_ssh.yml（双后端矩阵）独立触发。fork 不改这些工作流；本地等效门\n是 `make ci-check`。"
+    },
+    {
+      "anchor": "分层清单",
+      "id": "docs/TESTING.md#分层清单",
+      "source": "docs/TESTING.md",
+      "text": "## 分层清单\n\n| 层 | 命令 | 前置 | 能证明 / 不能代证 |\n|---|---|---|---|\n| 静态-格式 | `make lint` | nightly 工具链 | 排版一致 / 不能证行为 |\n| 静态-类型 | `make typecheck`（=make check） | cargo | 编译期契约 / 不能证运行时 |\n| 单元 | `cargo nextest run -p <crate>` | nextest（make setup） | 模块内行为+失败路径 / 不能证跨进程 |\n| 全量 | `make test` | nextest；ssh e2e 需 /usr/sbin/sshd | 全 workspace（含 escape-parser no_std 轮） / 不能证 GUI 视觉 |\n| 集成-ssh | `make test-integration` | 本机 sshd（fixture 自动起高位端口实例） | SSH 认证/sftp/agent 转发 e2e / 不能证其它域 |\n| heavy（CI 形态） | `make test-heavy` | 同上 | 全量+失败不中断收集完整信号 / 不是更高覆盖 |\n| 生成物 freshness | `make generated-check` | 二进制链需 target/debug/wezterm | 派生文件与生成器一致 / 不能证生成器正确 |\n| 图谱/KB freshness | `make graph-check / kb-check` | 无 | 产物与源码指纹一致 / 不能证内容质量 |\n| UI 冒烟 | `make ui-smoke` | target/debug/wezterm-gui、Xvfb、xwd、ffmpeg | 窗口可起、标记文本渲染 / 不能证交互细节 |\n| 实机平台 | NixOS VM（上游流程） | nix | GNOME/KDE 下真实桌面行为 / 人工流程 |\n| 框架自身 | `make framework-test` | 无 | resolver/hooks/KB 契约 / 不测产品代码 |"
+    },
+    {
+      "anchor": "截图与证据闭环",
+      "id": "docs/TESTING.md#截图与证据闭环",
+      "source": "docs/TESTING.md",
+      "text": "## 截图与证据闭环\n\n1. `make evidence TASK=<任务>` 分配批次目录（`.ui-evidence/<分支URL编码>/\n   <任务>/<UTC时间戳-uuid>/`，git check-ignore 验证过才写入）。\n2. `make ui-smoke`（或 `scripts/ui_smoke.sh --out <批次目录>`）：隔离\n   Xvfb 显示（占用即失败）→ 启动 wezterm-gui → 渲染标记文本 → xwd 抓屏\n   → ffmpeg 转 `before.png` → 写初始 result.json（status=CAPTURED，\n   images_reviewed=false）。\n3. **读回图片**：执行者必须实际查看 before.png，核对标记文本\n   `WEZTERM-UI-SMOKE-OK-…` 与基本布局（有字、有色、无花屏）。\n4. 判定：核对通过→ result.json 改 `status: PASS, images_reviewed: true`；\n   失败→ `status: FAIL` 并保留截图，修复后**另开批次**复测。\n5. 手动配色截图（上游流程）：`ci/make-color-screen-shots.sh`（xwininfo\n   选窗 + ImageMagick），产物进 `docs/colorschemes/`，属上游文档链。"
+    },
+    {
+      "anchor": "测试与证据",
+      "id": "docs/TESTING.md#测试与证据",
+      "source": "docs/TESTING.md",
+      "text": "# 测试与证据\n\n分层语义：每层写明能证明什么、不能代证什么；不同层不能互证。"
+    },
+    {
+      "anchor": "测试约定",
+      "id": "docs/TESTING.md#测试约定",
+      "source": "docs/TESTING.md",
+      "text": "## 测试约定\n\n- 断言库 k9：`k9::snapshot!` 快照 + `assert_equal` 别名；更新快照\n  `K9_UPDATE=1 cargo test`，更新即行为变更，必须逐个审 diff 并在交付说明\n  列出。\n- 测试组织：以 crate 内联 `#[cfg(test)]` 为主（term 的脚手架\n  `term/src/test/mod.rs::TestTerm`）；集成目录仅 wezterm-ssh/tests、\n  bidi/tests、wezterm-dynamic/tests。\n- 新行为先写会失败的用例再修；必要工具缺失时记 PENDING（附补验命令），\n  不得整族 skip 后报绿。\n- oracle 数据（bidi conformance、escape round-trip）不得裁剪\"修绿\"。"
+    }
+  ],
+  "generated_by": "scripts/build_agent_kb.py",
+  "schema_version": 1,
+  "source_hashes": {
+    "<generated>crate-map": "fe5a2477a3e8a68f0fee68adeb2f744ab485da6d9a13d1b93d5a81a722890a31",
+    "AGENTS.md": "ea8a686fbe7ed696bde7b078fdfff11150ecef640e7b72298f8b3e347f3a8bdf",
+    "CHANGELOG.md": "66f2d869ddfb66dfb9532f12b41b0a069a3bf0af5a06637d4d02c8cbd242ae22",
+    "CONTRIBUTING.md": "4b532cb620398e61b342833ee98705afb555abef7a0c9de9390b727d23395ebb",
+    "docs/AGENT_RULES/README.md": "3e032c14f9cee9dcf0478cefb576432aecb43ec6a98b66a5b0f04744875a5d0d",
+    "docs/AGENT_RULES/build-ci-release.md": "121befbd0463e594e9dc5dc02d29ccd3a813ece9b995dc1455409b422a70395e",
+    "docs/AGENT_RULES/cli-main.md": "6b811d2fa59a3929f7144aea7191be3e832632c834d31a6ec8ef2bd2c3b625d4",
+    "docs/AGENT_RULES/code-comments.md": "fc9b0f8eff6afff1c3b5a8b96f138124076f1d61847b613f6dfe0c84c9392aa6",
+    "docs/AGENT_RULES/code-review.md": "25e720270c5945f287370784408f1615fa60bb7e13991078c7ec56e7f47e127b",
+    "docs/AGENT_RULES/config-lua.md": "93fcf5c68e5b626a62d2ca9242fd5e4e62969ebf8c116665a2d943a405a2d9b0",
+    "docs/AGENT_RULES/development.md": "ca8dcce777820cfea3fb009b41c679cb61f112c6d640a5ef08d63ad6e7706a67",
+    "docs/AGENT_RULES/font-shaping.md": "db51515bef42bda5d2291ac3428397565c0d263db61b5ecb2d4d0f426d5851fc",
+    "docs/AGENT_RULES/gui-rendering.md": "91da499b3cdc2c717811292890c7bfe55f54cad8ec47542f54380f56c8fa57b8",
+    "docs/AGENT_RULES/mux-domain.md": "0148bb1a29360f551db764c136588768da4159f02fa6199e7647e7288003384a",
+    "docs/AGENT_RULES/platform-window.md": "acc23b5aa025352abd1a500a28f9e654a6578959aeeaf0f02e46cee22495ee61",
+    "docs/AGENT_RULES/process-io.md": "8cf07fbdefd2113c67095ff3a68e3c4e82253a33da7c91c3483193f4e6a4a9ef",
+    "docs/AGENT_RULES/product-assets.md": "b8773fcf0a98193c69a1cb192c8c04d63d8bfb6821db3a4023e2349c20c7be2e",
+    "docs/AGENT_RULES/product-docs.md": "3cff1c923e88aac78a615f17bf89a44f7ed1adc3ee35c36e0a5a49e27b2345b6",
+    "docs/AGENT_RULES/ssh-domain.md": "040b6e38095c3a780332479138ee3c863e6f2dea2323df9804b050d06cf2a553",
+    "docs/AGENT_RULES/support-crates.md": "554f90fba8388f95775d3503f9280a695704c9f54444d56e90d7069ccaabd19b",
+    "docs/AGENT_RULES/terminal-model.md": "e60e18b2854ad719460f45a27de348deacc63e2fa820ee6aaa70cbb32743065a",
+    "docs/AGENT_RULES/testing.md": "260826e8f56eb80035b472d0115932a930e4c1900f134f202ab2f8f2be3d6ef9",
+    "docs/AI_TOOLS.md": "a6e33f34c77ff5646ec3339af834e157a6a9ed51fc73dc3c33ce54f3562e80cf",
+    "docs/ARCHITECTURE.md": "4a82c062c9f23c099d93fc6220102057424ad0b02020d97af1825a36dae5afc7",
+    "docs/DEVELOPMENT.md": "90a8d67b18aeb531aa72bfb3246d496aca207cfe8810ad33ff1354c6c89c86ae",
+    "docs/MAKE_COMMANDS.md": "12170b6df3a4f6fb1fe5ba55c87214f0e68c18bceea631f7bd69787f1f942b6f",
+    "docs/README.md": "e422cf6ead4de20f835c7d24215854992e5db7949fdf8bf449ec6b81e64fe986",
+    "docs/RELEASE.md": "0c15492b5a7988dda54fe0d352ab48da54b14c7384f38293e6bd853c3f826c51",
+    "docs/TESTING.md": "9571b9c2c49ff20dde14cfb0638f5344d513fffdecf085f1a5c94d55ac204f37"
+  }
+}

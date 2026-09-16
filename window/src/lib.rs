@@ -1,3 +1,8 @@
+// fork(zh): 平台窗口/事件抽象层：`ConnectionOps`（连接与消息循环）、
+// `WindowOps`（单窗口能力）、`WindowEvent`（事件枚举）+ `bitmaps` 纹理
+// atlas 契约。Linux 上 Connection/Window 是 X11|Wayland 枚举分发；平台
+// 实现只在 os/ 子目录，事件只在平台事件循环线程派发（跨线程用 notify），
+// 见 docs/AGENT_RULES/platform-window.md。
 use async_trait::async_trait;
 use bitflags::bitflags;
 use config::window::WindowLevel;

@@ -1,3 +1,8 @@
+// fork(zh): GUI 窗口状态所有者 `TermWindow`：窗口句柄、ConfigHandle 与
+// overrides、RenderState（glium/WebGPU 二选一）、形状/行/quad 的 LfuCache、
+// 每 pane 视口与选区缓存（pane 树本身属于 mux 的 Tab）。跨线程一律经
+// `TermWindowNotif` 投递回主线程；渲染入口 `paint_impl` 的纹理耗尽降级链
+// 见 docs/AGENT_RULES/gui-rendering.md。
 #![allow(clippy::range_plus_one)]
 
 use super::renderstate::*;

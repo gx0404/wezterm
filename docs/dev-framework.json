@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "project": {
+    "name": "wezterm",
+    "source_roots": [
+      "term",
+      "termwiz",
+      "wezterm-gui",
+      "window",
+      "mux",
+      "config",
+      "wezterm",
+      "wezterm-ssh",
+      "wezterm-font",
+      "pty",
+      "wezterm-escape-parser",
+      "wezterm-surface",
+      "bidi",
+      "lua-api-crates"
+    ],
+    "test_roots": [
+      "wezterm-ssh/tests",
+      "bidi/tests",
+      "wezterm-dynamic/tests",
+      "test-data"
+    ],
+    "reviewed": true,
+    "sharing": "shared"
+  },
+  "evidence_root": ".ui-evidence",
+  "version_targets": [],
+  "ci": [
+    "lint",
+    "typecheck",
+    "test"
+  ],
+  "commands": {
+    "setup": {
+      "status": "configured",
+      "argv": ["scripts/setup_env.sh"],
+      "cwd": "."
+    },
+    "dev": {
+      "status": "configured",
+      "argv": ["cargo", "run", "-p", "wezterm-gui", "--", "--always-new-process"],
+      "cwd": "."
+    },
+    "build": {
+      "status": "configured",
+      "argv": ["make", "build"],
+      "cwd": "."
+    },
+    "lint": {
+      "status": "configured",
+      "argv": ["cargo", "+nightly", "fmt", "--check"],
+      "cwd": "."
+    },
+    "typecheck": {
+      "status": "configured",
+      "argv": ["make", "check"],
+      "cwd": "."
+    },
+    "test": {
+      "status": "configured",
+      "argv": ["make", "test"],
+      "cwd": "."
+    },
+    "test-integration": {
+      "status": "configured",
+      "argv": ["cargo", "nextest", "run", "-p", "wezterm-ssh"],
+      "cwd": "."
+    },
+    "test-heavy": {
+      "status": "configured",
+      "argv": ["cargo", "nextest", "run", "--all", "--no-fail-fast"],
+      "cwd": "."
+    },
+    "generated-check": {
+      "status": "configured",
+      "argv": ["scripts/generated_check.sh"],
+      "cwd": "."
+    },
+    "generated-write": {
+      "status": "configured",
+      "argv": ["ci/update-derived-files.sh"],
+      "cwd": "."
+    },
+    "ui-smoke": {
+      "status": "configured",
+      "argv": ["scripts/ui_smoke.sh"],
+      "cwd": "."
+    },
+    "graph": {
+      "status": "configured",
+      "argv": ["scripts/graphify.sh", "rebuild"],
+      "cwd": "."
+    },
+    "graph-check": {
+      "status": "configured",
+      "argv": ["scripts/graphify.sh", "check"],
+      "cwd": "."
+    },
+    "kb": {
+      "status": "configured",
+      "argv": ["python3", "scripts/build_agent_kb.py", "--confirm"],
+      "cwd": "."
+    },
+    "kb-check": {
+      "status": "configured",
+      "argv": ["python3", "scripts/build_agent_kb.py", "--check"],
+      "cwd": "."
+    },
+    "framework-test": {
+      "status": "configured",
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"],
+      "cwd": "."
+    },
+    "package": {
+      "status": "not-applicable",
+      "reason": "fork 不切发布；上游发布链（ci/tag.sh、ci/create-release.sh、ci/deploy.sh）由上游维护者在 wezterm/wezterm 仓库运行，不在本仓复建"
+    }
+  }
+}

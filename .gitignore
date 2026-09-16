@@ -66,3 +66,43 @@ dhat-heap.json
 /__pycache__/
 /nix/result
 *.qcow2
+
+# --- AI 协作开发框架（fork 维护段；上游没有）---
+# 项目钉版工具与运行态（安装：make setup）
+/.local/
+scripts/__pycache__/
+# UI 截图证据（分配：make evidence）
+/.ui-evidence/
+# graphify：跟踪当前快照，运行态与记忆层本机保留
+/graphify-out/*
+!/graphify-out/graph.json
+!/graphify-out/GRAPH_REPORT.md
+!/graphify-out/source-fingerprint.json
+/.graphify-memory/
+# 知识库：跟踪 chunks.json 单一产物
+/kb/*
+!/kb/chunks.json
+# AI 工具面共享白名单（团队入库；个人状态本机保留）
+/.claude/*
+!/.claude/settings.json
+!/.claude/hooks/
+!/.claude/rules/
+!/.claude/agents/
+!/.claude/commands/
+!/.claude/README.md
+/.claude/settings.local.json
+/.codex/*
+!/.codex/config.toml
+!/.codex/agents/
+!/.codex/README.md
+/.zcode/*
+!/.zcode/config.json
+!/.zcode/README.md
+/.agents/*
+!/.agents/README.md
+/.kimi-code/
+# 工具面 hooks 的字节码缓存不入库（在白名单之后声明以重新生效）
+**/__pycache__/
+*.pyc
+# AI 工具面基线候选目录（脚手架产物不入库）
+/update_ai_setting/

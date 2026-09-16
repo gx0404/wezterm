@@ -1,0 +1,31 @@
+# graphify 扫描排除表（gitignore 语法；扫描根为仓库根，代码-only AST）。
+# 目标：只索引产品 Rust 源码，排除文档站、资源、vendored 依赖、生成数据表
+# 与框架运行态。
+docs/
+docs-internal/
+assets/
+ci/
+.github/
+nix/
+test-data/
+deps/
+target/
+.local/
+.ui-evidence/
+graphify-out/
+kb/
+scripts/
+update_ai_setting/
+.claude/
+.codex/
+.zcode/
+.agents/
+.kimi-code/
+# 代码生成器目录（独立 workspace）
+wezterm-char-props/codegen/
+termwiz/codegen/
+# 生成数据表（约 21 万行，无架构价值）
+wezterm-gui/src/unicode_names.rs
+wezterm-char-props/src/emoji_variation.rs
+wezterm-char-props/src/nerdfonts_data.rs
+config/src/scheme_data.rs

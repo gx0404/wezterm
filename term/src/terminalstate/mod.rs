@@ -1,3 +1,8 @@
+// fork(zh): 终端状态的所有者（约 60 字段）：主/备屏、光标、margins、
+// 鼠标/键盘编码、palette、image_cache、title 与 bidi 标记。外部只经
+// `terminalstate::performer::Performer::perform` 应用变更；写侧走
+// `ThreadedWriter` 独立线程以避免大粘贴与 vim 输出互锁。行号体系
+// （Phys/Visible/Stable）刻意异型防混用，见 docs/AGENT_RULES/terminal-model.md。
 // The range_plus_one lint can't see when the LHS is not compatible with
 // and inclusive range
 #![allow(clippy::range_plus_one)]

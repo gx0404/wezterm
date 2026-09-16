@@ -9,6 +9,17 @@ edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: gh_pages
 strict: true
+# fork(gx0404): AI 协作开发框架文档仅供仓库内使用，不进公共文档站
+exclude_docs:
+  - 'AGENT_RULES/*'
+  - 'dev-framework.json'
+  - 'README.md'
+  - 'ARCHITECTURE.md'
+  - 'DEVELOPMENT.md'
+  - 'MAKE_COMMANDS.md'
+  - 'TESTING.md'
+  - 'AI_TOOLS.md'
+  - 'RELEASE.md'
 theme:
   name: material
   logo: favicon.svg

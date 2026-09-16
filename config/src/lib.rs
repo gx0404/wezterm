@@ -1,3 +1,7 @@
+// fork(zh): 配置加载与热重载的线程模型：Lua Send 但 !Sync，只允许主线程
+// 引用；fs-watch 线程经 `LuaPipe` 把新 Lua 上下文运回主线程。重载失败
+// 保留旧配置、仅更新错误消息；`ConfigHandle::generation` 随每次变更递增，
+// 供终端/字体缓存刷新。详见 docs/AGENT_RULES/config-lua.md。
 //! Configuration for the gui portion of the terminal
 
 use anyhow::{anyhow, bail, Context, Error};

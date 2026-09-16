@@ -1,3 +1,9 @@
+// fork(zh): mux 核心：进程内全局单例 `MUX`（get/set_mux/shutdown）拥有
+// tabs/panes/windows 三张 RwLock 表与订阅者。pane 输出泵 = 读 pty 线程 →
+// socketpair → parse 线程（escape 解析，含 DECSET 2026 同步输出）→
+// `Pane::perform_actions` → `MuxNotification` 通知 GUI/CLI。退出路径由
+// exit_behavior + prune_dead_windows 的“启动中不清理”保护，见
+// docs/AGENT_RULES/mux-domain.md。
 use crate::client::{ClientId, ClientInfo};
 use crate::pane::{CachePolicy, Pane, PaneId};
 use crate::ssh_agent::AgentProxy;

@@ -1,0 +1,273 @@
+# wezterm 领域规则路由（唯一机器真源）。
+# 语义：docs/AGENT_RULES/<id>.md 是该域规则正文；paths 是 Git 可见文件的
+# glob（* 不跨目录、** 跨目录）；tasks 把任务类型路由到额外必读文档。
+# 维护：新增/移动文件后必须让 `python3 scripts/resolve_agent_rules.py --check`
+# 通过（全仓闭集：每个文件恰好命中一个领域或 root_only）。
+
+version = 2
+root_max_bytes = 16384
+
+# root_only：仓库级元文件，没有领域不变量需要加载。
+root_only = [
+  ".dockerignore",
+  ".gitmodules",
+  ".mailmap",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "LICENSE.md",
+  "PRIVACY.md",
+  "README-DISTRO-MAINTAINER.md",
+  "README.md",
+  "licenses/**",
+]
+
+[[rules]]
+id = "build-ci-release"
+doc = "docs/AGENT_RULES/build-ci-release.md"
+paths = [
+  ".cargo/**",
+  ".cirrus.yml",
+  ".copr/**",
+  ".github/**",
+  ".rustfmt.toml",
+  "Cargo.lock",
+  "Cargo.toml",
+  "ci/**",
+  "cooldown.toml",
+  "deny.toml",
+  "get-deps",
+  "mkdocs_macros.py",
+  "nix/**",
+  "wezterm-version/**",
+]
+tasks = []
+
+[[rules]]
+id = "cli-main"
+doc = "docs/AGENT_RULES/cli-main.md"
+paths = [
+  "wezterm-gui-subcommands/**",
+  "wezterm/**",
+]
+tasks = []
+
+[[rules]]
+id = "code-comments"
+doc = "docs/AGENT_RULES/code-comments.md"
+paths = []
+tasks = ["code"]
+
+[[rules]]
+id = "code-review"
+doc = "docs/AGENT_RULES/code-review.md"
+paths = []
+tasks = ["review"]
+
+[[rules]]
+id = "config-lua"
+doc = "docs/AGENT_RULES/config-lua.md"
+paths = [
+  "config/**",
+  "env-bootstrap/**",
+  "lua-api-crates/**",
+  "luahelper/**",
+  "sync-color-schemes/**",
+  "wezterm-dynamic/**",
+]
+tasks = ["code"]
+
+[[rules]]
+id = "development"
+doc = "docs/AGENT_RULES/development.md"
+paths = [
+  ".agents/**",
+  ".claude/**",
+  ".codex/**",
+  ".gitignore",
+  ".graphifyignore",
+  ".zcode/**",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "Makefile",
+  "docs/AGENT_RULES/**",
+  "docs/AI_TOOLS.md",
+  "docs/ARCHITECTURE.md",
+  "docs/DEVELOPMENT.md",
+  "docs/MAKE_COMMANDS.md",
+  "docs/README.md",
+  "docs/RELEASE.md",
+  "docs/TESTING.md",
+  "docs/dev-framework.json",
+  "graphify-out/**",
+  "kb/**",
+  "scripts/**",
+]
+tasks = []
+
+[[rules]]
+id = "font-shaping"
+doc = "docs/AGENT_RULES/font-shaping.md"
+paths = [
+  "deps/**",
+  "wezterm-char-props/**",
+  "wezterm-font/**",
+]
+tasks = []
+
+[[rules]]
+id = "gui-rendering"
+doc = "docs/AGENT_RULES/gui-rendering.md"
+paths = [
+  "wezterm-gui/**",
+]
+tasks = []
+
+[[rules]]
+id = "mux-domain"
+doc = "docs/AGENT_RULES/mux-domain.md"
+paths = [
+  "codec/**",
+  "mux/**",
+  "wezterm-client/**",
+  "wezterm-mux-server-impl/**",
+  "wezterm-mux-server/**",
+  "wezterm-uds/**",
+]
+tasks = []
+
+[[rules]]
+id = "platform-window"
+doc = "docs/AGENT_RULES/platform-window.md"
+paths = [
+  "wezterm-input-types/**",
+  "wezterm-toast-notification/**",
+  "window/**",
+]
+tasks = []
+
+[[rules]]
+id = "process-io"
+doc = "docs/AGENT_RULES/process-io.md"
+paths = [
+  "filedescriptor/**",
+  "procinfo/**",
+  "pty/**",
+  "umask/**",
+]
+tasks = []
+
+[[rules]]
+id = "product-assets"
+doc = "docs/AGENT_RULES/product-assets.md"
+paths = [
+  "assets/flatpak/**",
+  "assets/fonts/**",
+  "assets/icon/**",
+  "assets/macos/**",
+  "assets/open-wezterm-here/**",
+  "assets/shell-completion/**",
+  "assets/wezterm-nautilus.py",
+  "assets/wezterm.appdata.xml",
+  "assets/wezterm.desktop",
+  "assets/windows/**",
+]
+tasks = []
+
+[[rules]]
+id = "product-docs"
+doc = "docs/AGENT_RULES/product-docs.md"
+paths = [
+  "docs-internal/**",
+  "docs/README.markdown",
+  "docs/_config.yml",
+  "docs/asciinema-player.css",
+  "docs/asciinema-player.min.js",
+  "docs/book.toml",
+  "docs/changelog.md",
+  "docs/cli/**",
+  "docs/colorschemes/**",
+  "docs/config/**",
+  "docs/contributing.md",
+  "docs/copymode.md",
+  "docs/custom.css",
+  "docs/escape-sequences.md",
+  "docs/examples/**",
+  "docs/faq.md",
+  "docs/features.md",
+  "docs/help.md",
+  "docs/hyperlinks.md",
+  "docs/imgcat.md",
+  "docs/index.md",
+  "docs/install/**",
+  "docs/installation.md",
+  "docs/javascript/**",
+  "docs/mdbook-admonish.css",
+  "docs/mermaid-init.js",
+  "docs/mkdocs-base.yml",
+  "docs/multiplexing.md",
+  "docs/overrides/**",
+  "docs/quickselect.md",
+  "docs/recipes/**",
+  "docs/screenshots/**",
+  "docs/scrollback.md",
+  "docs/serial.md",
+  "docs/shell-integration.md",
+  "docs/sponsor.md",
+  "docs/ssh.md",
+  "docs/style.css",
+  "docs/tags.md",
+  "docs/troubleshooting.md",
+  "docs/what-is-a-terminal.md",
+]
+tasks = []
+
+[[rules]]
+id = "ssh-domain"
+doc = "docs/AGENT_RULES/ssh-domain.md"
+paths = [
+  "wezterm-ssh/**",
+]
+tasks = []
+
+[[rules]]
+id = "support-crates"
+doc = "docs/AGENT_RULES/support-crates.md"
+paths = [
+  "async_ossl/**",
+  "base91/**",
+  "bidi/**",
+  "bintree/**",
+  "color-types/**",
+  "frecency/**",
+  "lfucache/**",
+  "promise/**",
+  "rangeset/**",
+  "ratelim/**",
+  "strip-ansi-escapes/**",
+  "tabout/**",
+  "wezterm-blob-leases/**",
+  "wezterm-open-url/**",
+]
+tasks = []
+
+[[rules]]
+id = "terminal-model"
+doc = "docs/AGENT_RULES/terminal-model.md"
+paths = [
+  "assets/shell-integration/**",
+  "term/**",
+  "termwiz/**",
+  "vtparse/**",
+  "wezterm-cell/**",
+  "wezterm-escape-parser/**",
+  "wezterm-surface/**",
+]
+tasks = []
+
+[[rules]]
+id = "testing"
+doc = "docs/AGENT_RULES/testing.md"
+paths = [
+  "test-data/**",
+]
+tasks = ["test"]

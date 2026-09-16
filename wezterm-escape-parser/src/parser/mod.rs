@@ -1,3 +1,7 @@
+// fork(zh): 转义解析的中间层：消费 vtparse 状态机事件（无语义分类），
+// 组装成可编解码的语义 `Action`（CSI/OSC/Esc/Sixel/Kitty/DCS 分派规则见
+// 各 dispatch 方法）。保持 no_std 可构建；`Action` 有 size_of 断言。
+// 分层契约见 docs/AGENT_RULES/terminal-model.md。
 #![allow(clippy::many_single_char_names)]
 
 #[cfg(feature = "tmux_cc")]

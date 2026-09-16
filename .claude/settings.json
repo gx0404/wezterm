@@ -1,0 +1,65 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(./**)",
+      "Glob",
+      "Grep",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git check-ignore:*)",
+      "Bash(python3 scripts/resolve_agent_rules.py:*)",
+      "Bash(python3 -m unittest discover:*)",
+      "Bash(make framework-check)",
+      "Bash(make framework-ready)",
+      "Bash(make framework-test)",
+      "Bash(make ai-doctor)",
+      "Bash(make version)",
+      "Bash(make version-check)",
+      "Bash(make graph-check)",
+      "Bash(make kb-check)",
+      "Bash(make generated-check)",
+      "Bash(cargo check:*)",
+      "Bash(cargo nextest run:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo fmt --check)",
+      "Bash(cargo +nightly fmt --check)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git commit:*)",
+      "Bash(make setup)",
+      "Bash(make graph)",
+      "Bash(make kb)",
+      "Bash(make ci-check)",
+      "Bash(make build)",
+      "Bash(make test)",
+      "Bash(make ui-smoke)",
+      "Bash(cargo run:*)",
+      "Bash(cargo build:*)",
+      "Bash(rm:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./**/.env)",
+      "Read(./**/*.pem)",
+      "Read(./.git/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/block_dangerous.sh\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

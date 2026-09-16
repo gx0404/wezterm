@@ -1,0 +1,46 @@
+# wezterm fork 项目级 Codex 配置。
+# 用户级模型/provider/认证仍在 ~/.codex/config.toml，不入项目。
+
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+# 根 AGENTS.md 是短入口；领域规则由 resolver 按路径显式读取。
+project_doc_max_bytes = 32768
+
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 4
+
+[agents.wezterm_reviewer]
+description = "wezterm fork 领域只读评审员：终端模型、GUI、mux、配置系统与上游同步边界。"
+config_file = "agents/wezterm-reviewer.toml"
+nickname_candidates = ["WezTerm Reviewer", "Terminal Auditor"]
+
+[sandbox_workspace_write]
+network_access = true
+
+[shell_environment_policy]
+inherit = "all"
+exclude = [
+  "*KEY*",
+  "*SECRET*",
+  "*TOKEN*",
+  "*PASSWORD*",
+  "OPENAI_API_KEY",
+  "ANTHROPIC_API_KEY",
+]
+
+[shell_environment_policy.set]
+PYTHONUNBUFFERED = "1"
+PYTHONDONTWRITEBYTECODE = "1"
+
+# 注意：hooks 事件必须是数组表 [[hooks.PreToolUse]] + 命令嵌套在
+# [[hooks.PreToolUse.hooks]]；Claude 风格单表会让 codex 启动即解析失败。
+# timeout 单位是秒（不是 ZCode 的毫秒）。
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = 'python3 "$(git rev-parse --show-toplevel)/.codex/hooks/pre_tool_use_policy.py"'
+timeout = 30
