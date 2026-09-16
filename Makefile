@@ -36,7 +36,8 @@ FRAMEWORK_PY := $(if $(wildcard .local/tools/venv/bin/python),.local/tools/venv/
 
 # build/test 沿用上方上游目标语义；框架命令经 dev_framework.py 调度，不重复定义。
 FRAMEWORK_COMMANDS := setup dev lint typecheck test-integration test-heavy \
-	generated-check generated-write ui-smoke graph graph-check kb kb-check framework-test
+	generated-check generated-write ui-smoke graph graph-check kb kb-check framework-test \
+	gx-bundle gx-install gx-sync
 
 .PHONY: help framework-check framework-ready ai-doctor ci-check version version-check version-write evidence $(FRAMEWORK_COMMANDS)
 

@@ -115,6 +115,21 @@
       "argv": ["python3", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"],
       "cwd": "."
     },
+    "gx-bundle": {
+      "status": "configured",
+      "argv": ["python3", "scripts/gx_bundle.py", "bundle"],
+      "cwd": "."
+    },
+    "gx-install": {
+      "status": "configured",
+      "argv": ["scripts/gx_install.sh"],
+      "cwd": "."
+    },
+    "gx-sync": {
+      "status": "configured",
+      "argv": ["python3", "scripts/gx_bundle.py", "sync"],
+      "cwd": "."
+    },
     "package": {
       "status": "not-applicable",
       "reason": "fork 不切发布；上游发布链（ci/tag.sh、ci/create-release.sh、ci/deploy.sh）由上游维护者在 wezterm/wezterm 仓库运行，不在本仓复建"

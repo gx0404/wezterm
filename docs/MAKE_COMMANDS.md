@@ -36,6 +36,9 @@
 | `make ui-smoke` | Xvfb 隔离显示截图冒烟 | 需 target/debug/wezterm-gui、Xvfb、xwd、ffmpeg |
 | `make graph` / `make graph-check` | 重建/校验代码图谱 | graph 需 venv（make setup） |
 | `make kb` / `make kb-check` | 重建/校验知识库 | kb 写盘，kb-check 只读 |
+| `make gx-bundle` | docker ubuntu:20.04 容器构建 release 四件套并组装离线安装包 `dist/*.tar.xz`（有 Windows 包时顺带产出 zip） | 需 docker（或 `GX_USE_LOCAL=1` 本机构建，产物标注 glibc）；联网装依赖，耗时 |
+| `make gx-install` | 源码路径安装：rust 检查 → `./get-deps`（需 sudo，交互确认）→ release 构建 → `dotfiles/install.sh` 部署 | 改 `$HOME` 下用户文件（先备份）；联网 |
+| `make gx-sync` | 对比本机 `~/.config/wezterm`、插件目录与 `dotfiles/` 快照差异 | 只读；`GX_SYNC_WRITE=1` 写回仓库 |
 | `make dev` | cargo run -p wezterm-gui（交互起 GUI） | 需显示；编译耗时 |
 
 ## 环境变量
@@ -44,6 +47,10 @@
 - `WEZTERM_GRAPHIFY_CLI` / `WEZTERM_GRAPHIFY_ALLOW_ANY_VERSION=1`：
   图谱 CLI 覆盖/版本放行（升级比对时用）。
 - `TASK=`：`make evidence TASK=<任务名>`（缺省 ui-smoke）。
+- `GX_USE_LOCAL=1`：`make gx-bundle` 回退本机构建（产物只兼容本机 glibc）。
+- `GX_WINDOWS_ZIP=<path>`：指定 Windows 构建包（缺省时尝试 `gh` 拉取
+  gx-windows-build workflow 产物或复用 `dist/` 现成包）。
+- `GX_SYNC_WRITE=1`：`make gx-sync` 把本机改动写回 `dotfiles/`。
 
 ## 已知边界
 

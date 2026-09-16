@@ -8,6 +8,26 @@
 `make version` 只读查询）。WezTerm 产品自身的版本号由 `wezterm-version/build.rs`
 按 git 提交时间与哈希生成，两套体系互不干扰（见 docs/RELEASE.md）。
 
+## 0.2.0(TBD)
+
+### Added
+
+- 收录本机 wezterm 用户环境快照为仓库真源 `dotfiles/`：配置工作区
+  （含壁纸与生效中的事件脚本，`config/launch.lua`、`config/domains.lua`
+  的 Windows 死路径改动态拼接）、4 个插件按 wezterm 插件加载器转义目录名
+  快照（pin 见 `dotfiles/PROVENANCE.md`）、精选字体（JetBrainsMono Nerd
+  Font 6 字重 + Noto Sans CJK Regular/Bold）、desktop entry / wrapper /
+  zshrc 模板。
+- 跨机一键安装链：`dotfiles/install.sh`（Linux 用户级、幂等、`--check`
+  干跑）与 `dotfiles/install.ps1`（Windows 用户级）；`make gx-bundle`
+  经 docker ubuntu:20.04 容器构建 glibc≤2.31 兼容二进制并组装自包含离线
+  包（Ubuntu 20.04/24.04 通吃）；`make gx-install` 提供在线源码构建路径；
+  `make gx-sync` 把本机配置改动收回仓库（默认只读对比）。
+- Windows 分支构建 workflow `.github/workflows/gx-windows-build.yml`
+  （workflow_dispatch / gx-v* tag 触发，产出四件套 zip 供 gx-bundle 组装）。
+- 领域规则 `docs/AGENT_RULES/dotfiles.md` + 路由；`dist/`、`target-gx-*/`
+  入 `.gitignore` fork 段。
+
 ## 0.1.0(TBD)
 
 ### Added

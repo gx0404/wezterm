@@ -1,0 +1,55 @@
+name: gx-windows-build
+
+# fork(gx): build the four release binaries from this branch for the dotfiles
+# install chain (dotfiles/install.ps1 consumes the zip via make gx-bundle).
+# Manually dispatched or triggered by gx-v* tags. NOT part of the generated
+# gen_* matrix (ci/generate-workflows.py); packaging is a plain zip of the
+# binaries -- the upstream release chain (ci/deploy.sh etc.) is never invoked.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "gx-v*"
+
+jobs:
+  build:
+    runs-on: "windows-2025"
+
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+      RUSTUP_WINDOWS_PATH_ADD_BIN: "1"
+
+    steps:
+      - name: "checkout repo"
+        uses: actions/checkout@v5
+        with:
+          submodules: "recursive"
+      - name: "Install Rust"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: "x86_64-pc-windows-msvc"
+      - name: "Compile with sccache"
+        uses: mozilla-actions/sccache-action@v0.0.9
+      - name: "Build (Release mode)"
+        shell: cmd
+        run: |
+          PATH C:\Strawberry\perl\bin;%PATH%
+          cargo build -p wezterm -p wezterm-gui -p wezterm-mux-server -p strip-ansi-escapes --release
+      - name: "Package plain zip"
+        shell: pwsh
+        run: |
+          $ver = (git describe --tags --always).Trim()
+          New-Item -ItemType Directory -Force package | Out-Null
+          foreach ($exe in "wezterm", "wezterm-gui", "wezterm-mux-server", "strip-ansi-escapes") {
+            Copy-Item "target/release/$exe.exe" package/
+          }
+          Compress-Archive -Path package/* -DestinationPath "wezterm-windows-$ver-x86_64.zip"
+          Get-Item "wezterm-windows-*.zip"
+      - name: "Upload artifact"
+        uses: actions/upload-artifact@v7
+        with:
+          name: "wezterm-windows-zip"
+          path: "wezterm-windows-*.zip"
