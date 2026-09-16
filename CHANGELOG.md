@@ -12,6 +12,16 @@
 
 ### Added
 
+- herdr 式设置浮层（`wezterm-gui/src/termwindow/settings.rs`，新
+  `OpenSettings` 键位/面板命令，macOS 菜单栏归入 WezTerm 组）：四个分区
+  ——语言（中文/English，应用即全 UI 切换）、外观（1001 个内置配色方案，
+  支持输入过滤，移动/悬停即预览、Enter 应用、Esc 还原）、交互（右键
+  菜单/滚动条开关、响铃、关闭确认的二值切换，即选即生效）、字体
+  （字号 0.5 步进增减与重置）。预览走每窗口 `config_overrides`
+  （易失），应用写入 `gui-settings.json` 并 `config::reload()` 全局
+  生效、跨重启持久化；Tab 切换分区、↑↓ 选择、Enter 应用、鼠标
+  悬停/点击与命令面板共用 Modal 通道，配置重载（含语言切换）即时
+  重绘浮层文案。
 - GUI 界面文案全面 zh-CN 汉化（311 条译表，`config/src/i18n/zh_cn.rs`，
   由 `scripts/gen_zh_table.py` 生成保序）：命令面板全部命令的标题/描述/
   分组名（模糊搜索与精确匹配同步走中文）、右键菜单、关闭确认与

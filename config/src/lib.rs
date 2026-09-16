@@ -164,6 +164,14 @@ fn json_to_dynamic(value: &serde_json::Value) -> Value {
     }
 }
 
+// fork: sorted builtin color-scheme names for the settings overlay
+// (avoids cloning 1001 full palettes just to list their names)
+pub fn builtin_scheme_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = scheme_data::SCHEMES.iter().map(|(n, _)| *n).collect();
+    names.sort_unstable();
+    names
+}
+
 pub fn build_default_schemes() -> HashMap<String, Palette> {
     let mut color_schemes = HashMap::new();
     for (scheme_name, data) in scheme_data::SCHEMES.iter() {

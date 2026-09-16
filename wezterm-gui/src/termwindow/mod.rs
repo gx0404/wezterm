@@ -89,6 +89,7 @@ mod prevcursor;
 pub mod render;
 pub mod resize;
 mod selection;
+pub mod settings;
 pub mod spawn;
 pub mod webgpu;
 use crate::spawn::SpawnWhere;
@@ -3254,6 +3255,9 @@ impl TermWindow {
             ActivateCommandPalette => {
                 let modal = crate::termwindow::palette::CommandPalette::new(self);
                 self.set_modal(Rc::new(modal));
+            }
+            OpenSettings => {
+                crate::termwindow::settings::open_settings(self);
             }
             PromptInputLine(args) => self.show_prompt_input_line(args),
             InputSelector(args) => self.show_input_selector(args),

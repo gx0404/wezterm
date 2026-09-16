@@ -2193,6 +2193,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Edit"],
             icon: None,
         },
+        OpenSettings => CommandDef {
+            brief: "Open Settings".into(),
+            doc: "Shows the settings overlay".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["WezTerm"],
+            icon: Some("md_cog"),
+        },
     })
 }
 
@@ -2236,6 +2244,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ActivateCopyMode,
         ClearKeyTableStack,
         ActivateCommandPalette,
+        OpenSettings,
         // ----------------- View
         DecreaseFontSize,
         IncreaseFontSize,

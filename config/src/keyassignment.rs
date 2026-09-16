@@ -647,6 +647,8 @@ pub enum KeyAssignment {
     ResetTerminal,
     OpenUri(String),
     ActivateCommandPalette,
+    /// fork: open the settings overlay (herdr-style)
+    OpenSettings,
     ActivateWindow(usize),
     ActivateWindowRelative(isize),
     ActivateWindowRelativeNoWrap(isize),
