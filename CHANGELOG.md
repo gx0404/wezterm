@@ -28,6 +28,17 @@
 - 领域规则 `docs/AGENT_RULES/dotfiles.md` + 路由；`dist/`、`target-gx-*/`
   入 `.gitignore` fork 段。
 
+- UI 交互增强（源自对 herdr 与 tmux 的交互调研）：鼠标绑定新增
+  `region` 维度（可按 TabBar/Tab/NewTabButton/LeftStatus/RightStatus/
+  Split/ScrollThumb 等区域定向绑定；未指定 region 的绑定语义不变）；
+  copy mode 新增 mark 标记（`m` 设标记、`'` 交换式跳转）、段落移动
+  （`{`/`}`）、`MoveToLine` 行跳转、无选区时复制光标处词、
+  `PipeSelection` 管道赋值与 `copy_mode_mark_bg/fg` 配色；tmux 域
+  pane 的 copy mode 搜索默认可用；bell 治理三件套：
+  `bell_notification_handling` 聚焦抑制、`bell_requests_attention`
+  失焦 WM 提醒（X11 urgency / macOS dock bounce）与 Lua
+  `window:request_attention()`、`bell_cooldown_ms` 每 pane 节流。
+
 ## 0.1.0(TBD)
 
 ### Added
