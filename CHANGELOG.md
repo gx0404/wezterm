@@ -41,6 +41,10 @@
 - 命令面板鼠标交互：悬停行即选中、左键点击直接执行（与 Enter 共用
   激活路径并记录 frecency）；`Modal::mouse_event` 通道接通，行矩形经
   hit map（`UIItemType::Modal`）路由，region 绑定新增 `Modal` 区域。
+- `make gx-upgrade`：一条命令完成本机替换——docker ubuntu:20.04 容器
+  构建 release 四件套（无 sudo，get-deps 唯一真源）→ `dotfiles/install.sh`
+  用户级部署（配置/插件/字体随快照，全带时间戳备份）→ 版本验证；
+  消除手工两步安装尾巴。
 
 ### Fixed
 
