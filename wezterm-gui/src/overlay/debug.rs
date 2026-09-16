@@ -1,5 +1,6 @@
 use crate::scripting::guiwin::GuiWin;
 use chrono::prelude::*;
+use config::i18n::tr;
 use futures::FutureExt;
 use log::Level;
 use luahelper::ValuePrinter;
@@ -147,7 +148,7 @@ pub fn show_debug_overlay(
 
     let mut host = Some(LuaReplHost::new(lua));
 
-    term.render(&[Change::Title("Debug".to_string())])?;
+    term.render(&[Change::Title(tr("Debug").into_owned())])?;
 
     fn print_new_log_entries(term: &mut TermWizTerminal) -> termwiz::Result<()> {
         let entries = env_bootstrap::ringlog::get_entries();
@@ -191,13 +192,16 @@ pub fn show_debug_overlay(
     let triple = config::wezterm_target_triple();
 
     term.render(&[Change::Text(format!(
-        "Debug Overlay\r\n\
+        "{}\r\n\
          wezterm version: {version} {triple}\r\n\
          Window Environment: {connection_info}\r\n\
          Lua Version: {lua_version}\r\n\
          {opengl_info}\r\n\
-         Enter lua statements or expressions and hit Enter.\r\n\
-         Press ESC or CTRL-D to exit\r\n",
+         {}\r\n\
+         {}\r\n",
+        tr("Debug Overlay"),
+        tr("Enter lua statements or expressions and hit Enter."),
+        tr("Press ESC or CTRL-D to exit"),
     ))])?;
 
     loop {

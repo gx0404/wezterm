@@ -11,6 +11,7 @@ use crate::overlay::quickselect;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::TermWindowNotif;
 use config::configuration;
+use config::i18n::{fill, tr, tr_cow};
 use config::keyassignment::{KeyAssignment, SpawnCommand, SpawnTabDomain};
 use mux::domain::{DomainId, DomainState};
 use mux::pane::PaneId;
@@ -137,9 +138,12 @@ impl LauncherArgs {
                 let name = dom.domain_name();
                 let label = dom.domain_label().await;
                 let label = if name == label || label == "" {
-                    format!("domain `{}`", name)
+                    fill(&tr("domain `{name}`"), &[("name", name)])
                 } else {
-                    format!("domain `{}` - {}", name, label)
+                    fill(
+                        &tr("domain `{name}` - {label}"),
+                        &[("name", name), ("label", &label)],
+                    )
                 };
                 d.push(LauncherDomainEntry {
                     domain_id: dom.domain_id(),
@@ -237,7 +241,7 @@ impl LauncherState {
                         Some(label) => label.to_string(),
                         None => match item.args.as_ref() {
                             Some(args) => args.join(" "),
-                            None => "(default shell)".to_string(),
+                            None => tr("(default shell)").into_owned(),
                         },
                     },
                     action: KeyAssignment::SpawnCommandInNewTab(item.clone()),
@@ -248,7 +252,7 @@ impl LauncherState {
         for domain in &args.domains {
             let entry = if domain.state == DomainState::Attached {
                 Entry {
-                    label: format!("New Tab ({})", domain.label),
+                    label: fill(&tr("New Tab ({label})"), &[("label", &domain.label)]),
                     action: KeyAssignment::SpawnCommandInNewTab(SpawnCommand {
                         domain: SpawnTabDomain::DomainName(domain.name.to_string()),
                         ..SpawnCommand::default()
@@ -256,7 +260,7 @@ impl LauncherState {
                 }
             } else {
                 Entry {
-                    label: format!("Attach {}", domain.label),
+                    label: fill(&tr("Attach {label}"), &[("label", &domain.label)]),
                     action: KeyAssignment::AttachDomain(domain.name.to_string()),
                 }
             };
@@ -274,7 +278,7 @@ impl LauncherState {
             for ws in &args.workspaces {
                 if *ws != args.active_workspace {
                     self.entries.push(Entry {
-                        label: format!("Switch to workspace: `{}`", ws),
+                        label: fill(&tr("Switch to workspace: `{ws}`"), &[("ws", ws)]),
                         action: KeyAssignment::SwitchToWorkspace {
                             name: Some(ws.clone()),
                             spawn: None,
@@ -283,9 +287,9 @@ impl LauncherState {
                 }
             }
             self.entries.push(Entry {
-                label: format!(
-                    "Create new Workspace (current is `{}`)",
-                    args.active_workspace
+                label: fill(
+                    &tr("Create new Workspace (current is `{ws}`)"),
+                    &[("ws", &args.active_workspace)],
                 ),
                 action: KeyAssignment::SwitchToWorkspace {
                     name: None,
@@ -297,7 +301,10 @@ impl LauncherState {
         for tab in &args.tabs {
             self.entries.push(Entry {
                 label: match tab.pane_count {
-                    Some(pane_count) => format!("{}. {pane_count} panes", tab.title),
+                    Some(pane_count) => fill(
+                        &tr("{title}. {n} panes"),
+                        &[("title", &tab.title), ("n", &pane_count.to_string())],
+                    ),
                     None => format!("{}.", tab.title),
                 },
                 action: KeyAssignment::ActivateTab(tab.tab_idx as isize),
@@ -315,7 +322,7 @@ impl LauncherState {
                     continue;
                 }
                 self.entries.push(Entry {
-                    label: format!("{}. {}", cmd.brief, cmd.doc),
+                    label: format!("{}. {}", tr_cow(cmd.brief.clone()), tr_cow(cmd.doc.clone())),
                     action: cmd.action,
                 });
             }
@@ -345,7 +352,7 @@ impl LauncherState {
                 }
 
                 let label = match derive_command_from_key_assignment(&entry.action) {
-                    Some(cmd) => format!("{}. {}", cmd.brief, cmd.doc),
+                    Some(cmd) => format!("{}. {}", tr_cow(cmd.brief), tr_cow(cmd.doc)),
                     None => format!(
                         "{:?} ({} {})",
                         entry.action,

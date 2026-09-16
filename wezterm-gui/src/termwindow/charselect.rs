@@ -8,6 +8,7 @@ use crate::termwindow::render::corners::{
 use crate::termwindow::DimensionContext;
 use crate::utilsprites::RenderMetrics;
 use crate::TermWindow;
+use config::i18n::tr;
 use config::keyassignment::{
     CharSelectArguments, CharSelectGroup, ClipboardCopyDestination, KeyAssignment,
 };
@@ -402,19 +403,19 @@ impl CharSelector {
         let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;
 
         let label = match group {
-            CharSelectGroup::RecentlyUsed => "Recent",
-            CharSelectGroup::SmileysAndEmotion => "Emotion",
-            CharSelectGroup::PeopleAndBody => "People",
-            CharSelectGroup::AnimalsAndNature => "Animals",
-            CharSelectGroup::FoodAndDrink => "Food",
-            CharSelectGroup::TravelAndPlaces => "Travel",
-            CharSelectGroup::Activities => "Activities",
-            CharSelectGroup::Objects => "Objects",
-            CharSelectGroup::Symbols => "Symbols",
-            CharSelectGroup::Flags => "Flags",
-            CharSelectGroup::NerdFonts => "NerdFonts",
-            CharSelectGroup::UnicodeNames => "Unicode",
-            CharSelectGroup::ShortCodes => "Short Codes",
+            CharSelectGroup::RecentlyUsed => tr("Recent"),
+            CharSelectGroup::SmileysAndEmotion => tr("Emotion"),
+            CharSelectGroup::PeopleAndBody => tr("People"),
+            CharSelectGroup::AnimalsAndNature => tr("Animals"),
+            CharSelectGroup::FoodAndDrink => tr("Food"),
+            CharSelectGroup::TravelAndPlaces => tr("Travel"),
+            CharSelectGroup::Activities => tr("Activities"),
+            CharSelectGroup::Objects => tr("Objects"),
+            CharSelectGroup::Symbols => tr("Symbols"),
+            CharSelectGroup::Flags => tr("Flags"),
+            CharSelectGroup::NerdFonts => tr("NerdFonts"),
+            CharSelectGroup::UnicodeNames => tr("Unicode"),
+            CharSelectGroup::ShortCodes => tr("Short Codes"),
         };
 
         let mut elements = vec![Element::new(

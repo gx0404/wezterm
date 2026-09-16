@@ -1,6 +1,7 @@
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::Modal;
 use crate::termwindow::{DimensionContext, TermWindow, UIItemType};
+use config::i18n::{fill, tr};
 use config::keyassignment::{
     ClipboardCopyDestination, ClipboardPasteSource, KeyAssignment, PaneDirection, SpawnCommand,
     SpawnTabDomain, SplitPane, SplitSize,
@@ -76,7 +77,7 @@ impl ContextMenu {
         Self::new(
             vec![
                 (
-                    Some("Split Pane Right".into()),
+                    Some(tr("Split Pane Right").into_owned()),
                     Some(KeyAssignment::SplitPane(SplitPane {
                         direction: PaneDirection::Right,
                         size: SplitSize::Percent(50),
@@ -85,7 +86,7 @@ impl ContextMenu {
                     })),
                 ),
                 (
-                    Some("Split Pane Down".into()),
+                    Some(tr("Split Pane Down").into_owned()),
                     Some(KeyAssignment::SplitPane(SplitPane {
                         direction: PaneDirection::Down,
                         size: SplitSize::Percent(50),
@@ -94,30 +95,30 @@ impl ContextMenu {
                     })),
                 ),
                 (
-                    Some("Toggle Pane Zoom".into()),
+                    Some(tr("Toggle Pane Zoom").into_owned()),
                     Some(KeyAssignment::TogglePaneZoomState),
                 ),
                 (None, None),
                 (
-                    Some("Copy".into()),
+                    Some(tr("Copy").into_owned()),
                     Some(KeyAssignment::CopyTo(ClipboardCopyDestination::Clipboard)),
                 ),
                 (
-                    Some("Paste".into()),
+                    Some(tr("Paste").into_owned()),
                     Some(KeyAssignment::PasteFrom(ClipboardPasteSource::Clipboard)),
                 ),
                 (None, None),
                 (
-                    Some("Scroll to Top".into()),
+                    Some(tr("Scroll to Top").into_owned()),
                     Some(KeyAssignment::ScrollToTop),
                 ),
                 (
-                    Some("Scroll to Bottom".into()),
+                    Some(tr("Scroll to Bottom").into_owned()),
                     Some(KeyAssignment::ScrollToBottom),
                 ),
                 (None, None),
                 (
-                    Some("Close Pane".into()),
+                    Some(tr("Close Pane").into_owned()),
                     Some(KeyAssignment::CloseCurrentPane { confirm: true }),
                 ),
             ],
@@ -131,25 +132,25 @@ impl ContextMenu {
         Self::new(
             vec![
                 (
-                    Some("New Tab".into()),
+                    Some(tr("New Tab").into_owned()),
                     Some(KeyAssignment::SpawnTab(SpawnTabDomain::CurrentPaneDomain)),
                 ),
                 (
-                    Some("Show Tab Navigator".into()),
+                    Some(tr("Show Tab Navigator").into_owned()),
                     Some(KeyAssignment::ShowTabNavigator),
                 ),
                 (None, None),
                 (
-                    Some("Move Tab Left".into()),
+                    Some(tr("Move Tab Left").into_owned()),
                     Some(KeyAssignment::MoveTabRelative(-1)),
                 ),
                 (
-                    Some("Move Tab Right".into()),
+                    Some(tr("Move Tab Right").into_owned()),
                     Some(KeyAssignment::MoveTabRelative(1)),
                 ),
                 (None, None),
                 (
-                    Some(format!("Close Tab {tab_idx}")),
+                    Some(fill(&tr("Close Tab {n}"), &[("n", &tab_idx.to_string())])),
                     Some(KeyAssignment::CloseCurrentTab { confirm: true }),
                 ),
             ],
@@ -163,11 +164,11 @@ impl ContextMenu {
         Self::new(
             vec![
                 (
-                    Some("New Tab".into()),
+                    Some(tr("New Tab").into_owned()),
                     Some(KeyAssignment::SpawnTab(SpawnTabDomain::CurrentPaneDomain)),
                 ),
                 (
-                    Some("Show Launcher".into()),
+                    Some(tr("Show Launcher").into_owned()),
                     Some(KeyAssignment::ShowLauncher),
                 ),
             ],

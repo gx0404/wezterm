@@ -266,7 +266,7 @@ impl ConnectionUI {
 
                 if !params.disable_close_delay && status == CloseStatus::Implicit {
                     ui.sleep(
-                        "(this window will close automatically)",
+                        &config::i18n::tr("(this window will close automatically)"),
                         Duration::new(120, 0),
                     )
                     .ok();
@@ -301,7 +301,8 @@ impl ConnectionUI {
     {
         match f() {
             Err(e) => {
-                let what = format!("\r\nFailed: {:?}\r\n", e);
+                let what = format!("\r\n{}\r\n", config::i18n::tr("Failed: {err}"));
+                let what = config::i18n::fill(&what, &[("err", &format!("{e:?}"))]);
                 log::error!("{}", what);
                 self.output_str(&what);
                 Err(e)
@@ -316,7 +317,8 @@ impl ConnectionUI {
     {
         match f.await {
             Err(e) => {
-                let what = format!("\r\nFailed: {:?}\r\n", e);
+                let what = format!("\r\n{}\r\n", config::i18n::tr("Failed: {err}"));
+                let what = config::i18n::fill(&what, &[("err", &format!("{e:?}"))]);
                 self.output_str(&what);
                 Err(e)
             }
@@ -436,7 +438,7 @@ fn get_error_window() -> ConnectionUI {
     }
 
     let ui = ConnectionUI::new_with_no_close_delay();
-    ui.title("wezterm Configuration Error");
+    ui.title(&config::i18n::tr("wezterm Configuration Error"));
     err.replace(ui.clone());
     ui
 }

@@ -8,6 +8,7 @@ use crate::termwindow::render::corners::{
 };
 use crate::termwindow::{DimensionContext, GuiWin, TermWindow, UIItemType};
 use crate::utilsprites::RenderMetrics;
+use config::i18n::{tr, tr_cow};
 use config::keyassignment::KeyAssignment;
 use config::Dimension;
 use frecency::Frecency;
@@ -177,9 +178,12 @@ struct MatchResult {
 
 impl MatchResult {
     fn new(row_idx: usize, score: u32, selection: &str, commands: &[ExpandedCommand]) -> Self {
+        // fork: compare against the localized brief so typing the exact
+        // (translated) label pumps the score
+        let brief = tr_cow(commands[row_idx].brief.clone());
         Self {
             row_idx,
-            score: if commands[row_idx].brief == selection {
+            score: if brief == selection {
                 // Pump up the score for an exact match, otherwise
                 // the order may be undesirable if there are a lot
                 // of candidates with the same score
@@ -202,8 +206,17 @@ fn compute_matches(selection: &str, commands: &[ExpandedCommand]) -> Vec<usize> 
             .par_iter()
             .enumerate()
             .filter_map(|(row_idx, entry)| {
-                let group = entry.menubar.join(" ");
-                let text = format!("{group}: {}. {} {:?}", entry.brief, entry.doc, entry.action);
+                // fork: match against the localized text so Chinese
+                // queries work
+                let group = entry
+                    .menubar
+                    .iter()
+                    .map(|s| tr(s))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let brief = tr_cow(entry.brief.clone());
+                let doc = tr_cow(entry.doc.clone());
+                let text = format!("{group}: {}. {} {:?}", brief, doc, entry.action);
                 matcher_score(&pattern, &text)
                     .map(|score| MatchResult::new(row_idx, score, selection, commands))
             })
@@ -296,7 +309,16 @@ impl CommandPalette {
             let group = if command.menubar.is_empty() {
                 String::new()
             } else {
-                format!("{}: ", command.menubar.join(" | "))
+                // fork: localized group label
+                format!(
+                    "{}: ",
+                    command
+                        .menubar
+                        .iter()
+                        .map(|s| tr(s))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                )
             };
 
             let icon = match &command.icon {
@@ -331,12 +353,15 @@ impl CommandPalette {
             };
 
             // DRY if the brief and doc are the same
-            let label = if command.doc.is_empty()
-                || command.brief.to_ascii_lowercase() == command.doc.to_ascii_lowercase()
+            // fork: localize at render time; the frecency store keeps
+            // the English brief as its stable key
+            let brief = tr_cow(command.brief.clone());
+            let doc = tr_cow(command.doc.clone());
+            let label = if doc.is_empty() || brief.to_ascii_lowercase() == doc.to_ascii_lowercase()
             {
-                format!("{group}{}", command.brief)
+                format!("{group}{}", brief)
             } else {
-                format!("{group}{}. {}", command.brief, command.doc)
+                format!("{group}{}. {}", brief, doc)
             };
 
             let mut row = vec![

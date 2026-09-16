@@ -1,6 +1,7 @@
 use crate::selection::{SelectionCoordinate, SelectionRange, SelectionX};
 use crate::termwindow::keyevent::KeyTableArgs;
 use crate::termwindow::{TermWindow, TermWindowNotif};
+use config::i18n::{fill, tr};
 use config::keyassignment::{
     ClipboardCopyDestination, CopyModeAssignment, KeyAssignment, KeyTable, KeyTableEntry,
     ScrollbackEraseMode, SelectionMode,
@@ -1234,7 +1235,10 @@ impl Pane for CopyOverlay {
     }
 
     fn get_title(&self) -> String {
-        format!("Copy mode: {}", self.delegate.get_title())
+        config::i18n::fill(
+            &config::i18n::tr("Copy mode: {title}"),
+            &[("title", &self.delegate.get_title())],
+        )
     }
 
     fn send_paste(&self, text: &str) -> anyhow::Result<()> {
@@ -1564,27 +1568,39 @@ impl Pane for CopyOverlay {
                         let rev = CellAttributes::default().set_reverse(true).clone();
                         line.fill_range(0..self.dims.cols, &Cell::new(' ', rev.clone()), SEQ_ZERO);
                         let mode = &match pattern {
-                            Pattern::CaseSensitiveString(_) => "case-sensitive",
-                            Pattern::CaseInSensitiveString(_) => "ignore-case",
-                            Pattern::CaseSmartString(_) => "smart-case",
-                            Pattern::Regex(_) => "regex",
+                            Pattern::CaseSensitiveString(_) => tr("case-sensitive").into_owned(),
+                            Pattern::CaseInSensitiveString(_) => tr("ignore-case").into_owned(),
+                            Pattern::CaseSmartString(_) => tr("smart-case").into_owned(),
+                            Pattern::Regex(_) => tr("regex").into_owned(),
                         };
 
                         let remain = match &self.renderer.searching {
-                            Some(Searching { remain, .. }) => {
-                                format!(" searching {remain} lines")
-                            }
+                            Some(Searching { remain, .. }) => fill(
+                                &tr(" searching {remain} lines"),
+                                &[("remain", &remain.to_string())],
+                            ),
                             None => String::new(),
                         };
 
                         line.overlay_text_with_attribute(
                             0,
-                            &format!(
-                                "Search: {} ({}/{} matches. {}{remain})",
-                                *pattern,
-                                self.renderer.result_pos.map(|x| x + 1).unwrap_or(0),
-                                self.renderer.results.len(),
-                                mode
+                            &fill(
+                                &tr("Search: {pattern} ({cur}/{total} matches. {mode}{remain})"),
+                                &[
+                                    ("pattern", &pattern.to_string()),
+                                    (
+                                        "cur",
+                                        &self
+                                            .renderer
+                                            .result_pos
+                                            .map(|x| x + 1)
+                                            .unwrap_or(0)
+                                            .to_string(),
+                                    ),
+                                    ("total", &self.renderer.results.len().to_string()),
+                                    ("mode", &mode),
+                                    ("remain", &remain),
+                                ],
                             ),
                             rev,
                             SEQ_ZERO,
@@ -1695,20 +1711,25 @@ impl Pane for CopyOverlay {
                 // Replace with search UI
                 let rev = CellAttributes::default().set_reverse(true).clone();
                 line.fill_range(0..dims.cols, &Cell::new(' ', rev.clone()), SEQ_ZERO);
-                let mode = &match pattern {
-                    Pattern::CaseSensitiveString(_) => "case-sensitive",
-                    Pattern::CaseInSensitiveString(_) => "ignore-case",
-                    Pattern::CaseSmartString(_) => "smart-case",
-                    Pattern::Regex(_) => "regex",
+                let mode = match pattern {
+                    Pattern::CaseSensitiveString(_) => tr("case-sensitive").into_owned(),
+                    Pattern::CaseInSensitiveString(_) => tr("ignore-case").into_owned(),
+                    Pattern::CaseSmartString(_) => tr("smart-case").into_owned(),
+                    Pattern::Regex(_) => tr("regex").into_owned(),
                 };
                 line.overlay_text_with_attribute(
                     0,
-                    &format!(
-                        "Search: {} ({}/{} matches. {})",
-                        *pattern,
-                        renderer.result_pos.map(|x| x + 1).unwrap_or(0),
-                        renderer.results.len(),
-                        mode
+                    &fill(
+                        &tr("Search: {pattern} ({cur}/{total} matches. {mode})"),
+                        &[
+                            ("pattern", &pattern.to_string()),
+                            (
+                                "cur",
+                                &renderer.result_pos.map(|x| x + 1).unwrap_or(0).to_string(),
+                            ),
+                            ("total", &renderer.results.len().to_string()),
+                            ("mode", &mode),
+                        ],
                     ),
                     rev,
                     SEQ_ZERO,

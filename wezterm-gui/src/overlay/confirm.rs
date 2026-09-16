@@ -1,4 +1,5 @@
 use crate::scripting::guiwin::GuiWin;
+use config::i18n::tr;
 use config::keyassignment::{Confirmation, KeyAssignment};
 use mux::termwiztermtab::TermWizTerminal;
 use mux_lua::MuxPane;
@@ -8,6 +9,14 @@ use termwiz::color::ColorAttribute;
 use termwiz::input::{InputEvent, KeyCode, KeyEvent, MouseButtons, MouseEvent};
 use termwiz::surface::{Change, CursorVisibility, Position};
 use termwiz::terminal::Terminal;
+
+// fork: display width (in terminal cells) of a UI string; CJK glyphs
+// are two cells wide, so translated button labels need measured widths
+fn display_width(s: &str) -> usize {
+    s.chars()
+        .map(|c| termwiz::cell::Cell::new(c, termwiz::cell::CellAttributes::default()).width())
+        .sum()
+}
 
 pub fn run_confirmation(message: &str, term: &mut TermWizTerminal) -> anyhow::Result<bool> {
     run_confirmation_impl(message, term)
@@ -34,11 +43,14 @@ fn run_confirmation_impl(message: &str, term: &mut TermWizTerminal) -> anyhow::R
     let button_row = top_row + message_rows + 1;
     let mut active = ActiveButton::None;
 
-    let yes_x = x_pos;
-    let yes_w = 7;
+    let yes_label = tr(" [Y]es ").into_owned();
+    let no_label = tr(" [N]o ").into_owned();
 
-    let no_x =  yes_x + yes_w + 8 /* spacer */;
-    let no_w = 6;
+    let yes_x = x_pos;
+    let yes_w = display_width(&yes_label);
+
+    let no_x = yes_x + yes_w + 8 /* spacer */;
+    let no_w = display_width(&no_label);
 
     #[derive(Copy, Clone, PartialEq, Eq)]
     enum ActiveButton {
@@ -70,7 +82,7 @@ fn run_confirmation_impl(message: &str, term: &mut TermWizTerminal) -> anyhow::R
         if active == ActiveButton::Yes {
             changes.push(AttributeChange::Reverse(true).into());
         }
-        changes.push(" [Y]es ".into());
+        changes.push(yes_label.clone().into());
         if active == ActiveButton::Yes {
             changes.push(AttributeChange::Reverse(false).into());
         }
@@ -80,7 +92,7 @@ fn run_confirmation_impl(message: &str, term: &mut TermWizTerminal) -> anyhow::R
         if active == ActiveButton::No {
             changes.push(AttributeChange::Reverse(true).into());
         }
-        changes.push(" [N]o ".into());
+        changes.push(no_label.clone().into());
         if active == ActiveButton::No {
             changes.push(AttributeChange::Reverse(false).into());
         }

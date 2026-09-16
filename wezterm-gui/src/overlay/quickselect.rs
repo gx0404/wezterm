@@ -1,5 +1,6 @@
 use crate::selection::{SelectionCoordinate, SelectionRange};
 use crate::termwindow::{TermWindow, TermWindowNotif};
+use config::i18n::{fill, tr};
 use config::keyassignment::{ClipboardCopyDestination, QuickSelectArguments, ScrollbackEraseMode};
 use config::ConfigHandle;
 use mux::domain::DomainId;
@@ -635,14 +636,19 @@ impl Pane for QuickSelectOverlay {
                         line.fill_range(0..self.dims.cols, &Cell::new(' ', rev.clone()), SEQ_ZERO);
                         line.overlay_text_with_attribute(
                             0,
-                            &format!(
-                                "Select: {}  (type highlighted prefix to {}, uppercase pastes, ESC to cancel)",
-                                self.renderer.selection,
-                                if self.renderer.args.label.is_empty() {
-                                    "copy"
-                                } else {
-                                    &self.renderer.args.label
-                                },
+                            &fill(
+                                &tr("Select: {input}  (type highlighted prefix to {action}, uppercase pastes, ESC to cancel)"),
+                                &[
+                                    ("input", &self.renderer.selection),
+                                    (
+                                        "action",
+                                        &if self.renderer.args.label.is_empty() {
+                                            tr("copy").into_owned()
+                                        } else {
+                                            self.renderer.args.label.clone()
+                                        },
+                                    ),
+                                ],
                             ),
                             rev,
                             SEQ_ZERO,

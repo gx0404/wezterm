@@ -1,4 +1,5 @@
 use crate::inputmap::InputMap;
+use config::i18n::{fill, tr};
 use config::keyassignment::*;
 use config::window::WindowLevel;
 use config::{ConfigHandle, DeferredKeyCode};
@@ -214,7 +215,7 @@ impl CommandDef {
                 },
             };
             result.push(ExpandedCommand {
-                brief: format!("{label} (New Tab)").into(),
+                brief: fillc(&tr("{label} (New Tab)"), &[("label", &label)]).into(),
                 doc: "".into(),
                 keys: vec![],
                 action: KeyAssignment::SpawnCommandInNewTab(cmd.clone()),
@@ -246,7 +247,8 @@ impl CommandDef {
                 if dom.spawnable() {
                     if dom.state() == DomainState::Attached {
                         result.push(ExpandedCommand {
-                            brief: format!("New Tab (Domain {label})").into(),
+                            brief: fillc(&tr("New Tab (Domain {label})"), &[("label", &label)])
+                                .into(),
                             doc: "".into(),
                             keys: vec![],
                             action: KeyAssignment::SpawnCommandInNewTab(SpawnCommand {
@@ -258,7 +260,7 @@ impl CommandDef {
                         });
                     } else {
                         result.push(ExpandedCommand {
-                            brief: format!("Attach Domain {label}").into(),
+                            brief: fillc(&tr("Attach Domain {label}"), &[("label", &label)]).into(),
                             doc: "".into(),
                             keys: vec![],
                             action: KeyAssignment::AttachDomain(name.to_string()),
@@ -278,7 +280,7 @@ impl CommandDef {
                         continue;
                     }
                     result.push(ExpandedCommand {
-                        brief: format!("Detach Domain {label}").into(),
+                        brief: fillc(&tr("Detach Domain {label}"), &[("label", &label)]).into(),
                         doc: "".into(),
                         keys: vec![],
                         action: KeyAssignment::DetachDomain(SpawnTabDomain::DomainName(
@@ -294,7 +296,11 @@ impl CommandDef {
             for workspace in mux.iter_workspaces() {
                 if workspace != active_workspace {
                     result.push(ExpandedCommand {
-                        brief: format!("Switch to workspace {workspace}").into(),
+                        brief: fillc(
+                            &tr("Switch to workspace {workspace}"),
+                            &[("workspace", &workspace)],
+                        )
+                        .into(),
                         doc: "".into(),
                         keys: vec![],
                         action: KeyAssignment::SwitchToWorkspace {
@@ -590,6 +596,22 @@ fn english_ordinal(n: isize) -> String {
     }
 }
 
+// fork: localized ordinal for dynamic command briefs ("2nd" / "第 2 个"),
+// filled into translated templates via the {ordinal} placeholder
+fn localized_ordinal(n: isize) -> String {
+    if config::i18n::lang() == config::i18n::UiLanguage::En {
+        english_ordinal(n)
+    } else {
+        format!("第 {n} 个")
+    }
+}
+
+// fork: fill variant returning Cow<'static, str> so both
+// `brief: fillc(..)` and `brief: fillc(..).into()` spellings compile
+fn fillc(template: &str, args: &[(&str, &str)]) -> Cow<'static, str> {
+    Cow::Owned(fill(template, args))
+}
+
 fn spawn_command_from_action(action: &KeyAssignment) -> Option<&SpawnCommand> {
     match action {
         SplitPane(config::keyassignment::SplitPane { command, .. }) => Some(command),
@@ -636,8 +658,19 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("md_content_copy"),
         },
         PipeSelection(cmd) => CommandDef {
-            brief: label_string(action, format!("Pipe selection to {cmd:?}")).into(),
-            doc: format!("Pipe the selection to the standard input of {cmd:?}").into(),
+            brief: label_string(
+                action,
+                fill(
+                    &tr("Pipe selection to {cmd}"),
+                    &[("cmd", &format!("{cmd:?}"))],
+                ),
+            )
+            .into(),
+            doc: fillc(
+                &tr("Pipe the selection to the standard input of {cmd}"),
+                &[("cmd", &format!("{cmd:?}"))],
+            )
+            .into(),
             keys: vec![],
             args: &[],
             menubar: &[],
@@ -967,24 +1000,47 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("md_tab_plus"),
         },
         SpawnTab(SpawnTabDomain::DomainName(name)) => CommandDef {
-            brief: format!("New Tab (`{name}` Domain)").into(),
-            doc: format!("Create a new tab in the domain named {name}").into(),
+            brief: fillc(&tr("New Tab (`{name}` Domain)"), &[("name", name)]).into(),
+            doc: fillc(
+                &tr("Create a new tab in the domain named {name}"),
+                &[("name", name)],
+            )
+            .into(),
             keys: vec![],
             args: &[ArgType::ActiveWindow],
             menubar: &["Shell"],
             icon: Some("md_tab_plus"),
         },
         SpawnTab(SpawnTabDomain::DomainId(id)) => CommandDef {
-            brief: format!("New Tab (Domain with id {id})").into(),
-            doc: format!("Create a new tab in the domain with id {id}").into(),
+            brief: fillc(
+                &tr("New Tab (Domain with id {id})"),
+                &[("id", &id.to_string())],
+            )
+            .into(),
+            doc: fillc(
+                &tr("Create a new tab in the domain with id {id}"),
+                &[("id", &id.to_string())],
+            )
+            .into(),
             keys: vec![],
             args: &[ArgType::ActiveWindow],
             menubar: &["Shell"],
             icon: Some("md_tab_plus"),
         },
         SpawnCommandInNewTab(cmd) => CommandDef {
-            brief: label_string(action, format!("Spawn a new Tab with {cmd:?}").to_string()).into(),
-            doc: format!("Spawn a new Tab with {cmd:?}").into(),
+            brief: label_string(
+                action,
+                fill(
+                    &tr("Spawn a new Tab with {cmd}"),
+                    &[("cmd", &format!("{cmd:?}"))],
+                ),
+            )
+            .into(),
+            doc: fillc(
+                &tr("Spawn a new Tab with {cmd}"),
+                &[("cmd", &format!("{cmd:?}"))],
+            )
+            .into(),
             keys: vec![],
             args: &[],
             menubar: &[],
@@ -993,10 +1049,17 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         SpawnCommandInNewWindow(cmd) => CommandDef {
             brief: label_string(
                 action,
-                format!("Spawn a new Window with {cmd:?}").to_string(),
+                fill(
+                    &tr("Spawn a new Window with {cmd}"),
+                    &[("cmd", &format!("{cmd:?}"))],
+                ),
             )
             .into(),
-            doc: format!("Spawn a new Window with {cmd:?}").into(),
+            doc: fillc(
+                &tr("Spawn a new Window with {cmd}"),
+                &[("cmd", &format!("{cmd:?}"))],
+            )
+            .into(),
             keys: vec![],
             args: &[],
             menubar: &[],
@@ -1012,15 +1075,19 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         },
         ActivateTab(n) => {
             let n = *n;
-            let ordinal = english_ordinal(n + 1);
+            let ordinal = localized_ordinal(n + 1);
             let keys = if n >= 0 && n <= 7 {
                 vec![(Modifiers::SUPER, (n + 1).to_string())]
             } else {
                 vec![]
             };
             CommandDef {
-                brief: format!("Activate {ordinal} Tab").into(),
-                doc: format!("Activates the {ordinal} tab").into(),
+                brief: fillc(&tr("Activate {ordinal} Tab"), &[("ordinal", &ordinal)]).into(),
+                doc: fillc(
+                    &tr("Activates the {ordinal} tab"),
+                    &[("ordinal", &ordinal)],
+                )
+                .into(),
                 keys,
                 args: &[ArgType::ActiveWindow],
                 menubar: &["Window", "Select Tab"],
@@ -1029,10 +1096,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         }
         ActivatePaneByIndex(n) => {
             let n = *n;
-            let ordinal = english_ordinal(n as isize);
+            let ordinal = localized_ordinal(n as isize);
             CommandDef {
-                brief: format!("Activate {ordinal} Pane").into(),
-                doc: format!("Activates the {ordinal} Pane").into(),
+                brief: fillc(&tr("Activate {ordinal} Pane"), &[("ordinal", &ordinal)]).into(),
+                doc: fillc(
+                    &tr("Activates the {ordinal} Pane"),
+                    &[("ordinal", &ordinal)],
+                )
+                .into(),
                 keys: vec![],
                 args: &[ArgType::ActiveWindow],
                 menubar: &[],
@@ -1040,32 +1111,30 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             }
         }
         SetPaneZoomState(true) => CommandDef {
-            brief: format!("Zooms the current Pane").into(),
-            doc: format!(
-                "Places the current pane into the zoomed state, \
-                             filling all of the space in the tab"
-            )
-            .into(),
+            brief: tr("Zooms the current Pane"),
+            doc: fillc(
+                &tr("Places the current pane into the zoomed state, filling all of the space in the tab"),
+                &[],
+            ),
             keys: vec![],
             args: &[ArgType::ActiveWindow],
             menubar: &[],
             icon: Some("md_fullscreen"),
         },
         SetPaneZoomState(false) => CommandDef {
-            brief: format!("Un-Zooms the current Pane").into(),
-            doc: format!("Takes the current pane out of the zoomed state").into(),
+            brief: tr("Un-Zooms the current Pane"),
+            doc: tr("Takes the current pane out of the zoomed state"),
             keys: vec![],
             args: &[ArgType::ActiveWindow],
             menubar: &[],
             icon: Some("md_fullscreen"),
         },
         EmitEvent(name) => CommandDef {
-            brief: format!("Emit event `{name}`").into(),
-            doc: format!(
-                "Emits the named event, causing any \
-                             associated event handler(s) to trigger"
-            )
-            .into(),
+            brief: fillc(&tr("Emit event `{name}`"), &[("name", name)]).into(),
+            doc: fillc(
+                &tr("Emits the named event, causing any associated event handler(s) to trigger"),
+                &[],
+            ),
             keys: vec![],
             args: &[ArgType::ActiveWindow],
             menubar: &[],
@@ -1113,10 +1182,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         },
         ActivateWindow(n) => {
             let n = *n;
-            let ordinal = english_ordinal(n as isize + 1);
+            let ordinal = localized_ordinal(n as isize + 1);
             CommandDef {
-                brief: format!("Activate {ordinal} Window").into(),
-                doc: format!("Activates the {ordinal} window").into(),
+                brief: fillc(&tr("Activate {ordinal} Window"), &[("ordinal", &ordinal)]).into(),
+                doc: fillc(
+                    &tr("Activates the {ordinal} window"),
+                    &[("ordinal", &ordinal)],
+                )
+                .into(),
                 keys: vec![],
                 args: &[ArgType::ActiveWindow],
                 menubar: &["Window", "Select Window"],
@@ -1149,14 +1222,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             } else {
                 ("forwards", *n)
             };
-            let ordinal = english_ordinal(amount + 1);
+            let ordinal = localized_ordinal(amount + 1);
+            let direction = tr(direction);
             CommandDef {
-                brief: format!("Activate the {ordinal} window {direction}").into(),
-                doc: format!(
-                    "Activates the {ordinal} window, moving {direction}. \
-                         Wraps around to the other end"
+                brief: fillc(
+                    &tr("Activate the {ordinal} window {direction}"),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
                 )
                 .into(),
+                doc: fillc(
+                    &tr("Activates the {ordinal} window, moving {direction}. Wraps around to the other end"),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActiveWindow],
                 menubar: &[],
@@ -1189,10 +1266,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             } else {
                 ("forwards", *n)
             };
-            let ordinal = english_ordinal(amount + 1);
+            let ordinal = localized_ordinal(amount + 1);
+            let direction = tr(direction);
             CommandDef {
-                brief: format!("Activate the {ordinal} window {direction}").into(),
-                doc: format!("Activates the {ordinal} window, moving {direction}.").into(),
+                brief: fillc(
+                    &tr("Activate the {ordinal} window {direction}"),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
+                )
+                .into(),
+                doc: fillc(
+                    &tr("Activates the {ordinal} window, moving {direction}."),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActiveWindow],
                 menubar: &[],
@@ -1229,14 +1314,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         },
         ActivateTabRelative(n) => {
             let (direction, amount) = if *n < 0 { ("left", -n) } else { ("right", *n) };
-            let ordinal = english_ordinal(amount + 1);
+            let ordinal = localized_ordinal(amount + 1);
+            let direction = tr(direction);
             CommandDef {
-                brief: format!("Activate the {ordinal} tab to the {direction}").into(),
-                doc: format!(
-                    "Activates the {ordinal} tab to the {direction}. \
-                         Wraps around to the other end"
+                brief: fillc(
+                    &tr("Activate the {ordinal} tab to the {direction}"),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
                 )
                 .into(),
+                doc: fillc(
+                    &tr("Activates the {ordinal} tab to the {direction}. Wraps around to the other end"),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActiveWindow],
                 menubar: &[],
@@ -1261,10 +1350,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         },
         ActivateTabRelativeNoWrap(n) => {
             let (direction, amount) = if *n < 0 { ("left", -n) } else { ("right", *n) };
-            let ordinal = english_ordinal(amount + 1);
+            let ordinal = localized_ordinal(amount + 1);
+            let direction = tr(direction);
             CommandDef {
-                brief: format!("Activate the {ordinal} tab to the {direction}").into(),
-                doc: format!("Activates the {ordinal} tab to the {direction}").into(),
+                brief: fillc(
+                    &tr("Activate the {ordinal} tab to the {direction}"),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
+                )
+                .into(),
+                doc: fillc(
+                    &tr("Activates the {ordinal} tab to the {direction}"),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActiveWindow],
                 menubar: &[],
@@ -1313,14 +1410,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             } else {
                 ("right", n.to_string(), "md_chevron_double_right")
             };
+            let direction = tr(direction);
 
             CommandDef {
-                brief: format!("Move tab {amount} place(s) to the {direction}").into(),
-                doc: format!(
-                    "Rearranges the tabs so that the current tab moves \
-            {amount} place(s) to the {direction}"
+                brief: fillc(
+                    &tr("Move tab {amount} place(s) to the {direction}"),
+                    &[("amount", &amount), ("direction", &direction)],
                 )
                 .into(),
+                doc: fillc(
+                    &tr("Rearranges the tabs so that the current tab moves {amount} place(s) to the {direction}"),
+                    &[("amount", &amount), ("direction", &direction)],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActiveTab],
                 menubar: &[],
@@ -1330,12 +1431,15 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         MoveTab(n) => {
             let n = (*n) + 1;
             CommandDef {
-                brief: format!("Move tab to index {n}").into(),
-                doc: format!(
-                    "Rearranges the tabs so that the current tab \
-                             moves to position {n}"
+                brief: fillc(
+                    &tr("Move tab to index {n}"),
+                    &[("n", &n.to_string())],
                 )
                 .into(),
+                doc: fillc(
+                    &tr("Rearranges the tabs so that the current tab moves to position {n}"),
+                    &[("n", &n.to_string())],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActiveTab],
                 menubar: &[],
@@ -1364,18 +1468,26 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 }
             } else if amount < 0.0 {
                 let amount = -amount;
+                let amount = format!("{amount}");
                 CommandDef {
-                    brief: format!("Scroll Up {amount} Page(s)").into(),
-                    doc: format!("Scrolls the viewport up by {amount} pages").into(),
+                    brief: fillc(&tr("Scroll Up {amount} Page(s)"), &[("amount", &amount)]).into(),
+                    doc: fillc(
+                        &tr("Scrolls the viewport up by {amount} pages"),
+                        &[("amount", &amount)],
+                    ),
                     keys: vec![],
                     args: &[ArgType::ActivePane],
                     menubar: &["View"],
                     icon: None,
                 }
             } else {
+                let amount = format!("{amount}");
                 CommandDef {
-                    brief: format!("Scroll Down {amount} Page(s)").into(),
-                    doc: format!("Scrolls the viewport down by {amount} pages").into(),
+                    brief: fillc(&tr("Scroll Down {amount} Page(s)"), &[("amount", &amount)]).into(),
+                    doc: fillc(
+                        &tr("Scrolls the viewport down by {amount} pages"),
+                        &[("amount", &amount)],
+                    ),
                     keys: vec![],
                     args: &[ArgType::ActivePane],
                     menubar: &["View"],
@@ -1389,13 +1501,17 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             } else {
                 ("down", n.to_string())
             };
+            let direction = tr(direction);
             CommandDef {
-                brief: format!("Scroll {direction} {amount} line(s)").into(),
-                doc: format!(
-                    "Scrolls the viewport {direction} by \
-                             {amount} line(s)"
+                brief: fillc(
+                    &tr("Scroll {direction} {amount} line(s)"),
+                    &[("direction", &direction), ("amount", &amount)],
                 )
                 .into(),
+                doc: fillc(
+                    &tr("Scrolls the viewport {direction} by {amount} line(s)"),
+                    &[("direction", &direction), ("amount", &amount)],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActivePane],
                 menubar: &[],
@@ -1404,14 +1520,19 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         }
         ScrollToPrompt(n) => {
             let (direction, amount) = if *n < 0 { ("up", -n) } else { ("down", *n) };
-            let ordinal = english_ordinal(amount);
+            let ordinal = localized_ordinal(amount);
+            let direction = tr(direction);
+            let amount = amount.to_string();
             CommandDef {
-                brief: format!("Scroll {direction} {amount} prompt(s)").into(),
-                doc: format!(
-                    "Scrolls the viewport {direction} to the \
-                             {ordinal} semantic prompt zone in that direction"
+                brief: fillc(
+                    &tr("Scroll {direction} {amount} prompt(s)"),
+                    &[("direction", &direction), ("amount", &amount)],
                 )
                 .into(),
+                doc: fillc(
+                    &tr("Scrolls the viewport {direction} to the {ordinal} semantic prompt zone in that direction"),
+                    &[("direction", &direction), ("ordinal", &ordinal)],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActivePane],
                 menubar: &[],
@@ -1460,7 +1581,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             domain: SpawnTabDomain::CurrentPaneDomain,
             ..
         }) => CommandDef {
-            brief: label_string(action, "Split Vertically (Top/Bottom)".to_string()).into(),
+            brief: label_string(action, tr("Split Vertically (Top/Bottom)").into_owned()).into(),
             doc: "Split the current pane vertically into two panes, by spawning \
             the default program into the bottom half"
                 .into(),
@@ -1478,7 +1599,11 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             domain: SpawnTabDomain::CurrentPaneDomain,
             ..
         }) => CommandDef {
-            brief: label_string(action, "Split Horizontally (Left/Right)".to_string()).into(),
+            brief: label_string(
+                action,
+                tr("Split Horizontally (Left/Right)").into_owned(),
+            )
+            .into(),
             doc: "Split the current pane horizontally into two panes, by spawning \
             the default program into the right hand side"
                 .into(),
@@ -1493,7 +1618,11 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("cod_split_horizontal"),
         },
         SplitHorizontal(_) => CommandDef {
-            brief: label_string(action, "Split Horizontally (Left/Right)".to_string()).into(),
+            brief: label_string(
+                action,
+                tr("Split Horizontally (Left/Right)").into_owned(),
+            )
+            .into(),
             doc: "Split the current pane horizontally into two panes, by spawning \
             the default program into the right hand side"
                 .into(),
@@ -1503,7 +1632,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("cod_split_horizontal"),
         },
         SplitVertical(_) => CommandDef {
-            brief: label_string(action, "Split Vertically (Top/Bottom)".to_string()).into(),
+            brief: label_string(action, tr("Split Vertically (Top/Bottom)").into_owned()).into(),
             doc: "Split the current pane veritically into two panes, by spawning \
             the default program into the bottom"
                 .into(),
@@ -1513,7 +1642,11 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("cod_split_vertical"),
         },
         AdjustPaneSize(PaneDirection::Left, amount) => CommandDef {
-            brief: format!("Resize Pane {amount} cell(s) to the Left").into(),
+            brief: fillc(
+                &tr("Resize Pane {amount} cell(s) to the Left"),
+                &[("amount", &amount.to_string())],
+            )
+            .into(),
             doc: "Adjusts the closest split divider to the left".into(),
             keys: vec![(
                 Modifiers::CTRL
@@ -1526,7 +1659,11 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         AdjustPaneSize(PaneDirection::Right, amount) => CommandDef {
-            brief: format!("Resize Pane {amount} cell(s) to the Right").into(),
+            brief: fillc(
+                &tr("Resize Pane {amount} cell(s) to the Right"),
+                &[("amount", &amount.to_string())],
+            )
+            .into(),
             doc: "Adjusts the closest split divider to the right".into(),
             keys: vec![(
                 Modifiers::CTRL
@@ -1539,7 +1676,11 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         AdjustPaneSize(PaneDirection::Up, amount) => CommandDef {
-            brief: format!("Resize Pane {amount} cell(s) Upwards").into(),
+            brief: fillc(
+                &tr("Resize Pane {amount} cell(s) Upwards"),
+                &[("amount", &amount.to_string())],
+            )
+            .into(),
             doc: "Adjusts the closest split divider towards the top".into(),
             keys: vec![(
                 Modifiers::CTRL
@@ -1552,7 +1693,11 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         AdjustPaneSize(PaneDirection::Down, amount) => CommandDef {
-            brief: format!("Resize Pane {amount} cell(s) Downwards").into(),
+            brief: fillc(
+                &tr("Resize Pane {amount} cell(s) Downwards"),
+                &[("amount", &amount.to_string())],
+            )
+            .into(),
             doc: "Adjusts the closest split divider towards the bottom".into(),
             keys: vec![(
                 Modifiers::CTRL
@@ -1663,16 +1808,26 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: Some("md_pipe_disconnected"),
         },
         DetachDomain(SpawnTabDomain::DomainName(name)) => CommandDef {
-            brief: format!("Detach the `{name}` domain").into(),
-            doc: format!("Detaches (disconnects from) the domain named `{name}`").into(),
+            brief: fillc(&tr("Detach the `{name}` domain"), &[("name", name)]).into(),
+            doc: fillc(
+                &tr("Detaches (disconnects from) the domain named `{name}`"),
+                &[("name", name)],
+            ),
             keys: vec![],
             args: &[ArgType::ActivePane],
             menubar: &["Shell", "Detach"],
             icon: Some("md_pipe_disconnected"),
         },
         DetachDomain(SpawnTabDomain::DomainId(id)) => CommandDef {
-            brief: format!("Detach the domain with id {id}").into(),
-            doc: format!("Detaches (disconnects from) the domain with id {id}").into(),
+            brief: fillc(
+                &tr("Detach the domain with id {id}"),
+                &[("id", &id.to_string())],
+            )
+            .into(),
+            doc: fillc(
+                &tr("Detaches (disconnects from) the domain with id {id}"),
+                &[("id", &id.to_string())],
+            ),
             keys: vec![],
             args: &[ArgType::ActivePane],
             menubar: &["Shell", "Detach"],
@@ -1704,8 +1859,15 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 icon: Some("fa_ticket"),
             },
             _ => CommandDef {
-                brief: format!("Open {uri} in your browser").into(),
-                doc: format!("Open {uri} in your browser").into(),
+                brief: fillc(
+                    &tr("Open {uri} in your browser"),
+                    &[("uri", uri.as_ref())],
+                )
+                .into(),
+                doc: fillc(
+                    &tr("Open {uri} in your browser"),
+                    &[("uri", uri.as_ref())],
+                ),
                 keys: vec![],
                 args: &[],
                 menubar: &[],
@@ -1713,32 +1875,28 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             },
         },
         SendString(text) => CommandDef {
-            brief: format!(
-                "Sends `{text}` to the active pane, \
-                           as though you typed it"
-            )
-            .into(),
-            doc: format!(
-                "Sends `{text}` to the active pane, as \
-                         though you typed it"
-            )
-            .into(),
+            brief: fillc(
+                &tr("Sends `{text}` to the active pane, as though you typed it"),
+                &[("text", text)],
+            ),
+            doc: fillc(
+                &tr("Sends `{text}` to the active pane, as though you typed it"),
+                &[("text", text)],
+            ),
             keys: vec![],
             args: &[],
             menubar: &[],
             icon: Some("md_keyboard_variant"),
         },
         SendKey(key) => CommandDef {
-            brief: format!(
-                "Sends {key:?} to the active pane, \
-                           as though you typed it"
-            )
-            .into(),
-            doc: format!(
-                "Sends {key:?} to the active pane, \
-                         as though you typed it"
-            )
-            .into(),
+            brief: fillc(
+                &tr("Sends {key} to the active pane, as though you typed it"),
+                &[("key", &format!("{key:?}"))],
+            ),
+            doc: fillc(
+                &tr("Sends {key} to the active pane, as though you typed it"),
+                &[("key", &format!("{key:?}"))],
+            ),
             keys: vec![],
             args: &[],
             menubar: &[],
@@ -1754,32 +1912,28 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         },
         DisableDefaultAssignment => return None,
         SelectTextAtMouseCursor(mode) => CommandDef {
-            brief: format!(
-                "Selects text at the mouse cursor \
-                           location using {mode:?}"
-            )
-            .into(),
-            doc: format!(
-                "Selects text at the mouse cursor \
-                         location using {mode:?}"
-            )
-            .into(),
+            brief: fillc(
+                &tr("Selects text at the mouse cursor location using {mode}"),
+                &[("mode", &format!("{mode:?}"))],
+            ),
+            doc: fillc(
+                &tr("Selects text at the mouse cursor location using {mode}"),
+                &[("mode", &format!("{mode:?}"))],
+            ),
             keys: vec![],
             args: &[],
             menubar: &[],
             icon: None,
         },
         ExtendSelectionToMouseCursor(mode) => CommandDef {
-            brief: format!(
-                "Extends the selection text to the mouse \
-                           cursor location using {mode:?}"
-            )
-            .into(),
-            doc: format!(
-                "Extends the selection text to the mouse \
-                         cursor location using {mode:?}"
-            )
-            .into(),
+            brief: fillc(
+                &tr("Extends the selection text to the mouse cursor location using {mode}"),
+                &[("mode", &format!("{mode:?}"))],
+            ),
+            doc: fillc(
+                &tr("Extends the selection text to the mouse cursor location using {mode}"),
+                &[("mode", &format!("{mode:?}"))],
+            ),
             keys: vec![],
             args: &[],
             menubar: &[],
@@ -1794,28 +1948,28 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         CompleteSelection(destination) => CommandDef {
-            brief: format!("Completes selection, and copy {destination:?}").into(),
-            doc: format!(
-                "Completes text selection using the mouse, and copies \
-                to {destination:?}"
-            )
-            .into(),
+            brief: fillc(
+                &tr("Completes selection, and copy {destination}"),
+                &[("destination", &format!("{destination:?}"))],
+            ),
+            doc: fillc(
+                &tr("Completes text selection using the mouse, and copies to {destination}"),
+                &[("destination", &format!("{destination:?}"))],
+            ),
             keys: vec![],
             args: &[],
             menubar: &[],
             icon: None,
         },
         CompleteSelectionOrOpenLinkAtMouseCursor(destination) => CommandDef {
-            brief: format!(
-                "Open a URL or Completes selection \
-            by copying to {destination:?}"
-            )
-            .into(),
-            doc: format!(
-                "If the mouse is over a link, open it, otherwise, completes \
-                text selection using the mouse, and copies to {destination:?}"
-            )
-            .into(),
+            brief: fillc(
+                &tr("Open a URL or Completes selection by copying to {destination}"),
+                &[("destination", &format!("{destination:?}"))],
+            ),
+            doc: fillc(
+                &tr("If the mouse is over a link, open it, otherwise, completes text selection using the mouse, and copies to {destination}"),
+                &[("destination", &format!("{destination:?}"))],
+            ),
             keys: vec![],
             args: &[],
             menubar: &[],
@@ -1861,16 +2015,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             name: None,
             spawn: None,
         } => CommandDef {
-            brief: format!(
-                "Spawn the default program into a new \
-                           workspace and switch to it"
-            )
-            .into(),
-            doc: format!(
-                "Spawn the default program into a new \
-                         workspace and switch to it"
-            )
-            .into(),
+            brief: fillc(
+                &tr("Spawn the default program into a new workspace and switch to it"),
+                &[],
+            ),
+            doc: fillc(
+                &tr("Spawn the default program into a new workspace and switch to it"),
+                &[],
+            ),
             keys: vec![],
             args: &[],
             menubar: &["Window", "Workspace"],
@@ -1880,16 +2032,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             name: Some(name),
             spawn: None,
         } => CommandDef {
-            brief: format!(
-                "Switch to workspace `{name}`, spawn the \
-                           default program if that workspace doesn't already exist"
-            )
-            .into(),
-            doc: format!(
-                "Switch to workspace `{name}`, spawn the \
-                         default program if that workspace doesn't already exist"
-            )
-            .into(),
+            brief: fillc(
+                &tr("Switch to workspace `{name}`, spawn the default program if that workspace doesn't already exist"),
+                &[("name", name)],
+            ),
+            doc: fillc(
+                &tr("Switch to workspace `{name}`, spawn the default program if that workspace doesn't already exist"),
+                &[("name", name)],
+            ),
             keys: vec![],
             args: &[],
             menubar: &["Window", "Workspace"],
@@ -1899,16 +2049,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             name: Some(name),
             spawn: Some(prog),
         } => CommandDef {
-            brief: format!(
-                "Switch to workspace `{name}`, spawn {prog:?} \
-                           if that workspace doesn't already exist"
-            )
-            .into(),
-            doc: format!(
-                "Switch to workspace `{name}`, spawn {prog:?} \
-                         if that workspace doesn't already exist"
-            )
-            .into(),
+            brief: fillc(
+                &tr("Switch to workspace `{name}`, spawn {prog} if that workspace doesn't already exist"),
+                &[("name", name), ("prog", &format!("{prog:?}"))],
+            ),
+            doc: fillc(
+                &tr("Switch to workspace `{name}`, spawn {prog} if that workspace doesn't already exist"),
+                &[("name", name), ("prog", &format!("{prog:?}"))],
+            ),
             keys: vec![],
             args: &[],
             menubar: &["Window", "Workspace"],
@@ -1918,8 +2066,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             name: None,
             spawn: Some(prog),
         } => CommandDef {
-            brief: format!("Spawn the {prog:?} into a new workspace and switch to it").into(),
-            doc: format!("Spawn the {prog:?} into a new workspace and switch to it").into(),
+            brief: fillc(
+                &tr("Spawn the {prog} into a new workspace and switch to it"),
+                &[("prog", &format!("{prog:?}"))],
+            ),
+            doc: fillc(
+                &tr("Spawn the {prog} into a new workspace and switch to it"),
+                &[("prog", &format!("{prog:?}"))],
+            ),
             keys: vec![],
             args: &[],
             menubar: &["Window", "Workspace"],
@@ -1931,14 +2085,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             } else {
                 ("next", *n)
             };
-            let ordinal = english_ordinal(amount);
+            let ordinal = localized_ordinal(amount);
+            let direction = tr(direction);
             CommandDef {
-                brief: format!("Switch to {ordinal} {direction} workspace").into(),
-                doc: format!(
-                    "Switch to the {ordinal} {direction} workspace, \
-                             ordered lexicographically by workspace name"
+                brief: fillc(
+                    &tr("Switch to {ordinal} {direction} workspace"),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
                 )
                 .into(),
+                doc: fillc(
+                    &tr("Switch to the {ordinal} {direction} workspace, ordered lexicographically by workspace name"),
+                    &[("ordinal", &ordinal), ("direction", &direction)],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActivePane],
                 menubar: &["Window", "Workspace"],
@@ -1946,8 +2104,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             }
         }
         ActivateKeyTable { name, .. } => CommandDef {
-            brief: format!("Activate key table `{name}`").into(),
-            doc: format!("Activate key table `{name}`").into(),
+            brief: fillc(&tr("Activate key table `{name}`"), &[("name", name)]).into(),
+            doc: fillc(&tr("Activate key table `{name}`"), &[("name", name)]),
             keys: vec![],
             args: &[ArgType::ActivePane],
             menubar: &[],
@@ -1962,8 +2120,8 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         AttachDomain(name) => CommandDef {
-            brief: format!("Attach domain `{name}`").into(),
-            doc: format!("Attach domain `{name}`").into(),
+            brief: fillc(&tr("Attach domain `{name}`"), &[("name", name)]).into(),
+            doc: fillc(&tr("Attach domain `{name}`"), &[("name", name)]),
             keys: vec![],
             args: &[ArgType::ActivePane],
             menubar: &["Shell", "Attach"],
@@ -1978,8 +2136,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             icon: None,
         },
         RotatePanes(direction) => CommandDef {
-            brief: format!("Rotate panes {direction:?}").into(),
-            doc: format!("Rotate panes {direction:?}").into(),
+            brief: fillc(
+                &tr("Rotate panes {direction}"),
+                &[("direction", &format!("{direction:?}"))],
+            ),
+            doc: fillc(
+                &tr("Rotate panes {direction}"),
+                &[("direction", &format!("{direction:?}"))],
+            ),
             keys: vec![],
             args: &[ArgType::ActivePane],
             menubar: &["Window", "Rotate Pane"],
@@ -1991,8 +2155,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         SplitPane(split) => {
             let direction = split.direction;
             CommandDef {
-                brief: label_string(action, format!("Split the current pane {direction:?}")).into(),
-                doc: format!("Split the current pane {direction:?}").into(),
+                brief: label_string(
+                    action,
+                    fill(
+                        &tr("Split the current pane {direction}"),
+                        &[("direction", &format!("{direction:?}"))],
+                    ),
+                )
+                .into(),
+                doc: fillc(
+                    &tr("Split the current pane {direction}"),
+                    &[("direction", &format!("{direction:?}"))],
+                ),
                 keys: vec![],
                 args: &[ArgType::ActivePane],
                 menubar: &[],
@@ -2152,4 +2326,65 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         // ----------------- Misc
         OpenLinkAtMouseCursor,
     ];
+}
+
+// fork: 译文覆盖守门——默认命令表中所有静态 brief/doc 都必须有 zh-CN
+// 译条；动态（format! 生成）条目是 Owned，天然跳过。新增命令若缺译，
+// 这里会 fail，提示去 scripts/gen_zh_table.py 补条目并重建译表。
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_commands_have_zh_cn_translations() {
+        let mut missing = vec![];
+        for action in compute_default_actions() {
+            let def = derive_command_from_key_assignment(&action);
+            let Some(def) = def else {
+                continue;
+            };
+            for (what, text) in [("brief", &def.brief), ("doc", &def.doc)] {
+                if let Cow::Borrowed(key) = text {
+                    if !key.is_empty() && !config::i18n::has_translation(key) {
+                        missing.push(format!("{what} missing zh-CN: {key:?}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "command table localization gaps:\n{}",
+            missing.join("\n")
+        );
+    }
+
+    #[test]
+    fn menubar_group_names_have_zh_cn_translations() {
+        // 组名在 palette 渲染与（macOS）menubar 中逐段翻译
+        for group in [
+            "WezTerm",
+            "Shell",
+            "Edit",
+            "View",
+            "Window",
+            "Help",
+            "Workspace",
+            "Select Tab",
+            "Select Window",
+            "Select Pane",
+            "Move Tab",
+            "Resize Pane",
+            "Rotate Pane",
+            "Copy Mode",
+            "Attach",
+            "Detach",
+            "Font Size",
+            "Level",
+        ] {
+            assert!(
+                config::i18n::has_translation(group),
+                "menubar group {group:?} missing zh-CN"
+            );
+        }
+    }
 }

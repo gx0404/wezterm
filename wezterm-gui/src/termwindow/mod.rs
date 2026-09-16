@@ -35,6 +35,7 @@ use crate::termwindow::webgpu::WebGpuState;
 use ::wezterm_term::input::{ClickPosition, MouseButton as TMB};
 use ::window::*;
 use anyhow::{anyhow, ensure, Context};
+use config::i18n::tr;
 use config::keyassignment::{
     Confirmation, KeyAssignment, LauncherActionArgs, PaneDirection, Pattern, PromptInputLine,
     QuickSelectArguments, RotationDirection, SpawnCommand, SplitSize,
@@ -2464,7 +2465,7 @@ impl TermWindow {
             Some(mux_window) => mux_window.get_active_tab_idx(),
             None => return,
         };
-        let title = "Tab Navigator".to_string();
+        let title = config::i18n::tr("Tab Navigator").into_owned();
         let args = LauncherActionArgs {
             title: Some(title),
             flags: LauncherFlags::TABS,
@@ -2476,7 +2477,7 @@ impl TermWindow {
     }
 
     fn show_launcher(&mut self) {
-        let title = "Launcher".to_string();
+        let title = config::i18n::tr("Launcher").into_owned();
         let args = LauncherActionArgs {
             title: Some(title),
             flags: LauncherFlags::LAUNCH_MENU_ITEMS
@@ -2514,14 +2515,12 @@ impl TermWindow {
         let tab_id = tab.tab_id();
         let title = args.title.unwrap();
         let flags = args.flags;
-        let help_text = args.help_text.unwrap_or(
-            "Select an item and press Enter=launch  \
-             Esc=cancel  /=filter"
-                .to_string(),
-        );
+        let help_text = args.help_text.unwrap_or_else(|| {
+            tr("Select an item and press Enter=launch  Esc=cancel  /=filter").into_owned()
+        });
         let fuzzy_help_text = args
             .fuzzy_help_text
-            .unwrap_or("Fuzzy matching: ".to_string());
+            .unwrap_or_else(|| tr("Fuzzy matching: ").into_owned());
 
         let config = &self.config;
         let alphabet = args.alphabet.unwrap_or(config.launcher_alphabet.clone());

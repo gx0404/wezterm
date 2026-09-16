@@ -111,6 +111,24 @@ pub fn tr(s: &'static str) -> Cow<'static, str> {
     }
 }
 
+/// Like [`tr`], but for `Cow` values whose `Owned` variant is runtime
+/// text (user-provided palette entries etc.) that must pass through
+/// untranslated; only `Borrowed` literals are looked up.
+pub fn tr_cow(s: Cow<'static, str>) -> Cow<'static, str> {
+    match s {
+        Cow::Borrowed(s) => tr(s),
+        Cow::Owned(s) => Cow::Owned(s),
+    }
+}
+
+/// Whether a zh-CN translation is recorded for `key`; used by coverage
+/// tests that walk the full command table (language-independent).
+pub fn has_translation(key: &str) -> bool {
+    zh_cn::ZH_CN
+        .binary_search_by(|(k, _)| (*k).cmp(key))
+        .is_ok()
+}
+
 /// Substitute `{name}` placeholders in a (possibly translated) template.
 /// `format!` cannot take a runtime template, so translated strings with
 /// parameters keep `{name}` placeholders and are filled by this helper.
