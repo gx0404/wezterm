@@ -70,3 +70,10 @@ DemiBold 权重由 SemiBold 命名文件提供）：
 - resurrect 已保存会话（当时为空）。
 - 快照机器当时在用的官方 nightly AppImage 二进制（`~/.local/opt/wezterm-nightly/`）：
   目标机改用本分支自建二进制。
+
+## Herdr 工作台联动（2026-09-18）
+
+本轮主动调整：绑定前缀统一、明确 Shift 拖选归属、Windows shell 存在性检查、
+WSL 自动发现、Regular 正文字重与 CJK 比例、独立配置模块加载路径。未更新插件
+提交或字体资产。Oh My Zsh 的 `gx/wezterm` 保留相同配置改动；其原有未提交壁纸
+快捷键另行保留，不作为本轮提交内容。

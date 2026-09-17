@@ -81,3 +81,17 @@ macOS 对应使用 `Super` / `Ctrl+Super`。Linux 的壁纸快捷键独立于常
   并自行调整 general.lua。
 - tabline.wez 插件目录含一段未上游化的 cpu.lua 本地补丁（见 PROVENANCE.md），
   重新从上游拉取会丢失，以本快照为准。
+
+## Herdr 终端工作台
+
+宿主 leader 统一为 `Ctrl+Shift+Space`，保留 `Ctrl+B` 给 Herdr。普通左键拖选由开启
+鼠标协议的应用处理；Shift+拖选固定使用宿主选择并复制，Ctrl+左键仅在应用未捕获
+鼠标时直接打开链接。正文采用 Regular 字重，TUI 标题和选中项自行强调。
+
+Windows 启动时检测 PowerShell 7，缺少时回退 PowerShell 5.1；菜单只列出找到的
+可选 shell。WSL 使用 `wezterm.default_wsl_domains()` 返回的真实发行版、默认用户
+和登录 shell，不假定 Windows 用户名等于 Linux 用户名，也不要求安装 fish。
+
+`wezterm.lua` 将自身目录放到 Lua 模块搜索路径前端，因此 `--config-file` 的隔离
+验证不会混入 `~/.config/wezterm` 的旧模块。联调先用独立配置验证，再备份并定向
+更新本机文件；不要全量覆盖用户自己的插件和配置。

@@ -10,6 +10,10 @@
 
 ## 0.2.0(TBD)
 
+- `fix(dotfiles)`：统一 Herdr/WezTerm 前缀和鼠标归属，修复独立配置误载旧模块；
+  Windows shell 自动回退、WSL 使用发行版默认用户，正文改用常规字重。
+
+
 ### Added
 - CLI 帮助全面 zh-CN 汉化（wezterm 与 wezterm-gui 两二进制的全部子命令
   树）：clap derive 的帮助文本来自 doc 注释，采取**运行时本地化**——

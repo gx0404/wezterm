@@ -70,7 +70,7 @@
       "anchor": "0.2.0(TBD)",
       "id": "CHANGELOG.md#0.2.0(TBD)",
       "source": "CHANGELOG.md",
-      "text": "## 0.2.0(TBD)"
+      "text": "## 0.2.0(TBD)\n\n- `fix(dotfiles)`：统一 Herdr/WezTerm 前缀和鼠标归属，修复独立配置误载旧模块；\n  Windows shell 自动回退、WSL 使用发行版默认用户，正文改用常规字重。"
     },
     {
       "anchor": "Added",
@@ -1134,7 +1134,7 @@
   "source_hashes": {
     "<generated>crate-map": "fe5a2477a3e8a68f0fee68adeb2f744ab485da6d9a13d1b93d5a81a722890a31",
     "AGENTS.md": "6eea2dd0157e12d85636f69932eb86f770932f618a62067a2b2080de092e835a",
-    "CHANGELOG.md": "c0447b0670c02c6c007e22c3bd660c4c2ee65027b5396bca3e63dd47463a3801",
+    "CHANGELOG.md": "4ddfc511917403b922937aa59f388cfcef31ab538e3f6ca4080e14ade2176f88",
     "CONTRIBUTING.md": "4b532cb620398e61b342833ee98705afb555abef7a0c9de9390b727d23395ebb",
     "docs/AGENT_RULES/README.md": "3e032c14f9cee9dcf0478cefb576432aecb43ec6a98b66a5b0f04744875a5d0d",
     "docs/AGENT_RULES/build-ci-release.md": "121befbd0463e594e9dc5dc02d29ccd3a813ece9b995dc1455409b422a70395e",
