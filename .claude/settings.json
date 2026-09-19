@@ -38,8 +38,7 @@
       "Bash(make test)",
       "Bash(make ui-smoke)",
       "Bash(cargo run:*)",
-      "Bash(cargo build:*)",
-      "Bash(rm:*)"
+      "Bash(cargo build:*)"
     ],
     "deny": [
       "Read(./.env)",
