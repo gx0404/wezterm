@@ -112,6 +112,25 @@
 
 ### Fixed
 
+- 修复安装链的版本漂移与静默覆盖（WEZ-BUILD-01/02、WEZ-HYG-02）：
+  `gx_install.sh` 曾「target/release 存在即复用」，实测把落后 HEAD 数天
+  的混版二进制装进版本目录（`wezterm` 与 `wezterm-gui` 版本串都不同），
+  回滚目标被同名覆盖。现在：默认总是 `make build BUILD_OPTS=--release`
+  （cargo 增量，仅 `--reuse-build` 跳过）；安装前断言四二进制自报版本
+  一致（`wezterm-gui --version` 的占位串已根治——`env_bootstrap::
+  bootstrap()` 移到 clap parse 之前；`strip-ansi-escapes` 补
+  `--version`）；`VERSION_DIR` 追加四二进制联合内容哈希，同 commit 的
+  脏树/异 feature 重构建不再静默覆盖；`.gx-managed` 元数据（版本/时间/
+  源 commit/内容哈希）正式生成；`wezterm-version/build.rs` 补
+  `rerun-if-changed=.git/HEAD`（分支切换不再留下陈旧版本串）。安装末尾
+  回收 `~/.local/opt/wezterm-gx` 旧版本目录（保留当前+最新 2 个）与
+  `.bak-gx-*` 备份（保留最新 3 份）——真机已累积 1.1GB/7 份。
+- `~/.zshrc` 的 cursor-mode 键位块归属改为 oh-my-zsh gx 层（2026-09-21
+  拍板）：`dotfiles/install.sh` 默认不再追加该块（`--zshrc` 显式开关
+  保留给无 gx 层的机器，`--no-zshrc` 兼容保留）；检测到
+  `~/.oh-my-zsh/.gx-managed` 时备份并清理历史追加的
+  `# >>> wezterm-gx >>>` 标记块。沙箱演练：默认不建/不改 `.zshrc`、
+  gx 层在场时清理历史块、`--zshrc` 幂等追加各验证通过。
 - 修复 gui-settings.json 首载按 env/XDG 而非生效 wezterm.lua 目录解析
   （WEZ-CFG-01）：`try_load` 在应用 sidecar 之后才 `set_var(
   WEZTERM_CONFIG_DIR)`，首载与重载解析到不同路径，`--config-file`

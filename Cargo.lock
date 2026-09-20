@@ -5745,6 +5745,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "termwiz",
+ "wezterm-version",
 ]
 
 [[package]]

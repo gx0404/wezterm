@@ -39,11 +39,24 @@ else
 fi
 
 # 3) release 构建（复用上游 Makefile build 语义）
-if [ ! -x target/release/wezterm-gui ]; then
-   say "building release binaries (first run takes a while)"
+# fork: 默认总是重建——cargo 增量下无改动时秒级完成，而「存在即复用」
+# 曾静默部署落后 HEAD 数天的陈旧二进制（WEZ-BUILD-01）。仅 --reuse-build
+# 显式跳过。
+REUSE_BUILD=0
+for arg in "$@"; do
+   case "$arg" in
+      --reuse-build) REUSE_BUILD=1 ;;
+      *) echo "gx_install.sh: unknown option: $arg" >&2; exit 2 ;;
+   esac
+done
+if [ "$REUSE_BUILD" = 0 ]; then
+   say "building release binaries (cargo incremental; first run takes a while)"
+   make build BUILD_OPTS=--release
+elif [ ! -x target/release/wezterm-gui ]; then
+   say "--reuse-build given but no prior build; building now"
    make build BUILD_OPTS=--release
 else
-   say "reusing target/release binaries"
+   say "reusing target/release binaries (--reuse-build)"
 fi
 
 # 4) 用户级部署（配置/插件/字体/desktop entry/zshrc）

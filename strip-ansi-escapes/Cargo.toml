@@ -10,3 +10,6 @@ publish = false
 [dependencies]
 clap.workspace = true
 termwiz.workspace = true
+# fork: report the same version string as the other binaries so the
+# installer can assert all four agree (WEZ-BUILD-01/02)
+wezterm-version.workspace = true

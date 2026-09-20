@@ -16,6 +16,18 @@ fn main() {
             if let Ok(ref_head) = repo.find_reference("HEAD") {
                 let repo_path = repo.path().to_path_buf();
 
+                // fork: also rerun when .git/HEAD itself changes (branch
+                // switch or detached checkout); watching only the resolved
+                // branch ref misses those and leaves a stale version string
+                // (WEZ-BUILD-01).
+                let head_path = repo_path.join("HEAD");
+                if head_path.exists() {
+                    println!(
+                        "cargo:rerun-if-changed={}",
+                        head_path.canonicalize().unwrap().display()
+                    );
+                }
+
                 if let Ok(resolved) = ref_head.resolve() {
                     if let Some(name) = resolved.name() {
                         let path = repo_path.join(name);

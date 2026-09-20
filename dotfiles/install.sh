@@ -2,16 +2,18 @@
 # wezterm-gx installer (Linux, user-level, no sudo required).
 #
 # Deploys the gx fork build plus the machine snapshot stored in dotfiles/:
-# binaries -> ~/.local/opt/wezterm-gx/<version>/   + wrapper ~/.local/bin/wezterm
+# binaries -> ~/.local/opt/wezterm-gx/<version>-<binhash>/ + wrapper ~/.local/bin/wezterm
 # config   -> ~/.config/wezterm/                   (existing copy is backed up)
 # plugins  -> ~/.local/share/wezterm/plugins/<escaped>/
 # fonts    -> ~/.local/share/fonts/wezterm-gx/     + fc-cache
 # desktop  -> ~/.local/share/applications/org.wezfurlong.wezterm.desktop
-# zshrc    -> marked append block (cursor-mode keybindings)
+# zshrc    -> 默认不动 ~/.zshrc（cursor-mode 块归 oh-my-zsh gx 层）；
+#             --zshrc 显式追加（无 gx 层的机器）；检测到 oh-my-zsh gx 层
+#             接管时清理历史追加块
 #
 # Usage:
 #   ./install.sh [--check] [--from-build DIR] [--bundle-root DIR]
-#                [--im fcitx|ibus|none] [--no-desktop] [--no-zshrc]
+#                [--im fcitx|ibus|none] [--no-desktop] [--zshrc]
 #                [--no-fonts] [--force]
 #
 # --check       dry-run: run all preflight checks and print the plan, write nothing.
@@ -20,6 +22,9 @@
 # --bundle-root dir that contains bin/, dotfiles/, manifest.env (default: script dir).
 # --im          input-method env rendered into the desktop entry (default fcitx,
 #               matching xim_im_name='fcitx' in config/general.lua).
+# --zshrc       append the cursor-mode keybinding block to ~/.zshrc (default:
+#               leave ~/.zshrc alone; the block's true source is the oh-my-zsh
+#               gx layer).
 
 set -euo pipefail
 
@@ -34,7 +39,7 @@ CHECK=0
 FROM_BUILD=""
 IM="fcitx"
 WANT_DESKTOP=1
-WANT_ZSHRC=1
+WANT_ZSHRC=0
 WANT_FONTS=1
 FORCE=0
 
@@ -45,10 +50,11 @@ while [ $# -gt 0 ]; do
       --bundle-root) BUNDLE_ROOT="${2:?--bundle-root needs a dir}"; shift ;;
       --im) IM="${2:?--im needs fcitx|ibus|none}"; shift ;;
       --no-desktop) WANT_DESKTOP=0 ;;
+      --zshrc) WANT_ZSHRC=1 ;;
       --no-zshrc) WANT_ZSHRC=0 ;;
       --no-fonts) WANT_FONTS=0 ;;
       --force) FORCE=1 ;;
-      -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+      -h|--help) sed -n '2,26p' "$0"; exit 0 ;;
       *) echo "install.sh: unknown option: $1" >&2; exit 2 ;;
    esac
    shift
@@ -120,7 +126,29 @@ VERSION="$("${BIN_SRC}/wezterm" --version 2>/dev/null || true)"
 VERSION="${VERSION%%$'\n'*}"
 VERSION="${VERSION#wezterm }"
 [ -n "$VERSION" ] || VERSION="dev"
-VERSION_DIR="$(printf '%s' "$VERSION" | tr '/: ' '___')"
+
+# fork: 四个二进制必须自报同一版本串——同目录混版构建曾让 GUI 停在旧版
+# 而 CLI 已更新（WEZ-BUILD-01）；占位串（WEZ-BUILD-02 修复前）也会在此
+# 被拦下。strip-ansi-escapes 的 --version 由 fork 补加。
+version_string_of() {
+   local out
+   out="$("$1" --version 2>/dev/null || true)"
+   out="${out%%$'\n'*}"
+   printf '%s' "${out##* }"
+}
+VERSION_REF="$(version_string_of "$BIN_SRC/wezterm")"
+for b in wezterm-gui wezterm-mux-server strip-ansi-escapes; do
+   V_OTHER="$(version_string_of "$BIN_SRC/$b")"
+   if [ "$V_OTHER" != "$VERSION_REF" ]; then
+      die "version mismatch: wezterm=$VERSION_REF but $b=$V_OTHER; rebuild all four binaries (make build BUILD_OPTS=--release)"
+   fi
+done
+
+# fork: 目录名带四二进制联合内容哈希——同一 commit 的脏树/异 feature
+# 重构建不会静默覆盖同名目录，回滚目标始终可分辨（WEZ-BUILD-01）。
+# 同名即同内容，幂等重装天然安全。
+BIN_HASH="$(sha256sum "$BIN_SRC/wezterm" "$BIN_SRC/wezterm-gui" "$BIN_SRC/wezterm-mux-server" "$BIN_SRC/strip-ansi-escapes" | sha256sum | cut -c1-12)"
+VERSION_DIR="$(printf '%s' "$VERSION" | tr '/: ' '___')-$BIN_HASH"
 OPT_DIR="$HOME/.local/opt/wezterm-gx/$VERSION_DIR"
 BIN_DIR="$OPT_DIR/bin"
 case "$HOME" in
@@ -149,7 +177,7 @@ backup_existing() {
 }
 
 # ------------------------------------------------------------------- install --
-TOTAL=7
+TOTAL=8
 STEP=0
 step() { STEP=$((STEP + 1)); plan "[$STEP/$TOTAL] $*"; }
 
@@ -159,6 +187,16 @@ if [ "$CHECK" = 0 ]; then
    for b in wezterm wezterm-gui wezterm-mux-server strip-ansi-escapes; do
       install -m 0755 "$BIN_SRC/$b" "$BIN_DIR/$b"
    done
+   # fork: 正式生成 .gx-managed 元数据（WEZ-BUILD-01/WEZ-CFG-02）。
+   # 源 commit：源码安装取 git HEAD，离线包取 manifest.env 的 COMMIT。
+   SRC_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)"
+   SRC_COMMIT="${SRC_COMMIT:-${COMMIT:-unknown}}"
+   cat > "$OPT_DIR/.gx-managed" <<EOF
+version=$VERSION
+installed_at=$(date -Iseconds)
+source_commit=$SRC_COMMIT
+bin_hash=$BIN_HASH
+EOF
 fi
 
 step "wrapper -> ~/.local/bin/wezterm"
@@ -243,8 +281,19 @@ else
    step "desktop entry skipped (--no-desktop)"
 fi
 
+ZSHRC="$HOME/.zshrc"
+# fork: ~/.zshrc 的真源归 oh-my-zsh gx 层（2026-09-21 拍板）。检测到
+# gx 层接管（~/.oh-my-zsh/.gx-managed）时清理本安装器历史上追加的
+# cursor-mode 标记块；该块内容已并入 oh-my-zsh gx/config/zshrc。
+if [ -f "$ZSHRC" ] && grep -q '>>> wezterm-gx >>>' "$ZSHRC" 2>/dev/null \
+   && [ -e "$HOME/.oh-my-zsh/.gx-managed" ]; then
+   plan "zshrc: remove legacy cursor-mode block (owned by oh-my-zsh gx layer now)"
+   if [ "$CHECK" = 0 ]; then
+      backup_existing "$ZSHRC"
+      sed -i '/# >>> wezterm-gx >>>/,/# <<< wezterm-gx <<</d' "$ZSHRC"
+   fi
+fi
 if [ "$WANT_ZSHRC" = 1 ]; then
-   ZSHRC="$HOME/.zshrc"
    if [ ! -f "$ZSHRC" ] || ! grep -q '>>> wezterm-gx >>>' "$ZSHRC" 2>/dev/null; then
       step "zshrc cursor-mode keybinding block -> $ZSHRC"
       if [ "$CHECK" = 0 ]; then
@@ -255,8 +304,46 @@ if [ "$WANT_ZSHRC" = 1 ]; then
       step "zshrc block already present, skip"
    fi
 else
-   step "zshrc skipped (--no-zshrc)"
+   step "zshrc untouched (default; use --zshrc on machines without the oh-my-zsh gx layer)"
 fi
+
+# fork: 回收旧版本目录与备份（WEZ-HYG-02）。VERSION_DIR 带内容哈希后每次
+# 新构建都产生新目录，不回收会无限累积（真机曾 1.1GB/7 份）。
+# 保留：当前版本 + 最新 2 个旧版本；.bak-gx-* 备份保留最新 3 份。
+prune_old() {
+   # $1=glob 目录前缀, $2=keep 数量, $3=说明
+   local parent="$1" keep="$2" what="$3" entry
+   [ -d "$parent" ] || return 0
+   local -a entries=()
+   while IFS= read -r entry; do entries+=("$entry"); done < <(ls -1dt "$parent"/*/ 2>/dev/null)
+   local i
+   for i in "${!entries[@]}"; do
+      [ "$i" -lt "$keep" ] && continue
+      # 永不删除当前版本目录
+      [ "${entries[$i]%/}" = "$OPT_DIR" ] && continue
+      plan "prune $what: ${entries[$i]}"
+      [ "$CHECK" = 0 ] && rm -rf "${entries[$i]}"
+   done
+}
+prune_backups() {
+   # $1=glob 模式（文件）, $2=keep, $3=说明
+   local pattern="$1" keep="$2" what="$3"
+   local -a entries=()
+   local entry
+   # shellcheck disable=SC2086 # glob 必须在此处展开
+   while IFS= read -r entry; do entries+=("$entry"); done < <(ls -1dt $pattern 2>/dev/null)
+   local i
+   for i in "${!entries[@]}"; do
+      [ "$i" -lt "$keep" ] && continue
+      plan "prune $what: ${entries[$i]}"
+      [ "$CHECK" = 0 ] && rm -rf "${entries[$i]}"
+   done
+}
+step "prune old versions/backups (WEZ-HYG-02)"
+prune_old "$HOME/.local/opt/wezterm-gx" 3 "old version dir"
+prune_backups "$HOME/.config/wezterm.bak-gx-*" 3 "config backup"
+prune_backups "$HOME/.local/bin/wezterm.bak-gx-*" 3 "wrapper backup"
+prune_backups "$HOME/.local/share/applications/org.wezfurlong.wezterm.desktop.bak-gx-*" 3 "desktop entry backup"
 
 echo
 if [ "$CHECK" = 1 ]; then

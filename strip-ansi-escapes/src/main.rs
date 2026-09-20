@@ -11,6 +11,8 @@ use termwiz::escape::{Action, ControlCode};
 /// This utility is part of WezTerm.
 ///
 /// https://github.com/wezterm/wezterm
+// fork: report the shared version string (WEZ-BUILD-01/02)
+#[command(version = wezterm_version::wezterm_version())]
 struct Opt {}
 
 fn main() -> Result<()> {

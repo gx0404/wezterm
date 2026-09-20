@@ -1165,6 +1165,12 @@ pub fn run_ls_fonts(config: config::ConfigHandle, cmd: &LsFontsCommand) -> anyho
 }
 
 fn run() -> anyhow::Result<()> {
+    // fork: bootstrap (which assigns the version info) must run before
+    // clap parses args: `Opt`'s `version = config::wezterm_version()`
+    // is evaluated during parse, and used to print the placeholder
+    // "someone forgot to call assign_version_info" (WEZ-BUILD-02).
+    env_bootstrap::bootstrap();
+
     // Inform the system of our AppUserModelID.
     // Without this, our toast notifications won't be correctly
     // attributed to our application.
@@ -1207,7 +1213,7 @@ fn run() -> anyhow::Result<()> {
         }
     };
 
-    env_bootstrap::bootstrap();
+    // fork: bootstrap moved to the top of run() (WEZ-BUILD-02);
     // window_funcs is not set up by env_bootstrap as window_funcs is
     // GUI environment specific and env_bootstrap is used to setup the
     // headless mux server.
