@@ -41,11 +41,11 @@
   ——语言（中文/English，应用即全 UI 切换）、外观（1001 个内置配色方案，
   支持输入过滤，移动/悬停即预览、Enter 应用、Esc 还原）、交互（右键
   菜单/滚动条开关、响铃、关闭确认的二值切换，即选即生效）、字体
-  （字号 0.5 步进增减与重置）。预览走每窗口 `config_overrides`
-  （易失），应用写入 `gui-settings.json` 并 `config::reload()` 全局
-  生效、跨重启持久化；Tab 切换分区、↑↓ 选择、Enter 应用、鼠标
-  悬停/点击与命令面板共用 Modal 通道，配置重载（含语言切换）即时
-  重绘浮层文案。
+  （字号 0.5 步进增减与重置）。预览走窗口级临时调色板（易失，见下方
+  Fixed 段的 WZ-02/WZ-03），应用写入 `gui-settings.json` 并
+  `config::reload()` 全局生效、跨重启持久化；Tab 切换分区、↑↓ 选择、
+  Enter 应用、鼠标悬停/点击与命令面板共用 Modal 通道，配置重载
+  （含语言切换）即时重绘浮层文案。
 - GUI 界面文案全面 zh-CN 汉化（311 条译表，`config/src/i18n/zh_cn.rs`，
   由 `scripts/gen_zh_table.py` 生成保序）：命令面板全部命令的标题/描述/
   分组名（模糊搜索与精确匹配同步走中文）、右键菜单、关闭确认与
@@ -112,12 +112,51 @@
 
 ### Fixed
 
+- 修复设置浮层配色预览把整份配置重载挂在按键重复率上：`settings.rs` 的
+  预览写每窗口 `config_overrides` 并调 `TermWindow::config_was_reloaded`，
+  于是每经过一行就重跑一遍用户 Lua、重建全部字体、对每个 pane
+  `set_config`，并经 `apply_dimensions` 沿 PTY 打出 SIGWINCH——1001 条配色
+  里长按 ↓ 直接卡死，嵌套的 herdr/Claude Code 还会被逐层放大重绘。预览
+  改走新增的窗口级临时调色板 `TermWindow::{preview_palette,
+  set_preview_palette,pane_palette}`：按名先查 `config.color_schemes`
+  （Lua 里定义的与 `color_scheme_dirs` 加载的），再回退内置
+  `config::COLOR_SCHEMES`（进程内已解析），取到后叠加用户 `colors` 覆盖
+  （查找与推导次序复刻 `Config::resolve_color_scheme` 与
+  `resolved_palette`，同名时用户那套优先），只 bump
+  quad/shape 失效代数、丢 fancy tab bar 缓存并 invalidate，不碰配置、
+  字体与窗口尺寸；配置落地仍只在 Enter 确认时走一次
+  `gui_settings::store_key` + `config::reload()`。
+- 修复点浮层外/被另一浮层顶掉时配色预览永久残留：还原原本只挂在 Esc 上，
+  其余两条关闭路径会把预览留成每窗口 override（优先级高于全局配置，
+  `ReloadConfiguration` 也清不掉）。`modal.rs::Modal` 新增
+  `on_dismissed`，`TermWindow::{cancel_modal,set_modal}`（改收 `&mut self`）
+  在摘除/顶掉浮层时统一回调，`SettingsOverlay` 在其中丢弃预览调色板——
+  Esc、点浮层外、被另一浮层顶掉三条路径行为一致。设置浮层不再写
+  `config_overrides`（`upsert_override`/`restore_overrides` 一并删除）。
+- 设置浮层「外观」分区不再在每个输入事件里重建 1001 条配色列表：
+  `compute` / `move_selection` / `mouse_event` 各要一次可见行列表，原先
+  每次都重新排序全部方案名并跑一遍模糊匹配。改为按「分区 + 过滤文本」
+  缓存 `Rc<Vec<Item>>`；同一行上的重复预览按方案名短路。
+- 设置浮层的字号步进、开关与枚举切换不再即时写每窗口 `config_overrides`：
+  原先「先 `upsert_override` 触发一次全量重载，再 `persist_and_reload`
+  触发第二次」，一次确认要重跑两遍用户 Lua 与字体重建，而留下的 override
+  优先级高于全局配置、`ReloadConfiguration` 也清不掉。现在统一只走一次
+  `gui_settings::store_key` + `config::reload()`。随之「当前值」的真源改为
+  刚落地的全局配置（`settings.rs::current_config`）而不是窗口的
+  `ConfigHandle`——后者靠 `Window::notify` → SPAWN_QUEUE 异步回推，而 X11
+  主循环先把排队的 X 事件一次排干才轮到 SPAWN_QUEUE，长按 Enter 时堆积的
+  重复按键会连续读到同一份陈旧值（字号只动一格、开关连点两下不回弹）；
+  下一个值与行标签都由纯函数 `settings.rs::pending_write` / `row_label`
+  从该配置推出，确认后立刻重算浮层，勾选标记与「字号: 12.5」不再等一拍。
+- 设置浮层切换分区时一并丢掉「外观」分区的配色预览：预览行在新分区已经
+  不可见，留着会出现「窗口是预览色、界面上却没有任何一行对应它」的脱节，
+  且在新分区按 Enter 会先闪回原配色再应用。
 - 修复 tab 拖拽重排完全失效：`mouseevent.rs` 的 Release(Left) 分支与
   `TermWindow::finish_tab_drag` 各 `take()` 了一次 `tab_drag`，调用方先取空
   之后 `finish_tab_drag` 必定提前返回，「按住左键拖拽重排 tab」是死路径。
   `take()` 收敛到 `finish_tab_drag` 一处；插入位计算抽成纯函数
   `mouseevent.rs::drop_index`（顺带修好指针拖出窗口左侧时 `x as usize`
-  回绕、被当成「拖到最右」的边界），配 7 条单测（最右/最左/原位/越界/
+  回绕、被当成「拖到最右」的边界），配 6 条单测（最右/最左/原位/越界/
   负坐标/相邻换位）。Xvfb 前后对照截图：修复前拖到最右顺序不变，修复后
   A|B|C → B|C|A → 拖回 A|B|C。
 - 修复右键上下文菜单中文标签被拦腰截断：`context_menu.rs` 用

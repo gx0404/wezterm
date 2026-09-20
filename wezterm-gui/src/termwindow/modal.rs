@@ -39,5 +39,12 @@ pub trait Modal: Downcast {
         term_window: &mut TermWindow,
     ) -> anyhow::Result<Ref<'_, [ComputedElement]>>;
     fn reconfigure(&self, term_window: &mut TermWindow);
+    /// fork: called when this modal goes away. All three dismissal paths
+    /// reach it: Esc (the modal calls `cancel_modal`), a click outside
+    /// (`mouseevent.rs` calls `cancel_modal`) and being replaced by another
+    /// modal (`set_modal`). Implementations restore volatile state such as a
+    /// colour scheme preview here, otherwise a preview the user merely
+    /// scrolled past stays on the window.
+    fn on_dismissed(&self, _term_window: &mut TermWindow) {}
 }
 impl_downcast!(Modal);

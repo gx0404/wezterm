@@ -459,7 +459,7 @@ impl Modal for ContextMenu {
 }
 
 /// Convenience: open a context menu modally at the given position
-pub fn open_context_menu(term_window: &TermWindow, menu: ContextMenu) {
+pub fn open_context_menu(term_window: &mut TermWindow, menu: ContextMenu) {
     term_window.set_modal(Rc::new(menu));
     if let Some(window) = term_window.window.as_ref() {
         window.invalidate();

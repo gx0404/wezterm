@@ -13,7 +13,10 @@ Lua gui 命名空间。平台窗口与事件抽象在 platform-window 域（`win
 - 窗口状态所有者：`wezterm-gui/src/termwindow/mod.rs::TermWindow`——窗口
   句柄、`ConfigHandle` 与 `config_overrides`、字体 `Rc<FontConfiguration>`、
   `RenderState`（GL 或 WebGPU 二选一）、形状/行缓存（LfuCache）、
-  `tab_state`/`pane_state`（每 pane 视口/选区/overlay 缓存）、`modal`。
+  `tab_state`/`pane_state`（每 pane 视口/选区/overlay 缓存）、`modal`、
+  `preview_palette`（fork：窗口级易失预览调色板，只经
+  `TermWindow::set_preview_palette` 设/清并在那里统一丢色相关缓存；设上
+  之后 `palette()`/`pane_palette()` 是渲染取色的唯一入口，不走配置重载）。
   跨线程通知统一走 `TermWindowNotif`（`Window::notify` → 主线程
   `dispatch_notif`）。
 - 渲染：`termwindow/render/paint.rs::paint_impl`（'pass 循环处理
@@ -21,7 +24,9 @@ Lua gui 命名空间。平台窗口与事件抽象在 platform-window 域（`win
   `renderstate.rs::RenderState/TripleLayerQuadAllocator`；webgpu 后端在
   `termwindow/webgpu.rs::WebGpuState`。字形缓存 `glyphcache.rs::GlyphCache`。
 - overlay/modal：`termwindow/overlay/`（selector/launcher/copy/quickselect/
-  confirm/prompt/debug）与 `termwindow/modal.rs::Modal` trait；overlay pane
+  confirm/prompt/debug）与 `termwindow/modal.rs::Modal` trait（fork：
+  `Modal::on_dismissed` 是三条关闭路径——Esc、点浮层外、被 `set_modal`
+  顶掉——的统一回调，易失状态只在这里还原）；overlay pane
   用 `mux::termwiztermtab::allocate` 造内存终端，跑在独立线程，结束经
   `schedule_cancel_overlay` 回主线程。
 - 输入：`termwindow/keyevent.rs`（leader 键 → `inputmap.rs::InputMap` 命中

@@ -228,7 +228,7 @@ impl crate::TermWindow {
             let background = if panes.len() == 1 {
                 // If we're the only pane, use the pane's palette
                 // to draw the padding background
-                panes[0].pane.palette().background
+                self.pane_palette(&panes[0].pane).background
             } else {
                 self.palette().background
             }

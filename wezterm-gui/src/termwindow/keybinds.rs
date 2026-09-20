@@ -369,8 +369,9 @@ impl Modal for KeybindsOverlay {
 }
 
 /// Convenience: open the keybinding cheat sheet modally
-pub fn open_keybinds(term_window: &TermWindow) {
-    term_window.set_modal(Rc::new(KeybindsOverlay::new(term_window)));
+pub fn open_keybinds(term_window: &mut TermWindow) {
+    let modal = Rc::new(KeybindsOverlay::new(term_window));
+    term_window.set_modal(modal);
     if let Some(window) = term_window.window.as_ref() {
         window.invalidate();
     }

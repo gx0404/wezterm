@@ -11,7 +11,7 @@ impl crate::TermWindow {
         split: &PositionedSplit,
         pane: &Arc<dyn Pane>,
     ) -> anyhow::Result<()> {
-        let palette = pane.palette();
+        let palette = self.pane_palette(pane);
         let foreground = palette.split.to_linear();
         let cell_width = self.render_metrics.cell_size.width as f32;
         let cell_height = self.render_metrics.cell_size.height as f32;

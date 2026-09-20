@@ -461,6 +461,13 @@ pub struct TermWindow {
     rapid_blink_state: RefCell<ColorEase>,
 
     palette: Option<ColorPalette>,
+    /// fork WZ-02: volatile per-window palette used by the settings
+    /// overlay to preview a color scheme. While it is set, `palette()`
+    /// and `pane_palette()` read it, so a preview costs a redraw instead
+    /// of the `config_overrides` -> `config_was_reloaded` reload chain,
+    /// and nothing stays pinned in the overrides once the overlay is
+    /// dismissed (WZ-03).
+    preview_palette: Option<ColorPalette>,
 
     ui_items: Vec<UIItem>,
     dragging: Option<(UIItem, MouseEvent)>,
@@ -717,6 +724,7 @@ impl TermWindow {
             config: config.clone(),
             config_overrides: wezterm_dynamic::Value::default(),
             palette: None,
+            preview_palette: None,
             focused: None,
             mux_window_id,
             mux_window_id_for_subscriptions: Arc::new(Mutex::new(mux_window_id)),
@@ -1751,10 +1759,55 @@ impl TermWindow {
 impl TermWindow {
     fn palette(&mut self) -> &ColorPalette {
         if self.palette.is_none() {
-            self.palette
-                .replace(config::TermConfig::new().color_palette());
+            // fork WZ-02: the settings preview swaps this window local
+            // palette only; it never writes `config_overrides`, so no lua
+            // reload and no font rebuild is triggered
+            let palette = match self.preview_palette.as_ref() {
+                Some(preview) => preview.clone(),
+                None => config::TermConfig::new().color_palette(),
+            };
+            self.palette.replace(palette);
         }
         self.palette.as_ref().unwrap()
+    }
+
+    /// fork WZ-02: the single entry point for pane render colors. A pane's
+    /// own palette comes from `TermConfig` and only changes on a full config
+    /// reload, which a preview must not trigger, so the preview palette wins
+    /// while it is set.
+    pub fn pane_palette(&self, pane: &Arc<dyn Pane>) -> ColorPalette {
+        match self.preview_palette.as_ref() {
+            Some(preview) => preview.clone(),
+            None => pane.palette(),
+        }
+    }
+
+    /// fork WZ-02: set or clear the preview palette. It drops the colour
+    /// derived caches and redraws, and deliberately leaves config, fonts and
+    /// window size alone: going through `apply_dimensions` would push
+    /// SIGWINCH down every pty, amplifying a single hover into the innermost
+    /// nested program.
+    pub fn set_preview_palette(&mut self, palette: Option<ColorPalette>) {
+        if self.preview_palette == palette {
+            return;
+        }
+        self.preview_palette = palette;
+        self.palette.take();
+        // Both caches bake colours in, so they must age out with the
+        // generations: `LineQuadCacheKey` keys the vertices and
+        // `LineToEleShapeCacheKey` keys the fg/bg/underline colours in
+        // `LineToElementShape`. Glyph shaping is colour independent.
+        self.quad_generation += 1;
+        self.shape_generation += 1;
+        // The fancy tab bar resolves title colours from the palette and is
+        // only rebuilt when its cache is empty; without dropping it a preview
+        // would recolour the panes but not the tab bar. The rebuild happens on
+        // the next paint, so it costs per frame, not per key repeat.
+        self.invalidate_fancy_tab_bar();
+        self.invalidate_modal();
+        if let Some(window) = self.window.as_ref() {
+            window.invalidate();
+        }
     }
 
     pub fn config_was_reloaded(&mut self) {
@@ -1884,15 +1937,27 @@ impl TermWindow {
         }
     }
 
-    pub fn cancel_modal(&self) {
-        self.modal.borrow_mut().take();
+    pub fn cancel_modal(&mut self) {
+        // fork: take the modal out before invoking the callback, so that an
+        // `on_dismissed` impl that looks at the modal slot cannot hit a
+        // re-entrant RefCell borrow
+        let dismissed = self.modal.borrow_mut().take();
+        if let Some(modal) = dismissed {
+            modal.on_dismissed(self);
+        }
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
         }
     }
 
-    pub fn set_modal(&self, modal: Rc<dyn Modal>) {
-        self.modal.borrow_mut().replace(modal);
+    pub fn set_modal(&mut self, modal: Rc<dyn Modal>) {
+        // fork: a modal that is replaced must see `on_dismissed` too,
+        // otherwise the settings colour preview survives a settings ->
+        // command palette switch and sticks to the window
+        let dismissed = self.modal.borrow_mut().replace(modal);
+        if let Some(prior) = dismissed {
+            prior.on_dismissed(self);
+        }
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
         }
