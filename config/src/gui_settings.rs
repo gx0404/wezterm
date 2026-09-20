@@ -291,7 +291,10 @@ mod tests {
         let first = load_value_in_dir(Some(&dir));
         let second = load_value_in_dir(Some(&dir));
         assert_eq!(first, second);
-        assert_eq!(settings_file_in_dir(Some(&dir)), dir.join(GUI_SETTINGS_FILE));
+        assert_eq!(
+            settings_file_in_dir(Some(&dir)),
+            dir.join(GUI_SETTINGS_FILE)
+        );
         assert!(dir.join(GUI_SETTINGS_FILE).exists());
         let _ = std::fs::remove_dir_all(&dir);
     }

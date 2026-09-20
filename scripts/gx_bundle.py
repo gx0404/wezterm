@@ -374,7 +374,7 @@ def cmd_sync(args) -> None:
             rels = [r for r in rels if r not in known]
         total += len(rels)
         if write:
-            for rel in added + changed:
+            for rel in rels:
                 src = live / rel
                 dst = snap / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
@@ -384,14 +384,15 @@ def cmd_sync(args) -> None:
                   if (DOTFILES / "wezterm-config" / k).exists()]
     if known_hits:
         print(f"note: {', '.join(known_hits)} intentionally differ from the "
-              f"machine copy (see dotfiles/PROVENANCE.md)")
+              f"machine copy (see dotfiles/PROVENANCE.md); excluded from "
+              f"--check and --write")
     if total == 0 and not write:
         print("sync: no unexpected differences")
     elif write:
         print(f"sync: copied {written} file(s) back into dotfiles/")
     else:
-        print(f"sync: {total} unexpected difference(s); "
-              f"run with GX_SYNC_WRITE=1 to sync back")
+        print(f"sync: {total} unexpected difference(s); deploy direction: "
+              f"make gx-upgrade, collect direction: GX_SYNC_WRITE=1 make gx-sync")
     # fork: --check 把漂移变成退出码（WEZ-CFG-02），供 make framework-check
     # 守门。差异存在即 1，并提示两个方向的补救命令。
     if check and total > 0:

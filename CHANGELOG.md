@@ -88,7 +88,8 @@
 - `gx-sync --check` 接入 `make framework-check` 守门（WEZ-CFG-02）：
   本机配置/插件与仓库快照出现非登记差异时退出码 1，提示两个方向的
   补救命令（部署 `make gx-upgrade` / 回收 `GX_SYNC_WRITE=1 make gx-sync`）；
-  PROVENANCE 登记的有意改动（launch.lua/domains.lua）不计入差异。
+  PROVENANCE 登记的有意改动（launch.lua/domains.lua）不计入差异，
+  也不再被 `--write` 误写回（此前会被本机旧版覆盖，抹掉有意改动）。
   PROVENANCE 同步现场（WEZ-HYG-03）：general.lua 的 `language` 键已随
   09-20 gx-upgrade 部署、失效的 .bak-20260713 记录删除、字体段更正为
   Regular 字重现状、zshrc 模板段记录归属变更。
