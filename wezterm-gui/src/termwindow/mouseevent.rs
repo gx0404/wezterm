@@ -46,6 +46,47 @@ impl UIItemType {
     }
 }
 
+/// fork: single source of truth for hit-test ordering.
+///
+/// `ui_items` is built in paint order: enclosing containers are pushed
+/// before their children and the modal overlay is appended last, so
+/// scanning in reverse makes the innermost/topmost item win. A modal's
+/// outer container therefore never shadows its own rows.
+pub(crate) fn hit_ui_item(items: &[UIItem], x: isize, y: isize) -> Option<&UIItem> {
+    items.iter().rev().find(|item| item.hit_test(x, y))
+}
+
+/// fork: where a dragged tab is dropped, as a pure function so the
+/// boundaries are unit testable.
+///
+/// `tabs` holds `(tab_idx, x, width)` sorted by screen x, `from_pos` is
+/// the index of the dragged tab within that order and `x` is the pointer
+/// position on release. The drop lands before the first tab whose centre
+/// is right of the pointer; `None` means the tab would not move.
+pub(crate) fn drop_index(
+    tabs: &[(usize, usize, usize)],
+    from_pos: usize,
+    x: isize,
+) -> Option<usize> {
+    if from_pos >= tabs.len() {
+        return None;
+    }
+    let mut pos = tabs.len();
+    for (i, (_, tab_x, tab_width)) in tabs.iter().enumerate() {
+        if x < (tab_x + tab_width / 2) as isize {
+            pos = i;
+            break;
+        }
+    }
+    // Removing the dragged tab first shifts every later slot down by one
+    let pos = if pos > from_pos { pos - 1 } else { pos };
+    if pos == from_pos {
+        None
+    } else {
+        Some(pos)
+    }
+}
+
 /// Normalize wheel deltas and streaks to 1 so that mouse assignments
 /// are easier to wrangle; callers only need to bind WheelUp(1)/WheelDown(1).
 fn normalize_wheel_trigger(trigger: &mut MouseEventTrigger) {
@@ -158,13 +199,7 @@ impl super::TermWindow {
     }
 
     fn resolve_ui_item(&self, event: &MouseEvent) -> Option<UIItem> {
-        let x = event.coords.x;
-        let y = event.coords.y;
-        self.ui_items
-            .iter()
-            .rev()
-            .find(|item| item.hit_test(x, y))
-            .cloned()
+        hit_ui_item(&self.ui_items, event.coords.x, event.coords.y).cloned()
     }
 
     fn leave_ui_item(&mut self, item: &UIItem) {
@@ -261,9 +296,11 @@ impl super::TermWindow {
                 self.current_mouse_capture = None;
                 self.current_mouse_buttons.retain(|p| p != press);
                 if press == &MousePress::Left {
-                    // Finish a tab drag-reorder, if any
+                    // Finish a tab drag-reorder, if any.
+                    // fork: the `take()` lives solely in finish_tab_drag;
+                    // taking here as well left the reorder unreachable.
                     self.tab_press = None;
-                    if self.tab_drag.take().is_some() {
+                    if self.tab_drag.is_some() {
                         self.finish_tab_drag(event.coords.x);
                         return;
                     }
@@ -680,19 +717,9 @@ impl super::TermWindow {
             Some(pos) => pos,
             None => return,
         };
-        // The drop lands before the first tab whose center is right of
-        // the pointer
-        let mut pos = tabs.len();
-        for (i, (_, tx, tw)) in tabs.iter().enumerate() {
-            if (x as usize) < tx + tw / 2 {
-                pos = i;
-                break;
-            }
-        }
-        let pos = if pos > from_pos { pos - 1 } else { pos };
-        if pos == from_pos {
+        let Some(pos) = drop_index(&tabs, from_pos, x) else {
             return;
-        }
+        };
         // MoveTab moves the active tab, so activate the dragged one first
         self.activate_tab(from as isize).ok();
         if let Some(pane) = self.get_active_pane_or_overlay() {
@@ -1274,5 +1301,114 @@ fn mouse_press_to_tmb(press: &MousePress) -> TMB {
         MousePress::Left => TMB::Left,
         MousePress::Right => TMB::Right,
         MousePress::Middle => TMB::Middle,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::termwindow::modal::MODAL_CHROME_ROW;
+
+    /// Three 40px wide tabs laid out side by side: centres at 20/60/100
+    fn three_tabs() -> Vec<(usize, usize, usize)> {
+        vec![(0, 0, 40), (1, 40, 40), (2, 80, 40)]
+    }
+
+    fn modal_item(x: usize, y: usize, width: usize, height: usize, row: usize) -> UIItem {
+        UIItem {
+            x,
+            y,
+            width,
+            height,
+            item_type: UIItemType::Modal(row),
+        }
+    }
+
+    /// Paint order of a modal: the outer chrome container is registered
+    /// first, then each row on top of it
+    fn modal_items() -> Vec<UIItem> {
+        vec![
+            modal_item(0, 0, 200, 60, MODAL_CHROME_ROW),
+            modal_item(4, 4, 192, 20, 0),
+            modal_item(4, 24, 192, 20, 1),
+        ]
+    }
+
+    #[test]
+    fn drop_index_keeps_position_when_dropped_on_itself() {
+        // Pointer still inside the dragged tab's own slot
+        assert_eq!(drop_index(&three_tabs(), 0, 10), None);
+        assert_eq!(drop_index(&three_tabs(), 1, 50), None);
+        assert_eq!(drop_index(&three_tabs(), 2, 90), None);
+    }
+
+    #[test]
+    fn drop_index_moves_to_the_far_right() {
+        // Past the centre of the last tab => append at the end. After
+        // removing the dragged tab the last slot is len - 1.
+        assert_eq!(drop_index(&three_tabs(), 0, 119), Some(2));
+        assert_eq!(drop_index(&three_tabs(), 1, 200), Some(2));
+    }
+
+    #[test]
+    fn drop_index_moves_to_the_far_left() {
+        assert_eq!(drop_index(&three_tabs(), 2, 0), Some(0));
+        assert_eq!(drop_index(&three_tabs(), 1, 5), Some(0));
+    }
+
+    #[test]
+    fn drop_index_handles_pointer_dragged_off_window() {
+        // Negative coordinates used to wrap around when cast to usize and
+        // were treated as "drop at the far right"; they mean far left.
+        assert_eq!(drop_index(&three_tabs(), 2, -50), Some(0));
+        assert_eq!(drop_index(&three_tabs(), 0, -50), None);
+    }
+
+    #[test]
+    fn drop_index_rejects_out_of_range_input() {
+        assert_eq!(drop_index(&[], 0, 10), None);
+        assert_eq!(drop_index(&three_tabs(), 3, 10), None);
+        assert_eq!(drop_index(&three_tabs(), 99, 10), None);
+    }
+
+    #[test]
+    fn drop_index_steps_one_slot_at_a_time() {
+        // Crossing the centre of the neighbour swaps with it
+        assert_eq!(drop_index(&three_tabs(), 0, 61), Some(1));
+        assert_eq!(drop_index(&three_tabs(), 2, 59), Some(1));
+    }
+
+    #[test]
+    fn hit_ui_item_prefers_child_rows_over_the_modal_container() {
+        let items = modal_items();
+        // Reverse scanning must not let the enclosing container swallow
+        // the row that is actually under the pointer
+        assert!(matches!(
+            hit_ui_item(&items, 100, 10).map(|i| i.item_type.clone()),
+            Some(UIItemType::Modal(0))
+        ));
+        assert!(matches!(
+            hit_ui_item(&items, 100, 30).map(|i| i.item_type.clone()),
+            Some(UIItemType::Modal(1))
+        ));
+    }
+
+    #[test]
+    fn hit_ui_item_falls_back_to_the_modal_container_padding() {
+        let items = modal_items();
+        // The padding ring and the blank space below the last row belong
+        // to the container only; landing there must still report the
+        // modal, otherwise the overlay closes itself
+        assert!(matches!(
+            hit_ui_item(&items, 1, 10).map(|i| i.item_type.clone()),
+            Some(UIItemType::Modal(MODAL_CHROME_ROW))
+        ));
+        assert!(matches!(
+            hit_ui_item(&items, 100, 55).map(|i| i.item_type.clone()),
+            Some(UIItemType::Modal(MODAL_CHROME_ROW))
+        ));
+        // Outside the modal entirely: nothing is hit, so the press is
+        // free to dismiss it
+        assert!(hit_ui_item(&items, 400, 10).is_none());
     }
 }

@@ -1,5 +1,5 @@
 use crate::termwindow::box_model::*;
-use crate::termwindow::modal::Modal;
+use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
 use crate::termwindow::{DimensionContext, TermWindow, UIItemType};
 use config::i18n::{fill, tr};
 use config::keyassignment::{
@@ -9,12 +9,59 @@ use config::keyassignment::{
 use config::Dimension;
 use std::cell::RefCell;
 use std::rc::Rc;
+use termwiz::cell::unicode_column_width;
 use wezterm_term::{KeyCode, KeyModifiers};
 use window::color::LinearRgba;
 use window::WindowOps;
 
 /// A menu item; a `None` action renders a separator row
 pub type MenuItem = (Option<String>, Option<KeyAssignment>);
+
+/// 菜单几何的唯一真源：下面的 `Element` 构造与外框尺寸推导共用这些常量，
+/// 于是宽高估算不会和实际 box model 漂移（WZ-04 的 `+ 16.` 魔数由此消失）。
+/// 菜单行的左右内边距（单元格）
+const ROW_PADDING_H_CELLS: f32 = 0.75;
+/// 菜单行的上下内边距（单元格）
+const ROW_PADDING_V_CELLS: f32 = 0.1;
+/// 菜单外框四边的内边距 / 外边距（单元格）与边框（像素）
+const MENU_PADDING_CELLS: f32 = 0.25;
+const MENU_MARGIN_CELLS: f32 = 0.25;
+const MENU_BORDER_PIXELS: f32 = 1.;
+/// 分隔行的字形；宽度同样按显示列数参与估算
+const SEPARATOR_ROW: &str = "────────";
+/// 宽度下限（单元格），避免只有极短标签时菜单细成一条
+const MIN_WIDTH_CELLS: f32 = 10.;
+
+/// 一行的渲染文本：`None` 标签是分隔行
+fn row_text(label: Option<&String>) -> String {
+    match label {
+        Some(label) => label.clone(),
+        None => SEPARATOR_ROW.to_string(),
+    }
+}
+
+/// 菜单内容占用的最大显示列数（纯函数）。
+///
+/// CJK 一格占两列，按 `chars().count()` 估算会少算一半宽度，box model
+/// 随后把中文菜单项拦腰截断（WZ-04），所以一律用显示列宽。
+fn content_width_cells(items: &[MenuItem]) -> f32 {
+    items.iter().fold(MIN_WIDTH_CELLS, |acc, (label, _)| {
+        acc.max(unicode_column_width(&row_text(label.as_ref()), None) as f32)
+    })
+}
+
+/// 由内容列数推导菜单外框的像素尺寸（纯函数）。
+///
+/// 内容 + 行内边距 + 外框内边距 + 外边距 + 边框，全部取自上面那批与
+/// `Element` 构造共用的常量，因此估算不会与实际 box model 漂移。
+fn menu_box_size(content_cells: f32, rows: usize, cell_width: f32, cell_height: f32) -> (f32, f32) {
+    let chrome_cells = 2. * (MENU_PADDING_CELLS + MENU_MARGIN_CELLS);
+    let row_height = cell_height * (1. + 2. * ROW_PADDING_V_CELLS);
+    let width = (content_cells + 2. * ROW_PADDING_H_CELLS + chrome_cells) * cell_width
+        + 2. * MENU_BORDER_PIXELS;
+    let height = rows as f32 * row_height + chrome_cells * cell_height + 2. * MENU_BORDER_PIXELS;
+    (width, height)
+}
 
 /// A lightweight context menu opened at a screen position, mirroring
 /// the right-click menus of herdr / tmux (`display-menu`).
@@ -240,18 +287,13 @@ impl ContextMenu {
             .into();
 
         let mut rows = vec![];
-        let mut max_width_cells: f32 = 10.;
         for (idx, (label, action)) in items.iter().enumerate() {
             let (row_bg, row_fg) = if idx == selected && action.is_some() {
                 (fg.clone(), bg.clone())
             } else {
                 (LinearRgba::TRANSPARENT.into(), fg.clone())
             };
-            let text = match label {
-                Some(label) => label.clone(),
-                None => "────────".to_string(),
-            };
-            max_width_cells = max_width_cells.max(text.chars().count() as f32);
+            let text = row_text(label.as_ref());
             rows.push(
                 Element::new(&font, ElementContent::Text(text))
                     .colors(ElementColors {
@@ -260,10 +302,10 @@ impl ContextMenu {
                         text: row_fg,
                     })
                     .padding(BoxDimension {
-                        left: Dimension::Cells(0.75),
-                        right: Dimension::Cells(0.75),
-                        top: Dimension::Cells(0.1),
-                        bottom: Dimension::Cells(0.1),
+                        left: Dimension::Cells(ROW_PADDING_H_CELLS),
+                        right: Dimension::Cells(ROW_PADDING_H_CELLS),
+                        top: Dimension::Cells(ROW_PADDING_V_CELLS),
+                        bottom: Dimension::Cells(ROW_PADDING_V_CELLS),
                     })
                     .min_width(Some(Dimension::Percent(1.)))
                     .display(DisplayType::Block)
@@ -277,15 +319,21 @@ impl ContextMenu {
                 bg: bg.clone(),
                 text: fg.clone(),
             })
-            .padding(BoxDimension::new(Dimension::Cells(0.25)))
-            .border(BoxDimension::new(Dimension::Pixels(1.)))
-            .margin(BoxDimension::new(Dimension::Cells(0.25)))
-            .display(DisplayType::Block);
+            .padding(BoxDimension::new(Dimension::Cells(MENU_PADDING_CELLS)))
+            .border(BoxDimension::new(Dimension::Pixels(MENU_BORDER_PIXELS)))
+            .margin(BoxDimension::new(Dimension::Cells(MENU_MARGIN_CELLS)))
+            .display(DisplayType::Block)
+            // 外框自己也要进 hit map：内边距/边框/外边距这一圈不属于任何行，
+            // 点在那里会被「点浮层外即关闭」当成点外面（WZ-06）
+            .item_type(UIItemType::Modal(MODAL_CHROME_ROW));
 
         let border = term_window.get_os_border();
-        let row_height = metrics.cell_size.height as f32 * 1.2;
-        let menu_height = items.len() as f32 * row_height + 8.;
-        let menu_width = max_width_cells * metrics.cell_size.width as f32 + 16.;
+        let (menu_width, menu_height) = menu_box_size(
+            content_width_cells(items),
+            items.len(),
+            metrics.cell_size.width as f32,
+            metrics.cell_size.height as f32,
+        );
         // Clamp so that the menu stays inside the window; flip upwards
         // when there is no room below the click position
         let mut menu_y = y;
@@ -334,6 +382,10 @@ impl Modal for ContextMenu {
         term_window: &mut TermWindow,
     ) -> anyhow::Result<()> {
         use ::window::MouseEventKind as WMEK;
+        // 外框（chrome）吞掉事件：既不移动选中行，也不关闭菜单
+        if row == MODAL_CHROME_ROW {
+            return Ok(());
+        }
         match event.kind {
             WMEK::Move => {
                 if self.row_is_selectable(row) && *self.selected.borrow() != row {
@@ -411,5 +463,61 @@ pub fn open_context_menu(term_window: &TermWindow, menu: ContextMenu) {
     term_window.set_modal(Rc::new(menu));
     if let Some(window) = term_window.window.as_ref() {
         window.invalidate();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(label: &str) -> MenuItem {
+        (Some(label.to_string()), Some(KeyAssignment::ScrollToTop))
+    }
+
+    #[test]
+    fn content_width_counts_display_columns_not_chars() {
+        // 「拆分窗格（右）」= 7 个字符、14 个显示列
+        let items = vec![item("拆分窗格（右）")];
+        assert_eq!(content_width_cells(&items), 14.);
+        // 短标签走下限，菜单不会细成一条
+        assert_eq!(content_width_cells(&[item("Copy")]), MIN_WIDTH_CELLS);
+    }
+
+    #[test]
+    fn content_width_covers_the_separator_row() {
+        let sep: MenuItem = (None, None);
+        assert_eq!(
+            content_width_cells(std::slice::from_ref(&sep)),
+            MIN_WIDTH_CELLS.max(unicode_column_width(SEPARATOR_ROW, None) as f32)
+        );
+        // 分隔行不得压低正文行算出的宽度
+        assert_eq!(content_width_cells(&[item("拆分窗格（右）"), sep]), 14.);
+    }
+
+    #[test]
+    fn menu_box_leaves_room_for_the_whole_label() {
+        let (cell_w, cell_h) = (9., 20.);
+        let cells = content_width_cells(&[item("拆分窗格（右）")]);
+        let (width, _) = menu_box_size(cells, 1, cell_w, cell_h);
+        // box model 给行的可用文本宽度 = 外框宽 - 边框 - 外框内边距 - 行内边距；
+        // 它必须严格大于标签宽度，否则最后一个字形被 `break` 掉
+        let chrome =
+            2. * MENU_BORDER_PIXELS + 2. * (MENU_PADDING_CELLS + ROW_PADDING_H_CELLS) * cell_w;
+        assert!(
+            width - chrome > cells * cell_w,
+            "width={} chrome={} cells={}",
+            width,
+            chrome,
+            cells
+        );
+        // 旧的 `+ 16.` 魔数连按字符数算出的宽度都兜不住中文
+        assert!(width > cells * cell_w + 16.);
+    }
+
+    #[test]
+    fn menu_box_height_accounts_for_container_chrome() {
+        let (_, height) = menu_box_size(MIN_WIDTH_CELLS, 3, 9., 20.);
+        let rows = 3. * 20. * (1. + 2. * ROW_PADDING_V_CELLS);
+        assert!(height > rows, "height={} rows={}", height, rows);
     }
 }

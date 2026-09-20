@@ -108,6 +108,7 @@ impl KeybindsOverlay {
                         top: Dimension::Cells(0.1),
                         bottom: Dimension::Cells(0.1),
                     })
+                    .min_width(Some(Dimension::Percent(1.)))
                     .display(DisplayType::Block)
                     .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
             ];
@@ -209,6 +210,7 @@ impl KeybindsOverlay {
                 top: Dimension::Cells(0.1),
                 bottom: Dimension::Cells(0.1),
             })
+            .min_width(Some(Dimension::Percent(1.)))
             .display(DisplayType::Block)
             .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
         );
@@ -249,7 +251,10 @@ impl KeybindsOverlay {
             })
             .padding(BoxDimension::new(Dimension::Cells(0.25)))
             .border(BoxDimension::new(Dimension::Pixels(1.)))
-            .min_width(Some(Dimension::Pixels(desired_pixel_width)));
+            .min_width(Some(Dimension::Pixels(desired_pixel_width)))
+            // 外框自己也进 hit map：内边距/边框/外边距那一圈不属于任何行，
+            // 点在那里会被「点浮层外即关闭」误判成点外面（WZ-06）
+            .item_type(UIItemType::Modal(MODAL_CHROME_ROW));
 
         let x_adjust = ((avail_pixel_width - padding_left) - desired_pixel_width) / 2.;
 

@@ -112,6 +112,37 @@
 
 ### Fixed
 
+- 修复 tab 拖拽重排完全失效：`mouseevent.rs` 的 Release(Left) 分支与
+  `TermWindow::finish_tab_drag` 各 `take()` 了一次 `tab_drag`，调用方先取空
+  之后 `finish_tab_drag` 必定提前返回，「按住左键拖拽重排 tab」是死路径。
+  `take()` 收敛到 `finish_tab_drag` 一处；插入位计算抽成纯函数
+  `mouseevent.rs::drop_index`（顺带修好指针拖出窗口左侧时 `x as usize`
+  回绕、被当成「拖到最右」的边界），配 7 条单测（最右/最左/原位/越界/
+  负坐标/相邻换位）。Xvfb 前后对照截图：修复前拖到最右顺序不变，修复后
+  A|B|C → B|C|A → 拖回 A|B|C。
+- 修复右键上下文菜单中文标签被拦腰截断：`context_menu.rs` 用
+  `chars().count()` 估算宽度，CJK 一格占两列因而少算一半，box model 随后
+  按 bounds 把标签截断。改用 `termwiz::cell::unicode_column_width`（分隔行
+  同理），`+ 16.` 与 `* 1.2` 魔数换成与 `Element` 构造共用的
+  padding/margin/border 常量推导（新增纯函数 `content_width_cells`
+  与 `menu_box_size` 及 4 条单测）。
+- 修复设置浮层「外观」分区过滤框打不进小写 `j`/`k`：`settings.rs` 的
+  导航 arm 排在通配过滤 arm 之前，1001 条配色里搜不到 `jellybeans`/
+  `kanagawa`，而过滤是该列表唯一可用入口。按键路由抽成纯函数
+  `settings.rs::classify_key`，`j`/`k` 在有过滤框的分区让位给过滤输入，
+  ↑↓ 与 Ctrl+p/n 在任何分区都仍是导航；Backspace 与字符输入一致地重置
+  选中行与滚动位置（7 条单测）。
+- 修复设置浮层选中行滚出可视区：滚动窗口用终端字体度量、渲染却用命令
+  面板字体度量。`SettingsOverlay::max_rows_on_screen` 的结果在 `compute()`
+  里缓存进 `visible_rows`，`move_selection` 直接复用，两侧行预算严格一致
+  （Xvfb 前后对照：刻意拉开两种字号后，修复前连按 20 次 ↓ 选中行不可见，
+  修复后选中行留在可视区末行）。
+- 修复点击浮层内边距/边框/外边距一圈以及 chrome 行右侧空白被当作
+  「点击浮层外」误关：这一圈不属于任何已登记行，`resolve_ui_item` 命中
+  不到就走了点外关闭。四个浮层（右键菜单/设置/快捷键/命令面板）的外层
+  容器统一打 `UIItemType::Modal(MODAL_CHROME_ROW)`，chrome 行补
+  `min_width(Percent(1.))` 铺满宽度；命中顺序真源抽成
+  `mouseevent.rs::hit_ui_item` 并加子行优先于外层容器的单测。
 - 修复 DECSET 2026 同步输出 hold 无超时：guest 在 `?2026h` 之后崩溃/挂死
   会让 pane 永久不刷新且动作队列无界增长。`mux/src/lib.rs::parse_buffered_data`
   的 hold 改为带到期时间的状态机（`SyncOutputHold`），到期强制 flush 并

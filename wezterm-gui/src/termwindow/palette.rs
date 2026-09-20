@@ -294,6 +294,7 @@ impl CommandPalette {
                             .to_linear()
                             .into(),
                     })
+                    .min_width(Some(Dimension::Percent(1.)))
                     .display(DisplayType::Block)
                     .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
             ];
@@ -480,7 +481,12 @@ impl CommandPalette {
                     poly: BOTTOM_RIGHT_ROUNDED_CORNER,
                 },
             }))
-            .min_width(Some(Dimension::Pixels(desired_pixel_width)));
+            .min_width(Some(Dimension::Pixels(desired_pixel_width)))
+            // fork: register the enclosing box in the hit map too. Its
+            // padding/border/margin ring belongs to no row, so a press
+            // there was treated as a press outside the modal and closed
+            // the palette.
+            .item_type(UIItemType::Modal(MODAL_CHROME_ROW));
 
         let x_adjust = ((avail_pixel_width - padding_left) - desired_pixel_width) / 2.;
 

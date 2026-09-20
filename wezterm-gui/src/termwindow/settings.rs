@@ -26,6 +26,12 @@ use window::WindowOps;
 /// matches `config::config::default_font_size` (the wezterm default)
 const DEFAULT_FONT_SIZE: f64 = 12.0;
 
+/// 数据行可视区的下限：窗口再矮也留这么多行
+const MIN_VISIBLE_ROWS: usize = 4;
+/// 浮层占窗口高度的比例（千分之），以及标题/分区/过滤/页脚等 chrome 行数
+const VISIBLE_ROWS_HEIGHT_PERMILLE: usize = 600;
+const CHROME_ROWS: usize = 4;
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Section {
     Language,
@@ -91,6 +97,10 @@ pub struct SettingsOverlay {
     /// per-window overrides snapshot taken when the overlay was opened;
     /// restored on Esc so cancelled previews don't stick around
     overrides_snapshot: RefCell<Value>,
+    /// 上一次 `compute()` 实际渲染的数据行数上限。滚动窗口必须和渲染用
+    /// 同一个数，否则选中行会滑出可视区（WZ-08）——`compute()` 用命令
+    /// 面板字体的度量，早先的 `move_selection` 却用终端字体重算一遍。
+    visible_rows: RefCell<usize>,
     element: RefCell<Option<Vec<ComputedElement>>>,
 }
 
@@ -127,6 +137,7 @@ impl SettingsOverlay {
             top_row: RefCell::new(0),
             filter: RefCell::new(String::new()),
             overrides_snapshot: RefCell::new(term_window.config_overrides.clone()),
+            visible_rows: RefCell::new(MIN_VISIBLE_ROWS),
             element: RefCell::new(None),
         }
     }
@@ -183,16 +194,16 @@ impl SettingsOverlay {
         self.items_for(*self.section.borrow(), term_window)
     }
 
+    /// 数据行可视区的行数，按传入度量（渲染实际使用的那份）计算
     fn max_rows_on_screen(
         &self,
         term_window: &TermWindow,
         metrics: &crate::utilsprites::RenderMetrics,
     ) -> usize {
-        let mut rows = ((term_window.dimensions.pixel_height * 6 / 10)
-            / metrics.cell_size.height as usize)
-            .saturating_sub(4);
-        rows = rows.max(4);
-        rows
+        let cell_height = (metrics.cell_size.height as usize).max(1);
+        ((term_window.dimensions.pixel_height * VISIBLE_ROWS_HEIGHT_PERMILLE / 1000) / cell_height)
+            .saturating_sub(CHROME_ROWS)
+            .max(MIN_VISIBLE_ROWS)
     }
 
     fn move_selection(&self, delta: isize, term_window: &TermWindow) {
@@ -204,16 +215,9 @@ impl SettingsOverlay {
         let mut selected = self.selected.borrow_mut();
         *selected = (*selected as isize + delta).rem_euclid(len as isize) as usize;
 
-        // keep the selection inside the scroll window
-        let max_rows = {
-            // metrics-independent variant of max_rows_on_screen: borrow
-            // of render metrics requires &TermWindow only
-            let mut rows = ((term_window.dimensions.pixel_height * 6 / 10)
-                / term_window.render_metrics.cell_size.height as usize)
-                .saturating_sub(4);
-            rows = rows.max(4);
-            rows
-        };
+        // keep the selection inside the scroll window: 用 `compute()` 缓存
+        // 下来的行预算，和渲染出的行数严格一致（WZ-08）
+        let max_rows = (*self.visible_rows.borrow()).max(1);
         let mut top_row = self.top_row.borrow_mut();
         if *selected < *top_row {
             *top_row = *selected;
@@ -240,6 +244,29 @@ impl SettingsOverlay {
     /// colors update live; cancelled by Esc (restore snapshot)
     fn preview_scheme(&self, term_window: &mut TermWindow, name: &str) {
         upsert_override(term_window, "color_scheme", Value::String(name.to_string()));
+    }
+
+    /// 当前分区是否带过滤输入框。带的时候可打印字符一律进过滤框，
+    /// 导航只留 ↑↓ 与 Ctrl+p/n（WZ-07：否则 `j`/`k` 永远搜不出
+    /// `jellybeans`/`kanagawa`，而过滤是 1001 条配色唯一可用入口）。
+    fn filter_is_active(&self) -> bool {
+        *self.section.borrow() == Section::Appearance
+    }
+
+    /// 过滤文本变化后重置选中行与滚动位置
+    fn reset_scroll(&self) {
+        self.selected.replace(0);
+        self.top_row.replace(0);
+    }
+
+    /// 移动选中行，并在配色列表里顺带预览
+    fn move_and_preview(&self, delta: isize, term_window: &mut TermWindow) {
+        self.move_selection(delta, term_window);
+        let row = *self.selected.borrow();
+        let item = self.visible_items(term_window).get(row).cloned();
+        if let Some(Item::Scheme(name)) = item {
+            self.preview_scheme(term_window, &name);
+        }
     }
 
     fn activate(&self, row: usize, term_window: &mut TermWindow) {
@@ -344,6 +371,7 @@ impl SettingsOverlay {
 
         let items = self.visible_items(term_window);
         let max_rows = self.max_rows_on_screen(term_window, &metrics);
+        self.visible_rows.replace(max_rows);
         let top_row = *self.top_row.borrow();
         let selected = *self.selected.borrow();
 
@@ -363,6 +391,7 @@ impl SettingsOverlay {
                     top: Dimension::Cells(0.1),
                     bottom: Dimension::Cells(0.1),
                 })
+                .min_width(Some(Dimension::Percent(1.)))
                 .display(DisplayType::Block)
                 .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
         );
@@ -390,6 +419,7 @@ impl SettingsOverlay {
                     top: Dimension::Cells(0.),
                     bottom: Dimension::Cells(0.1),
                 })
+                .min_width(Some(Dimension::Percent(1.)))
                 .display(DisplayType::Block)
                 .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
         );
@@ -410,6 +440,7 @@ impl SettingsOverlay {
                         top: Dimension::Cells(0.),
                         bottom: Dimension::Cells(0.1),
                     })
+                    .min_width(Some(Dimension::Percent(1.)))
                     .display(DisplayType::Block)
                     .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
             );
@@ -429,6 +460,7 @@ impl SettingsOverlay {
                         top: Dimension::Cells(0.),
                         bottom: Dimension::Cells(0.),
                     })
+                    .min_width(Some(Dimension::Percent(1.)))
                     .display(DisplayType::Block)
                     .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
             );
@@ -480,6 +512,7 @@ impl SettingsOverlay {
                 top: Dimension::Cells(0.1),
                 bottom: Dimension::Cells(0.1),
             })
+            .min_width(Some(Dimension::Percent(1.)))
             .display(DisplayType::Block)
             .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
         );
@@ -493,7 +526,10 @@ impl SettingsOverlay {
             .padding(BoxDimension::new(Dimension::Cells(0.25)))
             .border(BoxDimension::new(Dimension::Pixels(1.)))
             .margin(BoxDimension::new(Dimension::Cells(0.25)))
-            .display(DisplayType::Block);
+            .display(DisplayType::Block)
+            // 外框自己也进 hit map：内边距/边框/外边距那一圈不属于任何行，
+            // 点在那里会被「点浮层外即关闭」误判成点外面（WZ-06）
+            .item_type(UIItemType::Modal(MODAL_CHROME_ROW));
 
         let (padding_left, padding_top) = term_window.padding_left_top();
         let border = term_window.get_os_border();
@@ -599,6 +635,66 @@ fn enum_display(tw: &TermWindow, key: &str) -> std::borrow::Cow<'static, str> {
     }
 }
 
+/// 设置页对一次按键的处理意图。把按键路由抽成纯函数，`filter_active`
+/// 这条分支（WZ-07）才可单测。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsKey {
+    Cancel,
+    /// 切换分区，`delta` 为 +1 / -1
+    SwitchSection(isize),
+    /// 移动选中行
+    Move(isize),
+    Activate,
+    FilterPush(char),
+    FilterPop,
+    FilterClear,
+    /// 浮层吞掉但不做事
+    Swallow,
+    /// 交回上层（键位绑定 / pane）
+    PassThrough,
+}
+
+/// 按键路由的唯一真源。
+///
+/// `filter_active` 为真（外观分区有过滤输入框）时，裸 `j`/`k` 属于过滤
+/// 输入而不是导航——否则 1001 条配色里永远搜不出 `jellybeans`/`kanagawa`
+/// （WZ-07）；↑↓ 与 Ctrl+p/n 在任何分区都是导航。
+fn classify_key(key: KeyCode, mods: KeyModifiers, filter_active: bool) -> SettingsKey {
+    match (key, mods) {
+        (KeyCode::Escape, KeyModifiers::NONE) | (KeyCode::Char('g'), KeyModifiers::CTRL) => {
+            SettingsKey::Cancel
+        }
+        (KeyCode::Tab, KeyModifiers::NONE) => SettingsKey::SwitchSection(1),
+        (KeyCode::Tab, KeyModifiers::SHIFT) => SettingsKey::SwitchSection(-1),
+        (KeyCode::UpArrow, KeyModifiers::NONE) | (KeyCode::Char('p'), KeyModifiers::CTRL) => {
+            SettingsKey::Move(-1)
+        }
+        (KeyCode::DownArrow, KeyModifiers::NONE) | (KeyCode::Char('n'), KeyModifiers::CTRL) => {
+            SettingsKey::Move(1)
+        }
+        (KeyCode::Char('k'), KeyModifiers::NONE) if !filter_active => SettingsKey::Move(-1),
+        (KeyCode::Char('j'), KeyModifiers::NONE) if !filter_active => SettingsKey::Move(1),
+        (KeyCode::Enter, KeyModifiers::NONE) => SettingsKey::Activate,
+        (KeyCode::Char('u'), KeyModifiers::CTRL) if filter_active => SettingsKey::FilterClear,
+        (KeyCode::Char('u'), KeyModifiers::CTRL) => SettingsKey::Swallow,
+        (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
+            if filter_active {
+                SettingsKey::FilterPush(c)
+            } else {
+                SettingsKey::Swallow
+            }
+        }
+        (KeyCode::Backspace, KeyModifiers::NONE) => {
+            if filter_active {
+                SettingsKey::FilterPop
+            } else {
+                SettingsKey::Swallow
+            }
+        }
+        _ => SettingsKey::PassThrough,
+    }
+}
+
 impl Modal for SettingsOverlay {
     fn perform_assignment(
         &self,
@@ -646,68 +742,42 @@ impl Modal for SettingsOverlay {
         mods: KeyModifiers,
         term_window: &mut TermWindow,
     ) -> anyhow::Result<bool> {
-        match (key, mods) {
-            (KeyCode::Escape, KeyModifiers::NONE) | (KeyCode::Char('g'), KeyModifiers::CTRL) => {
+        match classify_key(key, mods, self.filter_is_active()) {
+            SettingsKey::Cancel => {
                 // cancel: restore any volatile previews
                 let snapshot = self.overrides_snapshot.borrow().clone();
                 restore_overrides(term_window, &snapshot);
                 term_window.cancel_modal();
             }
-            (KeyCode::Tab, KeyModifiers::NONE) => {
-                self.switch_section(1);
+            SettingsKey::SwitchSection(delta) => {
+                self.switch_section(delta);
             }
-            (KeyCode::Tab, KeyModifiers::SHIFT) => {
-                self.switch_section(-1);
-            }
-            (KeyCode::UpArrow, KeyModifiers::NONE)
-            | (KeyCode::Char('p'), KeyModifiers::CTRL)
-            | (KeyCode::Char('k'), KeyModifiers::NONE) => {
-                self.move_selection(-1, term_window);
+            SettingsKey::Move(delta) => {
                 // preview while moving through the scheme list
-                let row = *self.selected.borrow();
-                let item = self.visible_items(term_window).get(row).cloned();
-                if let Some(Item::Scheme(name)) = item {
-                    self.preview_scheme(term_window, &name);
-                }
+                self.move_and_preview(delta, term_window);
             }
-            (KeyCode::DownArrow, KeyModifiers::NONE)
-            | (KeyCode::Char('n'), KeyModifiers::CTRL)
-            | (KeyCode::Char('j'), KeyModifiers::NONE) => {
-                self.move_selection(1, term_window);
-                let row = *self.selected.borrow();
-                let item = self.visible_items(term_window).get(row).cloned();
-                if let Some(Item::Scheme(name)) = item {
-                    self.preview_scheme(term_window, &name);
-                }
-            }
-            (KeyCode::Enter, KeyModifiers::NONE) => {
+            SettingsKey::Activate => {
                 let row = *self.selected.borrow();
                 self.activate(row, term_window);
                 return Ok(true);
             }
-            (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
-                if *self.section.borrow() == Section::Appearance {
-                    let mut filter = self.filter.borrow_mut();
-                    filter.push(c);
-                    drop(filter);
-                    self.selected.replace(0);
-                    self.top_row.replace(0);
-                }
+            SettingsKey::FilterPush(c) => {
+                self.filter.borrow_mut().push(c);
+                self.reset_scroll();
             }
-            (KeyCode::Backspace, KeyModifiers::NONE) => {
-                if *self.section.borrow() == Section::Appearance {
-                    let mut filter = self.filter.borrow_mut();
-                    filter.pop();
-                }
+            SettingsKey::FilterPop => {
+                self.filter.borrow_mut().pop();
+                // 删字符同样换了一组可见行，选中行与滚动位置必须一起回零
+                self.reset_scroll();
             }
-            (KeyCode::Char('u'), KeyModifiers::CTRL) => {
-                if *self.section.borrow() == Section::Appearance {
-                    self.filter.borrow_mut().clear();
-                    self.selected.replace(0);
-                    self.top_row.replace(0);
-                }
+            SettingsKey::FilterClear => {
+                self.filter.borrow_mut().clear();
+                self.reset_scroll();
             }
-            _ => return Ok(false),
+            // 没有过滤框的分区里，可打印字符与 Backspace 照旧被浮层吞掉，
+            // 不落进 pane
+            SettingsKey::Swallow => {}
+            SettingsKey::PassThrough => return Ok(false),
         }
         term_window.invalidate_modal();
         Ok(true)
@@ -736,5 +806,97 @@ pub fn open_settings(term_window: &TermWindow) {
     term_window.set_modal(Rc::new(SettingsOverlay::new(term_window)));
     if let Some(window) = term_window.window.as_ref() {
         window.invalidate();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nav(key: KeyCode, filter_active: bool) -> SettingsKey {
+        classify_key(key, KeyModifiers::NONE, filter_active)
+    }
+
+    #[test]
+    fn lowercase_jk_types_into_the_appearance_filter() {
+        // 过滤框是 1001 条配色唯一可用入口，j/k 必须能打进去（WZ-07）
+        assert_eq!(nav(KeyCode::Char('j'), true), SettingsKey::FilterPush('j'));
+        assert_eq!(nav(KeyCode::Char('k'), true), SettingsKey::FilterPush('k'));
+        for c in "jellybeans".chars() {
+            assert_eq!(nav(KeyCode::Char(c), true), SettingsKey::FilterPush(c));
+        }
+        for c in "kanagawa".chars() {
+            assert_eq!(nav(KeyCode::Char(c), true), SettingsKey::FilterPush(c));
+        }
+    }
+
+    #[test]
+    fn lowercase_jk_still_navigates_without_a_filter() {
+        assert_eq!(nav(KeyCode::Char('j'), false), SettingsKey::Move(1));
+        assert_eq!(nav(KeyCode::Char('k'), false), SettingsKey::Move(-1));
+    }
+
+    #[test]
+    fn arrows_and_ctrl_pn_navigate_in_every_section() {
+        for filter_active in [false, true] {
+            assert_eq!(nav(KeyCode::UpArrow, filter_active), SettingsKey::Move(-1));
+            assert_eq!(nav(KeyCode::DownArrow, filter_active), SettingsKey::Move(1));
+            assert_eq!(
+                classify_key(KeyCode::Char('p'), KeyModifiers::CTRL, filter_active),
+                SettingsKey::Move(-1)
+            );
+            assert_eq!(
+                classify_key(KeyCode::Char('n'), KeyModifiers::CTRL, filter_active),
+                SettingsKey::Move(1)
+            );
+        }
+    }
+
+    #[test]
+    fn backspace_edits_the_filter_and_is_swallowed_elsewhere() {
+        assert_eq!(nav(KeyCode::Backspace, true), SettingsKey::FilterPop);
+        assert_eq!(nav(KeyCode::Backspace, false), SettingsKey::Swallow);
+    }
+
+    #[test]
+    fn plain_characters_never_reach_the_pane() {
+        // 无过滤框的分区吞掉字符，不交回键位绑定 / pane
+        assert_eq!(nav(KeyCode::Char('z'), false), SettingsKey::Swallow);
+        assert_eq!(
+            classify_key(KeyCode::Char('Z'), KeyModifiers::SHIFT, false),
+            SettingsKey::Swallow
+        );
+        assert_eq!(
+            classify_key(KeyCode::Char('u'), KeyModifiers::CTRL, false),
+            SettingsKey::Swallow
+        );
+        assert_eq!(
+            classify_key(KeyCode::Char('u'), KeyModifiers::CTRL, true),
+            SettingsKey::FilterClear
+        );
+    }
+
+    #[test]
+    fn section_switch_and_cancel_keep_working() {
+        assert_eq!(nav(KeyCode::Tab, true), SettingsKey::SwitchSection(1));
+        assert_eq!(
+            classify_key(KeyCode::Tab, KeyModifiers::SHIFT, true),
+            SettingsKey::SwitchSection(-1)
+        );
+        assert_eq!(nav(KeyCode::Escape, true), SettingsKey::Cancel);
+        assert_eq!(
+            classify_key(KeyCode::Char('g'), KeyModifiers::CTRL, true),
+            SettingsKey::Cancel
+        );
+        assert_eq!(nav(KeyCode::Enter, true), SettingsKey::Activate);
+    }
+
+    #[test]
+    fn unhandled_keys_are_passed_through() {
+        assert_eq!(nav(KeyCode::Home, true), SettingsKey::PassThrough);
+        assert_eq!(
+            classify_key(KeyCode::Char('q'), KeyModifiers::ALT, false),
+            SettingsKey::PassThrough
+        );
     }
 }
