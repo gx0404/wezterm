@@ -164,7 +164,14 @@ def main() -> int:
                 print(f"make {name}: {item['status']}")
             return 0
         elif args.action == "check":
-            return subprocess.run([sys.executable, str(ROOT / "scripts/resolve_agent_rules.py"), "--check"], check=False).returncode
+            # fork: 规则闭集之外再守 dotfiles 漂移（WEZ-CFG-02）：
+            # gx-sync --check 对本机配置/插件与仓库快照的差异返回非零。
+            for argv in ([sys.executable, str(ROOT / "scripts/resolve_agent_rules.py"), "--check"],
+                         [sys.executable, str(ROOT / "scripts/gx_bundle.py"), "sync", "--check"]):
+                result = subprocess.run(argv, check=False)
+                if result.returncode:
+                    return result.returncode
+            return 0
         if args.action == "ready":
             ready(data)
             print("PASS 配置完整；实际命令结果须另行验证")

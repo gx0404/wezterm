@@ -19,8 +19,11 @@
   - `config/domains.lua`：WSL 域写死的 `username='kevin'` / `/home/kevin` 改为
     `os.getenv('USERNAME')` 动态取当前账户；
   - `config/general.lua`（2026-09-16，R1）：新增 `language = 'zh-CN'`
-    （本 fork 的界面文案语言配置项，见根 CHANGELOG 0.2.0；本机尚未同步）。
-- 本机存在 `~/.config/wezterm.bak-20260713`（38MB 旧快照），未收录。
+    （本 fork 的界面文案语言配置项，见根 CHANGELOG 0.2.0；**已于 2026-09-20
+    的 gx-upgrade 部署到本机**，不再是 sync 差异项）。
+- 2026-09-21 更正（WEZ-HYG-03）：早前记录的「本机存在
+  `~/.config/wezterm.bak-20260713`（38MB 旧快照）」已不存在，删除该条；
+  字体段落同步为现状（正文 Regular 字重，见下）。
 - 2026-09-16 增量同步：`config/bindings.lua` 恢复 Linux 壁纸控制的
   `Alt+.` / `Alt+,` / `Alt+/` / `Ctrl+Alt+/` / `Alt+b`，与本机配置及
   Oh My Zsh 仓库 `gx/wezterm/` 同步；常用终端功能继续使用 `Ctrl+Shift`。
@@ -49,8 +52,9 @@
 ## fonts/
 
 全量字体 363MB 不入库，按配置实际引用精选（`config/fonts.lua`：主字体
-JetBrainsMono Nerd Font DemiBold + 回退 Noto Sans CJK SC Bold；fontconfig 中
-DemiBold 权重由 SemiBold 命名文件提供）：
+JetBrainsMono Nerd Font **Regular**（2026-09-18 起由 DemiBold 改为常规字重）
++ 回退 Noto Sans CJK SC；fontconfig 中字重命名与文件名的对应关系以
+`fc-match` 实测为准）：
 
 | 文件 | 来源 |
 |---|---|
@@ -66,7 +70,10 @@ DemiBold 权重由 SemiBold 命名文件提供）：
   与 `start --cwd .`），绝对路径改占位符。
 - `templates/wezterm-wrapper.sh.template`：基于本机 `~/.local/bin/wezterm`。
 - `templates/zshrc-wezterm.sh`：本机 `~/.zshrc` 的光标模式键位段，补全
-  autoload/zle 定义后改为带标记自包含块。
+  autoload/zle 定义后改为带标记自包含块。**2026-09-21 起 `~/.zshrc` 归
+  oh-my-zsh gx 层真源**：`install.sh` 默认不再追加该块（`--zshrc` 显式
+  追加供无 gx 层的机器），检测到 `~/.oh-my-zsh/.gx-managed` 时清理历史
+  追加块。
 
 ## 不收录项
 

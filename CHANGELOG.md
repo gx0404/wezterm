@@ -85,6 +85,13 @@
   （workflow_dispatch / gx-v* tag 触发，产出四件套 zip 供 gx-bundle 组装）。
 - 领域规则 `docs/AGENT_RULES/dotfiles.md` + 路由；`dist/`、`target-gx-*/`
   入 `.gitignore` fork 段。
+- `gx-sync --check` 接入 `make framework-check` 守门（WEZ-CFG-02）：
+  本机配置/插件与仓库快照出现非登记差异时退出码 1，提示两个方向的
+  补救命令（部署 `make gx-upgrade` / 回收 `GX_SYNC_WRITE=1 make gx-sync`）；
+  PROVENANCE 登记的有意改动（launch.lua/domains.lua）不计入差异。
+  PROVENANCE 同步现场（WEZ-HYG-03）：general.lua 的 `language` 键已随
+  09-20 gx-upgrade 部署、失效的 .bak-20260713 记录删除、字体段更正为
+  Regular 字重现状、zshrc 模板段记录归属变更。
 
 - UI 交互增强（源自对 herdr 与 tmux 的交互调研）：鼠标绑定新增
   `region` 维度（可按 TabBar/Tab/NewTabButton/LeftStatus/RightStatus/

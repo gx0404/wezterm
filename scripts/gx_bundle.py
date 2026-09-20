@@ -4,7 +4,9 @@
 #           release 四件套，组装自包含离线安装包 dist/*.tar.xz；有 Windows 构建包
 #           时顺带产出 Windows 部署 zip。
 # sync   —— 对比本机 ~/.config/wezterm 与插件目录同 dotfiles/ 快照的差异，
-#           GX_SYNC_WRITE=1 时把本机改动收回仓库（删除只报告不执行）。
+#           GX_SYNC_WRITE=1 时把本机改动收回仓库（删除只报告不执行）；
+#           --check 只读且对意外差异返回退出码 1（make framework-check 守门，
+#           WEZ-CFG-02）。
 # upgrade —— 一条命令完成本机替换：容器构建 release 四件套 →
 #           dotfiles/install.sh 用户级部署（配置/插件/字体随快照更新，
 #           全程带时间戳备份，无需 sudo）→ 版本验证。等价
@@ -354,34 +356,50 @@ def diff_tree(live: Path, snap: Path, label: str):
 
 def cmd_sync(args) -> None:
     write = args.write or os.environ.get("GX_SYNC_WRITE") == "1"
+    check = getattr(args, "check", False) and not write
+    # 已知的收录期有意改动（PROVENANCE.md 记录）不算意外差异；
+    # --check 的退出码只看非 known 差异
+    known = ["config/launch.lua", "config/domains.lua"]
     pairs = [
         (Path.home() / ".config" / "wezterm", DOTFILES / "wezterm-config", "config"),
         (Path.home() / ".local" / "share" / "wezterm" / "plugins",
          DOTFILES / "plugins", "plugins"),
     ]
     total = 0
+    written = 0
     for live, snap, label in pairs:
         added, changed, _ = diff_tree(live, snap, label)
-        total += len(added) + len(changed)
+        rels = added + changed
+        if label == "config":
+            rels = [r for r in rels if r not in known]
+        total += len(rels)
         if write:
             for rel in added + changed:
                 src = live / rel
                 dst = snap / rel
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
-    # 已知的收录期有意改动（PROVENANCE.md 记录）不算意外差异
-    known = ["config/launch.lua", "config/domains.lua"]
+                written += 1
     known_hits = [k for k in known
                   if (DOTFILES / "wezterm-config" / k).exists()]
     if known_hits:
         print(f"note: {', '.join(known_hits)} intentionally differ from the "
               f"machine copy (see dotfiles/PROVENANCE.md)")
-    if total == 0:
-        print("sync: no differences")
+    if total == 0 and not write:
+        print("sync: no unexpected differences")
     elif write:
-        print(f"sync: copied {total} file(s) back into dotfiles/")
+        print(f"sync: copied {written} file(s) back into dotfiles/")
     else:
-        print(f"sync: {total} difference(s); run with GX_SYNC_WRITE=1 to sync back")
+        print(f"sync: {total} unexpected difference(s); "
+              f"run with GX_SYNC_WRITE=1 to sync back")
+    # fork: --check 把漂移变成退出码（WEZ-CFG-02），供 make framework-check
+    # 守门。差异存在即 1，并提示两个方向的补救命令。
+    if check and total > 0:
+        print("sync --check: FAIL（差异见上；部署方向用 make gx-upgrade，"
+              "回收方向用 GX_SYNC_WRITE=1 make gx-sync）")
+        raise SystemExit(1)
+    if check:
+        print("sync --check: PASS")
 
 
 def cmd_upgrade(args) -> None:
@@ -399,7 +417,8 @@ def cmd_upgrade(args) -> None:
     print(f"upgrade verified: {version}")
     print("note: 已打开的 wezterm 窗口仍运行旧二进制；重启 wezterm"
           "（退出后从桌面/命令行重新启动）后新版本生效。"
-          "回滚：~/.local/bin 下 .bak-gx-* 备份与 ~/.local/opt/wezterm-nightly。")
+          "回滚：~/.local/opt/wezterm-gx/ 下保留的旧版本目录与"
+          " ~/.local/bin 的 .bak-gx-* 备份。")
 
 
 def main() -> None:
@@ -411,6 +430,9 @@ def main() -> None:
     b.add_argument("--linux-only", action="store_true", help="skip windows bundle")
     s = sub.add_parser("sync", help="diff/copy machine state back into dotfiles/")
     s.add_argument("--write", action="store_true", help="copy changes back")
+    s.add_argument("--check", action="store_true",
+                   help="read-only; exit 1 when unexpected differences exist "
+                        "(used by make framework-check, WEZ-CFG-02)")
     u = sub.add_parser("upgrade",
                        help="build in container + user-level install + verify")
     u.add_argument("--use-local", action="store_true",

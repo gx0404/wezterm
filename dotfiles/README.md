@@ -13,7 +13,7 @@
 | `fonts/` | JetBrainsMono Nerd Font 6 字重 + Noto Sans CJK Regular/Bold | `~/.local/share/fonts/wezterm-gx/` |
 | `templates/` | desktop entry / wrapper / zshrc 片段模板（占位符渲染） | 见 install.sh |
 | `assets/` | 图标 | `~/.local/share/icons/wezterm-gx/` |
-| `install.sh` | Linux 用户级安装器（幂等、无 sudo、`--check` 干跑） | — |
+| `install.sh` | Linux 用户级安装器（幂等、无 sudo、`--check` 干跑；默认不触碰 `~/.zshrc`——cursor-mode 块归 oh-my-zsh gx 层，无 gx 层的机器用 `--zshrc` 显式追加） | — |
 | `install.ps1` | Windows 用户级部署脚本 | `%LOCALAPPDATA%`、`%APPDATA%` |
 
 Windows 注意：配置装到 `%USERPROFILE%\.config\wezterm`（源码确认与 Linux 同一查找
