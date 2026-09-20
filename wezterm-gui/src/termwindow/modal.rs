@@ -11,6 +11,15 @@ use wezterm_term::{KeyCode, KeyModifiers};
 /// Modal implementations must ignore mouse events routed with this row.
 pub const MODAL_CHROME_ROW: usize = usize::MAX;
 
+/// fork: sentinel band for clickable section tabs in the settings
+/// overlay (WZ-09). Rows in [MODAL_SECTION_BASE, MODAL_SECTION_BASE +
+/// MODAL_SECTION_MAX) identify a section tab by index; data rows are
+/// small indices and chrome rows use MODAL_CHROME_ROW, so the band must
+/// never collide with either.
+pub const MODAL_SECTION_BASE: usize = usize::MAX - 64;
+pub const MODAL_SECTION_MAX: usize = 16;
+const _: () = assert!(MODAL_SECTION_BASE + MODAL_SECTION_MAX <= MODAL_CHROME_ROW);
+
 pub trait Modal: Downcast {
     fn perform_assignment(
         &self,

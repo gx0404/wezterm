@@ -49,6 +49,15 @@ fn us_layout_shift(s: &str) -> String {
         "=" => "+".to_string(),
         "-" => "_".to_string(),
         "'" => "\"".to_string(),
+        // fork: cover the remaining US punctuation so SHIFT-punct
+        // default assignments (eg: CTRL|SHIFT+comma) are reachable;
+        // without these the shifted form (eg: '<') never matched.
+        "," => "<".to_string(),
+        "." => ">".to_string(),
+        "/" => "?".to_string(),
+        ";" => ":".to_string(),
+        "\\" => "|".to_string(),
+        "`" => "~".to_string(),
         s if s.len() == 1 => s.to_ascii_uppercase(),
         s => s.to_string(),
     }

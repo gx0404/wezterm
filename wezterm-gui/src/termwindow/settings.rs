@@ -19,7 +19,7 @@
 //! `UIItemType::Modal(row)` 进 hit map，与右键菜单共用鼠标通道。
 
 use crate::termwindow::box_model::*;
-use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
+use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW, MODAL_SECTION_BASE, MODAL_SECTION_MAX};
 use crate::termwindow::{DimensionContext, TermWindow, UIItemType};
 use config::i18n::{tr, UiLanguage};
 use config::keyassignment::KeyAssignment;
@@ -44,7 +44,7 @@ const VISIBLE_ROWS_HEIGHT_PERMILLE: usize = 600;
 /// 见 `SettingsOverlay::chrome_rows`
 const FIXED_CHROME_ROWS: usize = 3;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Section {
     Language,
     Appearance,
@@ -69,6 +69,10 @@ impl Section {
         }
     }
 }
+
+// WZ-09: the clickable tab band must be wide enough for every section;
+// adding a fifth section without widening MODAL_SECTION_MAX fails here.
+const _: () = assert!(Section::ALL.len() <= MODAL_SECTION_MAX);
 
 /// One selectable row in the current section
 #[derive(Clone)]
@@ -276,6 +280,37 @@ impl SettingsOverlay {
         if self.select_section(delta) {
             term_window.set_preview_palette(None);
         }
+        // WZ-18: land on the row holding the effective value
+        self.locate_current();
+    }
+
+    /// 点击分区 tab（WZ-09）：绝对索引版本，与 `switch_section` 共用
+    /// 同一段状态收敛。
+    fn click_section(&self, target: usize, term_window: &mut TermWindow) {
+        if self.select_section_index(target) {
+            term_window.set_preview_palette(None);
+        }
+        self.locate_current();
+    }
+
+    /// WZ-18：把选中行定位到当前生效值所在行（语言/配色分区；其它
+    /// 分区行数少，定位到首行），并收敛滚动窗口让它可见。
+    fn locate_current(&self) {
+        let items = self.visible_items();
+        let config = current_config();
+        let idx = locate_current_in(&items, &config);
+        self.selected.replace(idx);
+        // 复用滚动窗口收敛逻辑把当前值纳入可视区
+        self.move_selection(0);
+        // WZ-18：行预算缓存可能来自上一分区（chrome 行数不同，见
+        // `visible_rows` 的已知取舍注释），贴末行的当前值会落在下一帧
+        // 的渲染窗口之外；往上让一行保它在窗内。
+        let max_rows = (*self.visible_rows.borrow()).max(1);
+        let budget = max_rows.saturating_sub(1).max(1);
+        let mut top_row = self.top_row.borrow_mut();
+        if idx > 0 && idx >= *top_row + budget {
+            *top_row = idx + 1 - budget;
+        }
     }
 
     /// 换分区 = 丢掉本分区的全部易失状态：过滤文本、选中行、滚动位置，
@@ -286,14 +321,30 @@ impl SettingsOverlay {
     /// 返回 true 表示窗口的预览调色板还需要还原。还原要 `TermWindow`
     /// （单测里造不出来），拆出去这条口径才测得到。
     fn select_section(&self, delta: isize) -> bool {
-        let had_preview = self.take_preview();
         let all = Section::ALL;
         let idx = all
             .iter()
             .position(|s| *s == *self.section.borrow())
             .unwrap_or(0);
         let next = (idx as isize + delta).rem_euclid(all.len() as isize) as usize;
-        self.section.replace(all[next]);
+        self.select_section_index(next)
+    }
+
+    /// WZ-09：按绝对索引切分区；点当前分区不重置浏览状态，只兜底丢预览。
+    fn select_section_index(&self, target: usize) -> bool {
+        if target >= Section::ALL.len() {
+            return false;
+        }
+        if target
+            == Section::ALL
+                .iter()
+                .position(|s| *s == *self.section.borrow())
+                .unwrap_or(0)
+        {
+            return self.take_preview();
+        }
+        let had_preview = self.take_preview();
+        self.section.replace(Section::ALL[target]);
         self.selected.replace(0);
         self.top_row.replace(0);
         // the filter only applies to Appearance
@@ -486,25 +537,54 @@ impl SettingsOverlay {
                 .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
         );
 
-        // Section tab row
+        // Section tab row (WZ-09): one child element per section so each
+        // tab is individually addressable (click targets via the
+        // MODAL_SECTION_BASE sentinel band) and the active section is
+        // rendered with the same inverted colors as a selected data row.
         let section = *self.section.borrow();
-        let mut tab_text = String::new();
+        let mut tab_children = vec![];
         for (idx, s) in Section::ALL.iter().enumerate() {
             if idx > 0 {
-                tab_text.push_str("  |  ");
+                tab_children.push(
+                    Element::new(&font, ElementContent::Text("  |  ".to_string())).colors(
+                        ElementColors {
+                            border: BorderColor::default(),
+                            bg: LinearRgba::TRANSPARENT.into(),
+                            text: fg.clone(),
+                        },
+                    ),
+                );
             }
-            tab_text.push_str(&tr(s.title()));
+            let active = *s == section;
+            tab_children.push(
+                Element::new(&font, ElementContent::Text(tr(s.title()).into_owned()))
+                    .colors(ElementColors {
+                        border: BorderColor::default(),
+                        bg: if active {
+                            fg.clone()
+                        } else {
+                            LinearRgba::TRANSPARENT.into()
+                        },
+                        text: if active { bg.clone() } else { fg.clone() },
+                    })
+                    .padding(BoxDimension {
+                        left: Dimension::Cells(0.5),
+                        right: Dimension::Cells(0.5),
+                        top: Dimension::Cells(0.),
+                        bottom: Dimension::Cells(0.),
+                    })
+                    .item_type(UIItemType::Modal(MODAL_SECTION_BASE + idx)),
+            );
         }
-        let _ = section;
         rows.push(
-            Element::new(&font, ElementContent::Text(tab_text))
+            Element::new(&font, ElementContent::Children(tab_children))
                 .colors(ElementColors {
                     border: BorderColor::default(),
                     bg: LinearRgba::TRANSPARENT.into(),
                     text: fg.clone(),
                 })
                 .padding(BoxDimension {
-                    left: Dimension::Cells(0.5),
+                    left: Dimension::Cells(0.),
                     right: Dimension::Cells(0.5),
                     top: Dimension::Cells(0.),
                     bottom: Dimension::Cells(0.1),
@@ -699,6 +779,22 @@ fn preview_palette_for_scheme(
 /// 只依赖传入的 `config`（`current_config()` 取来的、刚落地的那份），签名里
 /// 没有 `TermWindow`——窗口那份 ConfigHandle 因此不可能再被误读成当前值，
 /// 连续两次确认必然从上一次刚写下的值继续推（WZ-20 的回归护栏）。
+/// WZ-18：在可见行里找「当前生效值」的行号；找不到（被过滤/无对应
+/// 值的分区）回 0。纯函数，不依赖 TermWindow。
+fn locate_current_in(items: &[Item], config: &Config) -> usize {
+    for (idx, item) in items.iter().enumerate() {
+        let is_current = match item {
+            Item::LanguageChoice(lang, _) => *lang == config.language,
+            Item::Scheme(name) => config.color_scheme.as_deref() == Some(name.as_str()),
+            _ => false,
+        };
+        if is_current {
+            return idx;
+        }
+    }
+    0
+}
+
 fn pending_write(item: &Item, config: &Config) -> (&'static str, Value) {
     match item {
         Item::LanguageChoice(lang, _) => ("language", lang.to_dynamic()),
@@ -860,6 +956,16 @@ impl Modal for SettingsOverlay {
         term_window: &mut TermWindow,
     ) -> anyhow::Result<()> {
         use ::window::MouseEventKind as WMEK;
+        // WZ-09: section tabs live in the MODAL_SECTION_BASE sentinel band;
+        // a left click switches to that section (same state convergence as
+        // the Tab key), hovers and other presses are simply swallowed.
+        if (MODAL_SECTION_BASE..MODAL_SECTION_BASE + MODAL_SECTION_MAX).contains(&row) {
+            if let WMEK::Press(::window::MousePress::Left) = event.kind {
+                self.click_section(row - MODAL_SECTION_BASE, term_window);
+                term_window.invalidate_modal();
+            }
+            return Ok(());
+        }
         // chrome rows (title/footer/filter) swallow the event; an
         // out-of-range row must never move the selection
         if row == MODAL_CHROME_ROW {
@@ -958,6 +1064,8 @@ impl Modal for SettingsOverlay {
 /// Convenience: open the settings overlay modally
 pub fn open_settings(term_window: &mut TermWindow) {
     let modal = Rc::new(SettingsOverlay::new());
+    // WZ-18: open with the selection on the row holding the effective value
+    modal.locate_current();
     term_window.set_modal(modal);
     if let Some(window) = term_window.window.as_ref() {
         window.invalidate();
@@ -1289,5 +1397,66 @@ mod tests {
             classify_key(KeyCode::Char('q'), KeyModifiers::ALT, false),
             SettingsKey::PassThrough
         );
+    }
+
+    #[test]
+    fn locate_current_finds_the_effective_value_row() {
+        // WZ-18：打开/切分区后选中行落在当前生效值上
+        let mut config = Config::default_config();
+        config.language = UiLanguage::En;
+        let items = vec![
+            Item::LanguageChoice(UiLanguage::ZhCn, "中文"),
+            Item::LanguageChoice(UiLanguage::En, "English"),
+        ];
+        assert_eq!(locate_current_in(&items, &config), 1);
+
+        config.color_scheme = Some("Batman".to_string());
+        let schemes = vec![
+            Item::Scheme("AdventureTime".to_string()),
+            Item::Scheme("Batman".to_string()),
+            Item::Scheme("Catppuccin Mocha".to_string()),
+        ];
+        assert_eq!(locate_current_in(&schemes, &config), 1);
+
+        // 未知值/无对应行回 0；布尔与字号分区无所谓定位
+        config.color_scheme = Some("No Such Scheme".to_string());
+        assert_eq!(locate_current_in(&schemes, &config), 0);
+        let toggles = vec![Item::BoolToggle {
+            label: "Right-click menu",
+            key: "mouse_right_click_menu",
+        }];
+        assert_eq!(locate_current_in(&toggles, &config), 0);
+    }
+
+    #[test]
+    fn clicking_the_active_section_tab_keeps_browsing_state() {
+        // WZ-09：点当前分区 tab 不重置选中/滚动；点其它分区才收敛
+        let overlay = SettingsOverlay::new();
+        overlay.select_section(1); // Language -> Appearance
+        overlay.selected.replace(3);
+        overlay.top_row.replace(2);
+        assert!(
+            !overlay.select_section_index(1),
+            "点当前分区且无预览时不该要求还原"
+        );
+        assert_eq!(*overlay.selected.borrow(), 3);
+        assert_eq!(*overlay.top_row.borrow(), 2);
+
+        assert!(!overlay.select_section_index(2)); // -> Interaction
+        assert_eq!(*overlay.section.borrow(), Section::Interaction);
+        assert_eq!(*overlay.selected.borrow(), 0);
+        assert_eq!(*overlay.top_row.borrow(), 0);
+
+        // 越界索引安全拒绝
+        assert!(!overlay.select_section_index(usize::MAX));
+        assert!(!overlay.select_section_index(Section::ALL.len()));
+    }
+
+    #[test]
+    fn section_tabs_fit_the_sentinel_band() {
+        // WZ-09：分区数超出哨兵区间会在编译期被 const 断言拦下；
+        // 运行时再守一遍鼠标路由使用的区间上界
+        assert!(Section::ALL.len() <= MODAL_SECTION_MAX);
+        assert!(MODAL_SECTION_BASE + Section::ALL.len() <= MODAL_CHROME_ROW);
     }
 }

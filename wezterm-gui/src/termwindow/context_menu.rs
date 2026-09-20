@@ -369,7 +369,6 @@ impl ContextMenu {
             },
             &element,
         )?;
-
         Ok(vec![computed])
     }
 }

@@ -39,6 +39,17 @@ pub enum TabBarItem {
     WindowButton(IntegratedTitleButton),
 }
 
+/// fork: the main-menu button's label. Keep the text and its display
+/// width in one place: the hover zone, the tab-width budget and the
+/// rendered line must agree (WZ-13/WZ-14).
+const MENU_BUTTON_TEXT: &str = " ☰ ";
+
+/// Display width of `MENU_BUTTON_TEXT` in cells (☰ is 3 bytes and
+/// double-width; the two spaces are one cell each, 4 cells total).
+fn menu_button_display_cells() -> usize {
+    unicode_column_width(MENU_BUTTON_TEXT, None)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TabEntry {
     pub item: TabBarItem,
@@ -495,8 +506,16 @@ impl TabBarState {
         let titles_len: usize = tab_titles.iter().map(|s| s.len).sum();
         let number_of_tabs = tab_titles.len();
 
-        let available_cells =
-            title_width.saturating_sub(number_of_tabs.saturating_sub(1) + new_tab.len());
+        // WZ-14: the tab width budget must also reserve the ☰ menu
+        // button, otherwise a crowded bar pushes it (and the right
+        // status area) past the right edge of the line.
+        let menu_button_cells = if config.show_menu_button_in_tab_bar {
+            menu_button_display_cells()
+        } else {
+            0
+        };
+        let available_cells = title_width
+            .saturating_sub(number_of_tabs.saturating_sub(1) + new_tab.len() + menu_button_cells);
         let tab_width_max = if config.use_fancy_tab_bar || available_cells >= titles_len {
             // We can render each title with its full width
             usize::max_value()
@@ -627,8 +646,9 @@ impl TabBarState {
 
         // Main menu button (fork): opens the herdr-style main menu
         if config.show_menu_button_in_tab_bar {
-            let menu_text = " ☰ ";
-            let hover = is_tab_hover(mouse_x, x, menu_text.len());
+            // WZ-13: the hover zone must use the rendered cell width;
+            // " ☰ " is 5 bytes but only MENU_BUTTON_DISPLAY_CELLS wide.
+            let hover = is_tab_hover(mouse_x, x, menu_button_display_cells());
             let mut attrs = if config.use_fancy_tab_bar {
                 CellAttributes::default()
             } else {
@@ -637,7 +657,7 @@ impl TabBarState {
             if hover {
                 attrs.set_reverse(true);
             }
-            let menu_button = parse_status_text(menu_text, attrs);
+            let menu_button = parse_status_text(MENU_BUTTON_TEXT, attrs);
             let button_start = x;
             let width = menu_button.len();
 
@@ -856,4 +876,21 @@ pub fn parse_status_text(text: &str, default_cell: CellAttributes) -> Line {
     });
     flush_print(&mut print_buffer, &mut cells, &pen);
     Line::from_cells(cells, SEQ_ZERO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_button_width_is_cells_not_bytes() {
+        // WZ-13: " ☰ " is 5 bytes but 4 cells (☰ is double-width); the
+        // hover zone and the tab-width budget must agree on the cell
+        // width, not the byte length
+        assert_eq!(MENU_BUTTON_TEXT.len(), 5);
+        assert_eq!(menu_button_display_cells(), 4);
+        // hover zone spans exactly the rendered cells
+        assert!(is_tab_hover(Some(3), 0, menu_button_display_cells()));
+        assert!(!is_tab_hover(Some(4), 0, menu_button_display_cells()));
+    }
 }

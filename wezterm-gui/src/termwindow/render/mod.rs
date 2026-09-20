@@ -640,6 +640,15 @@ impl crate::TermWindow {
             cursor_shape,
             visibility,
         ) {
+            // fork (W11): a selected cell keeps its selection colors when
+            // the window is unfocused or the pane inactive — even when it
+            // is the cursor cell; it used to fall through to the plain
+            // colors arm and the highlight vanished.
+            (true, false, _, _) => (
+                params.selection_fg.when_fully_transparent(params.fg_color),
+                params.selection_bg,
+                params.cursor_bg,
+            ),
             // Selected text overrides colors
             (true, _, _, CursorVisibility::Hidden) => (
                 params.selection_fg.when_fully_transparent(params.fg_color),

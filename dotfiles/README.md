@@ -70,7 +70,7 @@ GX_SYNC_WRITE=1 make gx-sync        # 把本机改动收回 dotfiles/
 |---|---|
 | `Leader .` / `Leader ,` | 下一张 / 上一张壁纸 |
 | `Leader /` | 随机壁纸 |
-| `Leader Shift+/`（即 `Leader ?`） | 打开壁纸选择器 |
+| `Leader i` | 打开壁纸选择器 |
 | `Leader b` | 切换纯色专注模式与壁纸 |
 
 标签直达 `Leader 1..9`；`Alt+w` 关闭 pane 改为先弹确认。浮层入口在

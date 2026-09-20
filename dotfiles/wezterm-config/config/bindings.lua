@@ -173,8 +173,10 @@ local keys = {
       end),
    },
    {
-      key = [[/]],
-      mods = 'LEADER|SHIFT',
+      -- 壁纸选择器；不用 LEADER|SHIFT+/：X11 会把 Shift+/ 解成 '?'，
+      -- 用户绑定没有 shifted 变体合成（上游 #1906），物理不可达。
+      key = 'i',
+      mods = 'LEADER',
       action = act.InputSelector({
          title = 'InputSelector: Select Background',
          choices = backdrops:choices(),

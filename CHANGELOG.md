@@ -120,6 +120,31 @@
 
 ### Fixed
 
+- 设置页分区 tab 可辨识可点击（WZ-09）与打开定位当前值（WZ-18）：
+  tab 行从单一字符串拆为每分区一个子 Element，当前分区用数据行
+  选中态同款反显；分区点击经 `MODAL_SECTION_BASE` 哨兵区间路由
+  （加 const 断言与数据行/chrome 哨兵不重叠），点击当前分区不重置
+  浏览状态。打开与切换分区时选中行落到当前生效值（语言/配色），
+  滚动窗口收敛时给末行留一行余量——行预算缓存来自上一分区
+  （chrome 行数不同），贴末行的当前值会被下一帧裁掉。
+- retro 标签栏 ☰ 按钮悬停区与宽度预算改用显示列宽（WZ-13/14）：
+  悬停区原按 `" ☰ "` 字节长（5）算、实际渲染 4 列（☰ 双宽），悬停
+  命中偏右一格；标签宽度预算未扣 ☰，标签多时 ☰ 与右状态区被挤出
+  右缘。统一 `menu_button_display_cells()` 真源（悬停/预算/渲染三处
+  共用），加单测钉住字节数与列数差异。
+- 修复选区内的光标单元格在窗口失焦时丢失选中高亮（W11）：
+  `compute_cell_fg_bg` 的配色 match 里，光标格+失焦落到普通色分支；
+  新增「选中且非聚焦活动」分支优先返回选中色（Xvfb 双窗口截图：
+  失焦窗口选区行与光标格高亮均保持）。
+- `us_layout_shift` 补全 US 标点映射（`,`→`<`、`/`→`?` 等六个）：
+  X11 把 SHIFT+标点解成 shifted 字符（如 `<`），默认键 permute 变体
+  合成缺少映射导致 `CTRL|SHIFT+,`（OpenSettings）与 `CTRL|SHIFT+/`
+  （ShowKeybinds）等 SHIFT+标点默认键物理不可达（上游 #1906 同族）。
+  壁纸选择器键位因此从 `Leader Shift+/` 改为 `Leader i`（用户 Lua
+  绑定无变体合成，shifted 标点形式同样不可达）。
+- WZ-12 核验驳回不改代码：实测右键点击 (640,450) 菜单
+  actual_bounds=(581,146,246×308)，翻转与 clamp 是窗口小于屏幕时
+  的正确行为，padding 叠加 ≤11px 不构成贴底裁切（探测日志留档）。
 - 右键上下文菜单接入正规 mouse binding 机制（WZ-05/WEZ-INT-03）：
   原先 `mouse_event_terminal` 在绑定匹配之前硬拦截右键 Press，绕过
   用户 `mouse_bindings` 与 `bypass_mouse_reporting_modifiers`。改为新增
