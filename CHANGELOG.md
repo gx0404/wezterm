@@ -236,6 +236,15 @@
   `Alt+/` 随机、`Ctrl+Alt+/` 选择、`Alt+b` 切换纯色专注模式；
   避免壁纸控制跟随通用 `Ctrl+Shift` 修饰键变更。同步本机配置、
   `dotfiles/wezterm-config/` 与 Oh My Zsh 的 `gx/wezterm/` 快照。
+- 壁纸与标签直达键迁出裸 Alt 层（GX-10）：裸 `Alt+.` / `Alt+b` 是
+  readline 标准键（末参数插入、退词），GUI 截获后永不下发 PTY；`Alt+w`
+  还曾无确认销毁 pane。壁纸五键（随机/上一张/下一张/选择器/专注模式）
+  改挂 leader（`Ctrl+Shift+Space` 前缀），分屏 `Alt+\` 系并入统一的
+  `Ctrl+Shift(+Alt)+\`，标签直达 `Alt+1..9` 改 `Leader 1..9`，`Alt+w`
+  保留但 `confirm=true`。壁纸键本是 `action_callback`，不出现在快捷键
+  速查浮层（改前改后一致）；浮层的内建命令键位显示不受影响，无需另改。
+  仅改 `dotfiles/wezterm-config/config/bindings.lua`；Oh My Zsh 侧
+  `gx/wezterm/config/bindings.lua` 镜像由 ohmyzsh 车道同步。
 
 ## 0.1.0(TBD)
 

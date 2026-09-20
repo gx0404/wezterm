@@ -60,17 +60,21 @@ GX_SYNC_WRITE=1 make gx-sync        # 把本机改动收回 dotfiles/
 收录时提交进仓库的插件/字体不随 sync 变动；升级插件属于重新快照，
 须更新 PROVENANCE.md 的 pin 记录。
 
-## 壁纸快捷键（Linux / Windows）
+## 壁纸快捷键（Leader 层）
+
+壁纸键位统一挂在宿主 leader（`Ctrl+Shift+Space`，1 秒超时）之下，不再占用裸
+`Alt` 组合——裸 `Alt+.` / `Alt+b` 是 readline 标准键（末参数插入、退词），被 GUI
+截获后 shell 不可用（GX-10）。
 
 | 快捷键 | 功能 |
 |---|---|
-| `Alt+.` / `Alt+,` | 下一张 / 上一张壁纸 |
-| `Alt+/` | 随机壁纸 |
-| `Ctrl+Alt+/` | 打开壁纸选择器 |
-| `Alt+b` | 切换纯色专注模式与壁纸 |
+| `Leader .` / `Leader ,` | 下一张 / 上一张壁纸 |
+| `Leader /` | 随机壁纸 |
+| `Leader Shift+/`（即 `Leader ?`） | 打开壁纸选择器 |
+| `Leader b` | 切换纯色专注模式与壁纸 |
 
-macOS 对应使用 `Super` / `Ctrl+Super`。Linux 的壁纸快捷键独立于常用终端功能的
-`Ctrl+Shift` 组合；修改后同步到 Oh My Zsh 仓库的 `gx/wezterm/config/bindings.lua`。
+标签直达 `Leader 1..9`；`Alt+w` 关闭 pane 改为先弹确认。修改后同步到
+Oh My Zsh 仓库的 `gx/wezterm/config/bindings.lua`。
 
 ## 已知边界
 

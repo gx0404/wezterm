@@ -24,6 +24,11 @@
 - 2026-09-16 增量同步：`config/bindings.lua` 恢复 Linux 壁纸控制的
   `Alt+.` / `Alt+,` / `Alt+/` / `Ctrl+Alt+/` / `Alt+b`，与本机配置及
   Oh My Zsh 仓库 `gx/wezterm/` 同步；常用终端功能继续使用 `Ctrl+Shift`。
+- 2026-09-21 GX-10：`config/bindings.lua` 壁纸五键（随机/上一张/下一张/
+  选择器/专注模式）迁入 leader 层（`Ctrl+Shift+Space` 前缀），分屏 `Alt+\`
+  系并入 `Ctrl+Shift(+Alt)+\`，标签直达 `Alt+1..9` 改 `Leader 1..9`，
+  `Alt+w` 关闭 pane 改 `confirm=true`——裸 Alt 组合抢走 readline 标准键
+  （`Alt+.` 末参数、`Alt+b` 退词）且无确认销毁 pane。
 
 ## plugins/
 
