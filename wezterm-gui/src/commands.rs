@@ -2252,7 +2252,9 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         OpenSettings => CommandDef {
             brief: "Open Settings".into(),
             doc: "Shows the settings overlay".into(),
-            keys: vec![],
+            // fork: WZ-16/WEZ-UX-01 default keys so the overlays stay
+            // reachable when an app has grabbed the mouse
+            keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), ",".into())],
             args: &[ArgType::ActiveWindow],
             menubar: &["WezTerm"],
             icon: Some("md_cog"),
@@ -2260,7 +2262,7 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         ShowMainMenu => CommandDef {
             brief: "Show Main Menu".into(),
             doc: "Shows the main menu overlay".into(),
-            keys: vec![],
+            keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "m".into())],
             args: &[ArgType::ActiveWindow],
             menubar: &["WezTerm"],
             icon: Some("md_menu"),
@@ -2268,10 +2270,18 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
         ShowKeybinds => CommandDef {
             brief: "Show Keybindings".into(),
             doc: "Shows the keybinding cheat sheet overlay".into(),
-            keys: vec![],
+            keys: vec![(Modifiers::CTRL.union(Modifiers::SHIFT), "/".into())],
             args: &[ArgType::ActiveWindow],
             menubar: &["WezTerm"],
             icon: Some("md_keyboard"),
+        },
+        ShowPaneContextMenu => CommandDef {
+            brief: "Show Pane Context Menu".into(),
+            doc: "Shows the pane context menu (split/zoom/copy/paste/close)".into(),
+            keys: vec![],
+            args: &[ArgType::ActivePane],
+            menubar: &["Shell"],
+            icon: None,
         },
     })
 }
@@ -2319,6 +2329,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         OpenSettings,
         ShowMainMenu,
         ShowKeybinds,
+        ShowPaneContextMenu,
         // ----------------- View
         DecreaseFontSize,
         IncreaseFontSize,

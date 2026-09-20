@@ -653,6 +653,10 @@ pub enum KeyAssignment {
     ShowMainMenu,
     /// fork: open the keybinding cheat-sheet overlay
     ShowKeybinds,
+    /// fork: open the pane context menu (WZ-05/WEZ-INT-03); when triggered
+    /// from a mouse binding it opens at the click position, otherwise
+    /// centered in the window
+    ShowPaneContextMenu,
     ActivateWindow(usize),
     ActivateWindowRelative(isize),
     ActivateWindowRelativeNoWrap(isize),

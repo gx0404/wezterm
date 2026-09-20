@@ -120,6 +120,21 @@
 
 ### Fixed
 
+- 右键上下文菜单接入正规 mouse binding 机制（WZ-05/WEZ-INT-03）：
+  原先 `mouse_event_terminal` 在绑定匹配之前硬拦截右键 Press，绕过
+  用户 `mouse_bindings` 与 `bypass_mouse_reporting_modifiers`。改为新增
+  `KeyAssignment::ShowPaneContextMenu` + `InputMap` 默认注册
+  `{Down streak1 Right, mods=NONE, mouse_reporting=false, region=Pane}`
+  （`mouse_right_click_menu=false` 时不注册）；菜单在点击位置弹出
+  （键盘触发时窗口居中）。语义：非抓取 pane 裸右键弹菜单；应用抓取
+  鼠标时裸右键透传应用，Shift+右键（bypass 翻转）弹菜单——抓取态下
+  菜单从「不可达」变为「Shift 可达」。Xvfb 四场景截图核对通过
+  （含 SGR 鼠标上报透传实证）。
+- 主菜单/设置/快捷键三个浮层补默认键位（WZ-16/WEZ-UX-01）：
+  `Ctrl+Shift+M` / `Ctrl+Shift+,` / `Ctrl+Shift+/`（应用抓鼠标时
+  键盘入口可达；fork dotfiles 因 `disable_default_key_bindings`
+  另在 leader 层绑定 `Leader m` / `Leader s` / `Leader k`）。
+  `mouse_region_roundtrip` 测试补 `MenuButton` 变体（WEZ-TEST-01）。
 - 修复安装链的版本漂移与静默覆盖（WEZ-BUILD-01/02、WEZ-HYG-02）：
   `gx_install.sh` 曾「target/release 存在即复用」，实测把落后 HEAD 数天
   的混版二进制装进版本目录（`wezterm` 与 `wezterm-gui` 版本串都不同），

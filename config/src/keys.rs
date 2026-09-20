@@ -327,6 +327,8 @@ mod tests {
             MouseRegion::BelowScrollThumb,
             MouseRegion::Split,
             MouseRegion::Modal,
+            // WEZ-TEST-01: fork-added region must roundtrip too
+            MouseRegion::MenuButton,
         ] {
             let value = region.to_dynamic();
             assert_eq!(

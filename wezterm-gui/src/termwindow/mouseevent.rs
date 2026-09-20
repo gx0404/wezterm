@@ -1171,21 +1171,10 @@ impl super::TermWindow {
             CursorIcon::Text
         }));
 
-        // herdr/tmux style: right click in the terminal area opens a
-        // pane context menu, unless the application has grabbed the
-        // mouse (in which case the event belongs to the application)
-        if let WMEK::Press(MousePress::Right) = event.kind {
-            if !pane.is_mouse_grabbed() && self.config.mouse_right_click_menu {
-                crate::termwindow::context_menu::open_context_menu(
-                    self,
-                    crate::termwindow::context_menu::ContextMenu::pane_menu(
-                        event.coords.x as f32,
-                        event.coords.y as f32,
-                    ),
-                );
-                return;
-            }
-        }
+        // fork: the pane context menu is a regular mouse binding now
+        // (`KeyAssignment::ShowPaneContextMenu` via InputMap defaults,
+        // WZ-05/WEZ-INT-03); no hard interception here, so user
+        // mouse_bindings and bypass_mouse_reporting_modifiers apply.
 
         // Preserve the historical early-return for zero-delta wheel
         // events: they must not fall through to the pane as input.
@@ -1234,6 +1223,18 @@ impl super::TermWindow {
                 };
 
                 if let Some(action) = self.input_map.lookup_mouse(event_trigger_type, mouse_mods) {
+                    // fork: the pane context menu opens at the click
+                    // position rather than window-centered (WZ-05)
+                    if matches!(action, KeyAssignment::ShowPaneContextMenu) {
+                        crate::termwindow::context_menu::open_context_menu(
+                            self,
+                            crate::termwindow::context_menu::ContextMenu::pane_menu(
+                                event.coords.x as f32,
+                                event.coords.y as f32,
+                            ),
+                        );
+                        return;
+                    }
                     self.perform_key_assignment(&pane, &action).ok();
                     return;
                 }

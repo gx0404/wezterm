@@ -96,6 +96,9 @@ PAIRS = [
     ("Shows the main menu overlay", "显示主菜单浮层"),
     ("Show Keybindings", "查看快捷键"),
     ("Shows the keybinding cheat sheet overlay", "显示快捷键速查浮层"),
+    ("Show Pane Context Menu", "打开窗格右键菜单"),
+    ("Shows the pane context menu (split/zoom/copy/paste/close)",
+     "显示窗格右键菜单（分屏/缩放/复制/粘贴/关闭）"),
     ("Keybindings", "快捷键"),
     ("↑↓ scroll  Esc close", "↑↓ 滚动  Esc 关闭"),
     # ---- CLI 帮助（clap 运行时本地化）----

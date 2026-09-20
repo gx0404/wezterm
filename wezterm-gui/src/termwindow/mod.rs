@@ -3345,6 +3345,19 @@ impl TermWindow {
             ShowKeybinds => {
                 crate::termwindow::keybinds::open_keybinds(self);
             }
+            ShowPaneContextMenu => {
+                // fork: keyboard-triggered pane context menu opens centered;
+                // mouse-triggered opens at the click position (handled in
+                // mouseevent.rs before dispatching here)
+                let dims = self.dimensions;
+                crate::termwindow::context_menu::open_context_menu(
+                    self,
+                    crate::termwindow::context_menu::ContextMenu::pane_menu(
+                        dims.pixel_width as f32 / 2.,
+                        dims.pixel_height as f32 / 2.,
+                    ),
+                );
+            }
             PromptInputLine(args) => self.show_prompt_input_line(args),
             InputSelector(args) => self.show_input_selector(args),
             Confirmation(args) => self.show_confirmation(args),

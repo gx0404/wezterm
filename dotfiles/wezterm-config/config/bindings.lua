@@ -254,6 +254,11 @@ local keys = {
       }),
    },
 
+   -- 浮层入口（WZ-16/WEZ-UX-01）：herdr 抓鼠标时键盘仍可达。
+   { key = 'k', mods = 'LEADER', action = act.ShowKeybinds },
+   { key = 'm', mods = 'LEADER', action = act.ShowMainMenu },
+   { key = 's', mods = 'LEADER', action = act.OpenSettings },
+
    -- plugins: workspace switcher (智能项目切换)
    {
       key = 's',

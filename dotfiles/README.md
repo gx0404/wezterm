@@ -73,8 +73,9 @@ GX_SYNC_WRITE=1 make gx-sync        # 把本机改动收回 dotfiles/
 | `Leader Shift+/`（即 `Leader ?`） | 打开壁纸选择器 |
 | `Leader b` | 切换纯色专注模式与壁纸 |
 
-标签直达 `Leader 1..9`；`Alt+w` 关闭 pane 改为先弹确认。修改后同步到
-Oh My Zsh 仓库的 `gx/wezterm/config/bindings.lua`。
+标签直达 `Leader 1..9`；`Alt+w` 关闭 pane 改为先弹确认。浮层入口在
+leader 层：`Leader m` 主菜单、`Leader s` 设置、`Leader k` 快捷键速查。
+修改后同步到 Oh My Zsh 仓库的 `gx/wezterm/config/bindings.lua`。
 
 ## 已知边界
 

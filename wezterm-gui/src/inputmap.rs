@@ -368,6 +368,28 @@ impl InputMap {
                     StartWindowDrag
                 ],
             );
+
+            // fork: pane context menu on plain right-click in the pane area
+            // (WZ-05/WEZ-INT-03). mouse_reporting=false keeps the event with
+            // the pane's application when it grabbed the mouse; the
+            // bypass_mouse_reporting_modifiers key (SHIFT by default) flips
+            // reporting to false and thus reaches this menu while grabbed.
+            // mouse_right_click_menu=false leaves no default registered.
+            if config.mouse_right_click_menu {
+                m!([
+                    MouseEventTriggerMods {
+                        mods: Modifiers::NONE,
+                        mouse_reporting: false,
+                        alt_screen: MouseEventAltScreen::Any,
+                        region: MouseRegion::Pane,
+                    },
+                    MouseEventTrigger::Down {
+                        streak: 1,
+                        button: MouseButton::Right
+                    },
+                    ShowPaneContextMenu
+                ]);
+            }
         }
 
         keys.default
@@ -944,6 +966,112 @@ mod tests {
         // And it does not match chrome lookups either
         assert!(im
             .lookup_mouse_in_region(left_down(2), mods(MouseRegion::Any), MouseRegion::Tab)
+            .is_none());
+    }
+
+    fn right_down() -> MouseEventTrigger {
+        MouseEventTrigger::Down {
+            streak: 1,
+            button: MouseButton::Right,
+        }
+    }
+
+    fn config_with_overrides(pairs: Vec<(String, wezterm_dynamic::Value)>) -> ConfigHandle {
+        // overridden_config always loads from the user's config file;
+        // point it at a minimal temp config instead so the ambient
+        // ~/.config/wezterm (whose plugins may not even initialize in
+        // this environment) is never evaluated. nextest gives each test
+        // its own process, so env mutation is safe here.
+        let dir = std::env::temp_dir().join(format!(
+            "wezterm-inputmap-test-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("wezterm.lua"), "return {}\n").unwrap();
+        std::env::set_var("WEZTERM_CONFIG_FILE", dir.join("wezterm.lua"));
+        let obj = pairs
+            .into_iter()
+            .map(|(k, v)| (wezterm_dynamic::Value::String(k), v))
+            .collect();
+        let result = config::overridden_config(&wezterm_dynamic::Value::Object(obj));
+        std::env::remove_var("WEZTERM_CONFIG_FILE");
+        std::env::remove_var("WEZTERM_CONFIG_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+        result.unwrap()
+    }
+
+    #[test]
+    fn default_right_click_binds_pane_context_menu() {
+        // WZ-05/WEZ-INT-03: the pane context menu is a regular default
+        // mouse binding (region=Pane, mouse_reporting=false)
+        let im = InputMap::default_input_map();
+        assert!(matches!(
+            im.lookup_mouse(right_down(), mods(MouseRegion::Any)),
+            Some(KeyAssignment::ShowPaneContextMenu)
+        ));
+    }
+
+    #[test]
+    fn right_click_menu_config_off_unregisters_default() {
+        use wezterm_dynamic::Value;
+        let config = config_with_overrides(vec![(
+            "mouse_right_click_menu".to_string(),
+            Value::Bool(false),
+        )]);
+        let im = InputMap::new(&config);
+        assert!(im
+            .lookup_mouse(right_down(), mods(MouseRegion::Any))
+            .is_none());
+    }
+
+    #[test]
+    fn user_pane_region_right_click_overrides_default() {
+        // A user binding scoped to region=Pane shadows the default menu
+        use config::{Mouse, MouseEventAltScreen};
+        use wezterm_dynamic::{ToDynamic, Value};
+        let user = Mouse {
+            event: right_down(),
+            mods: MouseEventTriggerMods {
+                mods: Modifiers::NONE,
+                mouse_reporting: false,
+                alt_screen: MouseEventAltScreen::Any,
+                region: MouseRegion::Pane,
+            },
+            action: KeyAssignment::Nop,
+        };
+        let config = config_with_overrides(vec![(
+            "mouse_bindings".to_string(),
+            Value::Array(vec![user.to_dynamic()].into()),
+        )]);
+        let im = InputMap::new(&config);
+        assert!(matches!(
+            im.lookup_mouse(right_down(), mods(MouseRegion::Any)),
+            Some(KeyAssignment::Nop)
+        ));
+    }
+
+    #[test]
+    fn disable_default_assignment_suppresses_context_menu() {
+        use config::{Mouse, MouseEventAltScreen};
+        use wezterm_dynamic::{ToDynamic, Value};
+        let user = Mouse {
+            event: right_down(),
+            mods: MouseEventTriggerMods {
+                mods: Modifiers::NONE,
+                mouse_reporting: false,
+                alt_screen: MouseEventAltScreen::Any,
+                region: MouseRegion::Pane,
+            },
+            action: KeyAssignment::DisableDefaultAssignment,
+        };
+        let config = config_with_overrides(vec![(
+            "mouse_bindings".to_string(),
+            Value::Array(vec![user.to_dynamic()].into()),
+        )]);
+        let im = InputMap::new(&config);
+        assert!(im
+            .lookup_mouse(right_down(), mods(MouseRegion::Any))
             .is_none());
     }
 }

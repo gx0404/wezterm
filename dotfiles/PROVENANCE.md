@@ -32,6 +32,10 @@
   系并入 `Ctrl+Shift(+Alt)+\`，标签直达 `Alt+1..9` 改 `Leader 1..9`，
   `Alt+w` 关闭 pane 改 `confirm=true`——裸 Alt 组合抢走 readline 标准键
   （`Alt+.` 末参数、`Alt+b` 退词）且无确认销毁 pane。
+- 2026-09-21 批 8（WZ-16/WEZ-UX-01）：`config/bindings.lua` leader 层新增
+  浮层入口三键 `Leader m` 主菜单 / `Leader s` 设置 / `Leader k` 快捷键
+  速查（fork 的 `disable_default_key_bindings=true` 使内建默认键
+  `Ctrl+Shift+M/,//` 不生效，需显式绑定）。
 
 ## plugins/
 
