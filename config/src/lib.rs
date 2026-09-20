@@ -972,3 +972,35 @@ mod override_split_tests {
         assert!(split_override_value("font_size", ";keys=1").is_err());
     }
 }
+
+// fork: `mux_synchronized_output_timeout_ms` 的默认值与显式覆盖守门。
+#[cfg(test)]
+mod sync_output_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn default_is_150ms() {
+        assert_eq!(
+            Config::default_config().mux_synchronized_output_timeout_ms,
+            150
+        );
+    }
+
+    #[test]
+    fn explicit_zero_is_accepted() {
+        let mut obj = std::collections::BTreeMap::new();
+        obj.insert(
+            Value::String("mux_synchronized_output_timeout_ms".into()),
+            Value::U64(0),
+        );
+        let cfg = Config::from_dynamic(
+            &Value::Object(obj.into()),
+            FromDynamicOptions {
+                unknown_fields: UnknownFieldAction::Deny,
+                deprecated_fields: UnknownFieldAction::Warn,
+            },
+        )
+        .expect("config with explicit timeout");
+        assert_eq!(cfg.mux_synchronized_output_timeout_ms, 0);
+    }
+}

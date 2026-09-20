@@ -143,18 +143,182 @@ fn send_actions_to_mux(pane: &Weak<dyn Pane>, dead: &Arc<AtomicBool>, actions: V
     histogram!("send_actions_to_mux.rate").record(1.);
 }
 
+/// fork: DECSET 2026 (synchronized output) hold state of the output pump.
+///
+/// Upstream tracks the hold as a plain `bool` that is only cleared by
+/// `?2026l` or a soft reset, so a guest that dies or wedges inside a
+/// synchronized block freezes its pane forever while the pending action
+/// list grows without bound.  This wraps the hold in an optional deadline
+/// (`mux_synchronized_output_timeout_ms`; `0` keeps the upstream
+/// never-expire semantics) and keeps every decision free of I/O so the
+/// policy can be unit tested with an injected clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncOutputHold {
+    /// Not inside a synchronized block.
+    Idle,
+    /// Inside a synchronized block.  `until` is `None` when the timeout
+    /// is disabled.
+    Held { until: Option<Instant> },
+}
+
+/// fork: what the output pump should do with the actions buffered so far
+/// once the action just parsed has been appended to them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HoldStep {
+    /// Keep buffering.
+    Buffer,
+    /// Flush everything buffered so far, including the action just seen.
+    Flush,
+}
+
+impl SyncOutputHold {
+    fn is_held(self) -> bool {
+        matches!(self, Self::Held { .. })
+    }
+
+    /// Apply one parsed action to the hold state.  `has_pending` reports
+    /// whether anything is buffered before this action is appended; `now`
+    /// is only evaluated when a new block starts, so the parse hot path
+    /// does not touch the clock for every action.
+    fn on_action(
+        &mut self,
+        action: &Action,
+        has_pending: bool,
+        now: impl FnOnce() -> Instant,
+        timeout: Duration,
+    ) -> HoldStep {
+        match action {
+            Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SynchronizedOutput,
+            )))) => {
+                if self.is_held() {
+                    // A nested begin must neither tear the current block
+                    // apart nor let a guest extend the deadline forever.
+                    return HoldStep::Buffer;
+                }
+                // Synchronized output frame started: hold off ~all actions
+                // that apply changes to the terminal.
+                let until = if timeout.is_zero() {
+                    None
+                } else {
+                    now().checked_add(timeout)
+                };
+                *self = Self::Held { until };
+                // Only actions buffered *before* the block need to reach
+                // the terminal now; starting a block on an empty buffer
+                // must not cost an extra render (a frame wrapped in
+                // ?2026h/?2026l is then presented exactly once).
+                if has_pending {
+                    HoldStep::Flush
+                } else {
+                    HoldStep::Buffer
+                }
+            }
+            Action::CSI(CSI::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SynchronizedOutput,
+            )))) => {
+                // Synchronized output frame ended: flush all pending
+                // actions to the terminal.
+                *self = Self::Idle;
+                HoldStep::Flush
+            }
+            Action::CSI(CSI::Device(dev)) if matches!(**dev, Device::SoftReset) => {
+                // Soft reset requested
+                *self = Self::Idle;
+                HoldStep::Flush
+            }
+            _ => HoldStep::Buffer,
+        }
+    }
+
+    /// How long the pump may wait for more input before the hold expires,
+    /// or `None` when it can block indefinitely (idle, or no timeout).
+    /// Rounded up to whole milliseconds because `poll(2)` truncates and
+    /// would otherwise wake up just before the deadline.
+    fn poll_timeout(self, now: Instant) -> Option<Duration> {
+        match self {
+            Self::Held { until: Some(until) } => {
+                let remaining = until.saturating_duration_since(now);
+                let millis =
+                    remaining.as_millis() + u128::from(remaining.subsec_nanos() % 1_000_000 != 0);
+                Some(Duration::from_millis(millis.try_into().unwrap_or(u64::MAX)))
+            }
+            _ => None,
+        }
+    }
+
+    /// Release the hold if its deadline has passed.  Returns `true` exactly
+    /// once per expired block so the caller can flush and warn once.
+    fn take_expired(&mut self, now: Instant) -> bool {
+        match *self {
+            Self::Held { until: Some(until) } if now >= until => {
+                *self = Self::Idle;
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
 /// This is the parsing loop for the given pane.
 /// It reads all data sent to `rx` (from pane PTY) and handles all terminal events for this pane.
-fn parse_buffered_data(pane: Weak<dyn Pane>, dead: &Arc<AtomicBool>, mut rx: FileDescriptor) {
+fn parse_buffered_data(pane: Weak<dyn Pane>, dead: &Arc<AtomicBool>, rx: FileDescriptor) {
+    // fork: the loop body lives in `parse_buffered_data_with_sink` so that
+    // the synchronized output hold policy can be exercised without a Pane.
+    let pane_id = pane.upgrade().map(|pane| pane.pane_id());
+    parse_buffered_data_with_sink(pane_id, dead, rx, &mut |actions| {
+        send_actions_to_mux(&pane, dead, actions)
+    });
+}
+
+/// fork: log once per synchronized block that outlived its timeout.
+fn warn_synchronized_output_timeout(pane_id: Option<PaneId>, timeout: Duration) {
+    let pane_id = pane_id.map_or_else(|| "?".to_string(), |id| id.to_string());
+    log::warn!(
+        "pane {pane_id}: DECSET 2026 synchronized output block was not \
+         closed within {timeout:?}; flushing pending output \
+         (mux_synchronized_output_timeout_ms)"
+    );
+}
+
+fn parse_buffered_data_with_sink(
+    pane_id: Option<PaneId>,
+    dead: &Arc<AtomicBool>,
+    mut rx: FileDescriptor,
+    sink: &mut dyn FnMut(Vec<Action>),
+) {
     let mut buf = vec![0; configuration().mux_output_parser_buffer_size];
     let mut parser = termwiz::escape::parser::Parser::new();
     let mut actions = vec![];
-    let mut hold = false;
+    let mut hold = SyncOutputHold::Idle;
+    let mut hold_timeout =
+        Duration::from_millis(configuration().mux_synchronized_output_timeout_ms);
     let mut action_size = 0;
     let mut delay = Duration::from_millis(configuration().mux_output_parser_coalesce_delay_ms);
     let mut deadline = None;
 
     loop {
+        // fork: while a synchronized block is held with a deadline, wait
+        // with a bounded poll instead of a blocking read so the hold can
+        // expire even if the guest never sends ?2026l.
+        if let Some(wait) = hold.poll_timeout(Instant::now()) {
+            let mut pfd = [pollfd {
+                fd: rx.as_socket_descriptor(),
+                events: POLLIN,
+                revents: 0,
+            }];
+            if let Ok(0) = poll(&mut pfd, Some(wait)) {
+                if hold.take_expired(Instant::now()) {
+                    warn_synchronized_output_timeout(pane_id, hold_timeout);
+                    if !actions.is_empty() {
+                        sink(std::mem::take(&mut actions));
+                        action_size = 0;
+                    }
+                }
+                continue;
+            }
+        }
+
         match rx.read(&mut buf) {
             Ok(size) if size == 0 => {
                 dead.store(true, Ordering::Relaxed);
@@ -166,42 +330,23 @@ fn parse_buffered_data(pane: Weak<dyn Pane>, dead: &Arc<AtomicBool>, mut rx: Fil
             }
             Ok(size) => {
                 parser.parse(&buf[0..size], |action| {
-                    let mut flush = false;
-                    match &action {
-                        Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
-                            DecPrivateModeCode::SynchronizedOutput,
-                        )))) => {
-                            // Synchronized output frame started:
-                            // => We hold off ~all actions that applies changes to the terminal.
-                            hold = true;
-
-                            // => We also flush prior actions
-                            flush = true;
-                        }
-                        Action::CSI(CSI::Mode(Mode::ResetDecPrivateMode(
-                            DecPrivateMode::Code(DecPrivateModeCode::SynchronizedOutput),
-                        ))) => {
-                            // Synchronized output frame ended:
-                            // => We flush out all pending actions to the terminal.
-                            hold = false;
-                            flush = true;
-                        }
-                        Action::CSI(CSI::Device(dev)) if matches!(**dev, Device::SoftReset) => {
-                            // Soft reset requested
-                            hold = false;
-                            flush = true;
-                        }
-                        _ => {}
-                    };
+                    let step =
+                        hold.on_action(&action, !actions.is_empty(), Instant::now, hold_timeout);
                     action.append_to(&mut actions);
 
-                    if flush && !actions.is_empty() {
-                        send_actions_to_mux(&pane, &dead, std::mem::take(&mut actions));
+                    if step == HoldStep::Flush && !actions.is_empty() {
+                        sink(std::mem::take(&mut actions));
                         action_size = 0;
                     }
                 });
                 action_size += size;
-                if !actions.is_empty() && !hold {
+                // fork: a guest that keeps writing without ever closing the
+                // block must not accumulate actions without bound; once the
+                // hold expires the coalescing path below flushes as usual.
+                if hold.take_expired(Instant::now()) {
+                    warn_synchronized_output_timeout(pane_id, hold_timeout);
+                }
+                if !actions.is_empty() && !hold.is_held() {
                     // If we haven't accumulated too much data,
                     // pause for a short while to increase the chances
                     // that we coalesce a full "frame" from an unoptimized
@@ -231,7 +376,7 @@ fn parse_buffered_data(pane: Weak<dyn Pane>, dead: &Arc<AtomicBool>, mut rx: Fil
                         }
                     }
 
-                    send_actions_to_mux(&pane, &dead, std::mem::take(&mut actions));
+                    sink(std::mem::take(&mut actions));
                     deadline = None;
                     action_size = 0;
                 }
@@ -239,6 +384,7 @@ fn parse_buffered_data(pane: Weak<dyn Pane>, dead: &Arc<AtomicBool>, mut rx: Fil
                 let config = configuration();
                 buf.resize(config.mux_output_parser_buffer_size, 0);
                 delay = Duration::from_millis(config.mux_output_parser_coalesce_delay_ms);
+                hold_timeout = Duration::from_millis(config.mux_synchronized_output_timeout_ms);
             }
         }
     }
@@ -248,7 +394,7 @@ fn parse_buffered_data(pane: Weak<dyn Pane>, dead: &Arc<AtomicBool>, mut rx: Fil
     // for very short lived commands so that we don't forget to
     // display what they displayed.
     if !actions.is_empty() {
-        send_actions_to_mux(&pane, &dead, std::mem::take(&mut actions));
+        sink(std::mem::take(&mut actions));
     }
 }
 
@@ -1477,5 +1623,256 @@ impl wezterm_term::DownloadHandler for MuxDownloader {
                 data: Arc::new(data),
             });
         }
+    }
+}
+
+// fork: DECSET 2026 同步输出 hold 策略的单测——纯状态机部分注入时钟，
+// 泵循环部分用 socketpair 驱动真实解析线程，不依赖 pty 与 Mux 单例。
+#[cfg(test)]
+mod sync_output_hold_tests {
+    use super::*;
+
+    const TIMEOUT: Duration = Duration::from_millis(150);
+
+    fn set_sync() -> Action {
+        Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::SynchronizedOutput,
+        ))))
+    }
+
+    fn reset_sync() -> Action {
+        Action::CSI(CSI::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+            DecPrivateModeCode::SynchronizedOutput,
+        ))))
+    }
+
+    fn soft_reset() -> Action {
+        Action::CSI(CSI::Device(Box::new(Device::SoftReset)))
+    }
+
+    #[test]
+    fn begin_without_pending_actions_only_holds() {
+        // 块前没有未刷新动作：只开启 hold，不额外 flush（herdr 计划 2.1 修法 5）
+        let now = Instant::now();
+        let mut hold = SyncOutputHold::Idle;
+        assert_eq!(
+            hold.on_action(&set_sync(), false, || now, TIMEOUT),
+            HoldStep::Buffer
+        );
+        assert!(hold.is_held());
+    }
+
+    #[test]
+    fn begin_with_pending_actions_flushes_them_first() {
+        // 块前确有未刷新动作：保持上游语义，先 flush 再 hold
+        let now = Instant::now();
+        let mut hold = SyncOutputHold::Idle;
+        assert_eq!(
+            hold.on_action(&set_sync(), true, || now, TIMEOUT),
+            HoldStep::Flush
+        );
+        assert!(hold.is_held());
+    }
+
+    #[test]
+    fn nested_begin_keeps_deadline_and_does_not_flush() {
+        // 块内再次 ?2026h：不撕开当前块，也不延长到期时间
+        let now = Instant::now();
+        let mut hold = SyncOutputHold::Idle;
+        hold.on_action(&set_sync(), false, || now, TIMEOUT);
+        let first = hold;
+        assert_eq!(
+            hold.on_action(
+                &set_sync(),
+                true,
+                || now + Duration::from_millis(100),
+                TIMEOUT
+            ),
+            HoldStep::Buffer
+        );
+        assert_eq!(hold, first);
+    }
+
+    #[test]
+    fn frame_is_flushed_once_at_end_without_expiry() {
+        // 正常 ?2026h … ?2026l：块尾一次 flush，期间不到期，结束后不再到期
+        let now = Instant::now();
+        let mut hold = SyncOutputHold::Idle;
+        assert_eq!(
+            hold.on_action(&set_sync(), false, || now, TIMEOUT),
+            HoldStep::Buffer
+        );
+        assert_eq!(
+            hold.on_action(&Action::Print('x'), true, || now, TIMEOUT),
+            HoldStep::Buffer
+        );
+        assert!(!hold.take_expired(now + Duration::from_millis(149)));
+        assert_eq!(
+            hold.on_action(&reset_sync(), true, || now, TIMEOUT),
+            HoldStep::Flush
+        );
+        assert!(!hold.is_held());
+        assert!(!hold.take_expired(now + Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn soft_reset_releases_hold_and_flushes() {
+        let now = Instant::now();
+        let mut hold = SyncOutputHold::Idle;
+        hold.on_action(&set_sync(), false, || now, TIMEOUT);
+        assert_eq!(
+            hold.on_action(&soft_reset(), true, || now, TIMEOUT),
+            HoldStep::Flush
+        );
+        assert!(!hold.is_held());
+        assert!(!hold.take_expired(now + Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn expired_hold_is_released_exactly_once() {
+        // 到期只释放（并由调用方告警）一次
+        let now = Instant::now();
+        let mut hold = SyncOutputHold::Idle;
+        hold.on_action(&set_sync(), false, || now, TIMEOUT);
+        assert!(!hold.take_expired(now + Duration::from_millis(149)));
+        assert!(hold.is_held());
+        assert!(hold.take_expired(now + TIMEOUT));
+        assert!(!hold.is_held());
+        assert!(!hold.take_expired(now + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn zero_timeout_never_expires() {
+        // timeout = 0 保留上游永不超时语义
+        let now = Instant::now();
+        let mut hold = SyncOutputHold::Idle;
+        hold.on_action(&set_sync(), false, || now, Duration::ZERO);
+        assert!(hold.is_held());
+        assert_eq!(hold.poll_timeout(now), None);
+        assert!(!hold.take_expired(now + Duration::from_secs(3600)));
+        assert!(hold.is_held());
+        assert_eq!(
+            hold.on_action(&reset_sync(), true, || now, Duration::ZERO),
+            HoldStep::Flush
+        );
+        assert!(!hold.is_held());
+    }
+
+    #[test]
+    fn poll_timeout_tracks_remaining_time_rounded_up() {
+        // poll(2) 以毫秒截断，剩余时长向上取整避免提前返回后空转
+        let now = Instant::now();
+        let mut hold = SyncOutputHold::Idle;
+        assert_eq!(hold.poll_timeout(now), None);
+        hold.on_action(&set_sync(), false, || now, TIMEOUT);
+        assert_eq!(hold.poll_timeout(now), Some(TIMEOUT));
+        assert_eq!(
+            hold.poll_timeout(now + Duration::from_micros(149_500)),
+            Some(Duration::from_millis(1))
+        );
+        assert_eq!(
+            hold.poll_timeout(now + Duration::from_millis(200)),
+            Some(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn unrelated_actions_do_not_change_hold() {
+        let now = Instant::now();
+        let mut hold = SyncOutputHold::Idle;
+        assert_eq!(
+            hold.on_action(&Action::Print('a'), false, || now, TIMEOUT),
+            HoldStep::Buffer
+        );
+        assert!(!hold.is_held());
+        hold.on_action(&set_sync(), false, || now, TIMEOUT);
+        assert_eq!(
+            hold.on_action(&Action::Print('a'), true, || now, TIMEOUT),
+            HoldStep::Buffer
+        );
+        assert!(hold.is_held());
+    }
+}
+
+#[cfg(test)]
+mod parse_buffered_data_tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    /// 起一条与生产相同的解析泵线程；sink 把每次 flush 的批次送回测试。
+    fn spawn_pump() -> (
+        FileDescriptor,
+        mpsc::Receiver<Vec<Action>>,
+        thread::JoinHandle<()>,
+    ) {
+        let (tx, rx) = allocate_socketpair().expect("socketpair");
+        let (batch_tx, batch_rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            let dead = Arc::new(AtomicBool::new(false));
+            parse_buffered_data_with_sink(Some(1), &dead, rx, &mut |batch| {
+                batch_tx.send(batch).ok();
+            });
+        });
+        (tx, batch_rx, handle)
+    }
+
+    fn is_set_sync(action: &Action) -> bool {
+        matches!(
+            action,
+            Action::CSI(CSI::Mode(Mode::SetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SynchronizedOutput,
+            ))))
+        )
+    }
+
+    fn is_reset_sync(action: &Action) -> bool {
+        matches!(
+            action,
+            Action::CSI(CSI::Mode(Mode::ResetDecPrivateMode(DecPrivateMode::Code(
+                DecPrivateModeCode::SynchronizedOutput
+            ),)))
+        )
+    }
+
+    #[test]
+    fn unclosed_block_is_flushed_after_timeout_while_guest_is_alive() {
+        config::use_default_configuration();
+        let (mut tx, batches, handle) = spawn_pump();
+        let started = Instant::now();
+        tx.write_all(b"\x1b[?2026hhello").expect("write");
+        // 没有超时的话泵会阻塞在 read() 直到 tx 被丢弃；此处在 tx 仍存活时
+        // 就收到批次，证明 hold 已到期强制 flush。
+        let batch = batches
+            .recv_timeout(Duration::from_secs(5))
+            .expect("forced flush after timeout");
+        assert!(
+            started.elapsed() >= Duration::from_millis(150),
+            "flushed too early: {:?}",
+            started.elapsed()
+        );
+        assert_eq!(batch.len(), 2, "{batch:?}");
+        assert!(is_set_sync(&batch[0]));
+        assert_eq!(batch[1], Action::PrintString("hello".into()));
+        drop(tx);
+        handle.join().expect("pump thread");
+        assert!(batches.recv().is_err(), "unexpected extra batch");
+    }
+
+    #[test]
+    fn synchronized_frame_without_prior_output_is_flushed_once() {
+        config::use_default_configuration();
+        let (mut tx, batches, handle) = spawn_pump();
+        tx.write_all(b"\x1b[?2026hhello\x1b[?2026l").expect("write");
+        let batch = batches
+            .recv_timeout(Duration::from_secs(5))
+            .expect("frame flush");
+        // 上游会在 ?2026h 处先 flush 出只含该动作的批次；现在整帧一次到达
+        assert_eq!(batch.len(), 3, "{batch:?}");
+        assert!(is_set_sync(&batch[0]));
+        assert_eq!(batch[1], Action::PrintString("hello".into()));
+        assert!(is_reset_sync(&batch[2]));
+        drop(tx);
+        handle.join().expect("pump thread");
+        assert!(batches.recv().is_err(), "unexpected extra batch");
     }
 }

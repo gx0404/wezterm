@@ -112,6 +112,13 @@
 
 ### Fixed
 
+- 修复 DECSET 2026 同步输出 hold 无超时：guest 在 `?2026h` 之后崩溃/挂死
+  会让 pane 永久不刷新且动作队列无界增长。`mux/src/lib.rs::parse_buffered_data`
+  的 hold 改为带到期时间的状态机（`SyncOutputHold`），到期强制 flush 并
+  `log::warn!` 一次；新增配置 `mux_synchronized_output_timeout_ms`（默认
+  150，`0` = 不超时保留旧语义，文档见 `docs/config/lua/config/`）。同时收到
+  `?2026h` 时仅当块前确有未刷新动作才先 flush（否则只开启 hold），一帧
+  `?2026h…?2026l` 只呈现一次，消除 herdr 切标签时的中间态闪烁。
 - 修复 `--config 'a=b;c=d;…'` 仅第一对生效：`set_config_overrides`
   现按**顶层分号**展开为多对覆盖（花括号/圆括号/方括号嵌套与引号
   字符串内的分号保持字面，如 `keys={{a=1};{b=2}}` 不受影响），后续

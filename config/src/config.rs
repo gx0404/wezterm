@@ -418,6 +418,13 @@ pub struct Config {
     #[dynamic(default = "default_mux_output_parser_coalesce_delay_ms")]
     pub mux_output_parser_coalesce_delay_ms: u64,
 
+    /// fork: How many ms a DECSET 2026 synchronized output block may
+    /// hold back pane output before the mux flushes it anyway.  Guards
+    /// against a guest that dies or wedges inside a block, which would
+    /// otherwise freeze the pane forever.  `0` disables the timeout.
+    #[dynamic(default = "default_mux_synchronized_output_timeout_ms")]
+    pub mux_synchronized_output_timeout_ms: u64,
+
     #[dynamic(default = "default_mux_env_remove")]
     pub mux_env_remove: Vec<String>,
 
@@ -1738,6 +1745,10 @@ fn default_swallow_mouse_click_on_window_focus() -> bool {
 
 fn default_mux_output_parser_coalesce_delay_ms() -> u64 {
     3
+}
+
+fn default_mux_synchronized_output_timeout_ms() -> u64 {
+    150
 }
 
 fn default_mux_output_parser_buffer_size() -> usize {
