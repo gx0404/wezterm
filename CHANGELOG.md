@@ -112,6 +112,16 @@
 
 ### Fixed
 
+- 修复 gui-settings.json 首载按 env/XDG 而非生效 wezterm.lua 目录解析
+  （WEZ-CFG-01）：`try_load` 在应用 sidecar 之后才 `set_var(
+  WEZTERM_CONFIG_DIR)`，首载与重载解析到不同路径，`--config-file`
+  隔离环境会读写用户真实 sidecar；CLI 早期 Deny 校验还会把 sidecar
+  的失效键变成致命错误。`gui_settings::apply_to_lua` 新增显式 `dir`
+  参数（`try_load` 传配置文件目录、无文件默认路径传 None），
+  `store_key_in_dir` 公开化；CLI overrides 早期校验拆出
+  `validate_cli_overrides`（不掺 sidecar）。新增 4 条单测（显式目录
+  优先于 ambient、重复加载同路径等），隔离实测：`--config-file
+  /tmp/iso/wezterm.lua` 只读 iso 目录的 sidecar。
 - 修复设置浮层配色预览把整份配置重载挂在按键重复率上：`settings.rs` 的
   预览写每窗口 `config_overrides` 并调 `TermWindow::config_was_reloaded`，
   于是每经过一行就重跑一遍用户 Lua、重建全部字体、对每个 pane

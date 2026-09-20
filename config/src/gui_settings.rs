@@ -66,11 +66,19 @@ pub fn load_value_in_dir(dir: Option<&Path>) -> Value {
 /// skipped instead of failing the whole config load: this file is owned
 /// by the GUI, so a stale key (e.g. after a downgrade) must not break
 /// the user's session.
+///
+/// `dir` is the directory of the effective wezterm.lua being loaded;
+/// `None` (no config file in play) falls back to the ambient
+/// `settings_path()`. Callers must pass the config file's directory
+/// explicitly: relying on WEZTERM_CONFIG_DIR here races with
+/// `try_load`, which only sets that variable after the sidecar has
+/// already been applied (WEZ-CFG-01).
 pub fn apply_to_lua<'l>(
     lua: &'l Lua,
     mut config: mlua::Value<'l>,
+    dir: Option<&Path>,
 ) -> anyhow::Result<mlua::Value<'l>> {
-    let sidecar = load_value_in_dir(None);
+    let sidecar = load_value_in_dir(dir);
     let obj = match &sidecar {
         Value::Object(obj) => obj,
         _ => return Ok(config),
@@ -156,7 +164,15 @@ fn dynamic_to_json(value: &Value) -> serde_json::Value {
 /// Upsert a single settings key, preserving other keys, then atomically
 /// replace the file (write to a sibling temp file + rename).
 pub fn store_key(key: &str, value: &Value) -> anyhow::Result<()> {
-    let path = settings_path();
+    store_key_in_dir(None, key, value)
+}
+
+/// `store_key` against an explicit config directory: writes the sidecar
+/// next to the effective wezterm.lua instead of the ambient
+/// `settings_path()`, so isolated `--config-file` setups never touch the
+/// user's real gui-settings.json (WEZ-CFG-01).
+pub fn store_key_in_dir(dir: Option<&Path>, key: &str, value: &Value) -> anyhow::Result<()> {
+    let path = settings_file_in_dir(dir);
     let mut root = parse_file(&path).unwrap_or_else(|| serde_json::json!({}));
     if !root.is_object() {
         log::warn!(
@@ -203,9 +219,9 @@ mod tests {
     #[test]
     fn store_and_load_roundtrip() {
         let dir = temp_dir();
-        store_key_in_dir(&dir, "language", &Value::String("en".into())).unwrap();
+        store_key_in_dir(Some(&dir), "language", &Value::String("en".into())).unwrap();
         store_key_in_dir(
-            &dir,
+            Some(&dir),
             "font_size",
             &Value::F64(ordered_float::OrderedFloat(13.5)),
         )
@@ -214,7 +230,7 @@ mod tests {
         let loaded = load_value_in_dir(Some(&dir));
         let obj = match &loaded {
             Value::Object(obj) => obj,
-            other => panic!("expected object, got {other:?}"),
+            other => panic!("expected object, got {:?}", other),
         };
         assert_eq!(
             obj.get_by_str("language"),
@@ -239,13 +255,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // The real store_key targets the ambient settings_path(); redirect it
-    // via WEZTERM_CONFIG_DIR for the roundtrip test.
-    fn store_key_in_dir(dir: &Path, key: &str, value: &Value) -> anyhow::Result<()> {
+    // WEZ-CFG-01: an explicit config dir wins over the ambient
+    // WEZTERM_CONFIG_DIR, so an isolated `--config-file /tmp/iso/wezterm.lua`
+    // never reads the user's real sidecar.
+    #[test]
+    fn explicit_dir_isolates_from_ambient() {
+        let iso = temp_dir();
+        let ambient = temp_dir();
+        store_key_in_dir(Some(&ambient), "language", &Value::String("en".into())).unwrap();
+        store_key_in_dir(Some(&iso), "language", &Value::String("zh-CN".into())).unwrap();
+
         // nextest runs each test in its own process, so env mutation is safe
-        std::env::set_var("WEZTERM_CONFIG_DIR", dir);
-        let result = store_key(key, value);
+        std::env::set_var("WEZTERM_CONFIG_DIR", &ambient);
+        let loaded = load_value_in_dir(Some(&iso));
         std::env::remove_var("WEZTERM_CONFIG_DIR");
-        result
+
+        let obj = match &loaded {
+            Value::Object(obj) => obj,
+            other => panic!("expected object, got {:?}", other),
+        };
+        assert_eq!(
+            obj.get_by_str("language"),
+            Some(&Value::String("zh-CN".into()))
+        );
+        let _ = std::fs::remove_dir_all(&iso);
+        let _ = std::fs::remove_dir_all(&ambient);
+    }
+
+    // WEZ-CFG-01: two loads against the same effective config dir resolve to
+    // the same sidecar path (first load and reload agree).
+    #[test]
+    fn repeated_loads_resolve_same_path() {
+        let dir = temp_dir();
+        store_key_in_dir(Some(&dir), "font_size", &Value::U64(12)).unwrap();
+        let first = load_value_in_dir(Some(&dir));
+        let second = load_value_in_dir(Some(&dir));
+        assert_eq!(first, second);
+        assert_eq!(settings_file_in_dir(Some(&dir)), dir.join(GUI_SETTINGS_FILE));
+        assert!(dir.join(GUI_SETTINGS_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

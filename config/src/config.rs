@@ -1204,8 +1204,10 @@ impl Config {
                 // fork: layer the GUI settings sidecar (gui-settings.json,
                 // owned by the settings overlay) on top of the lua config.
                 // --config overrides and per-window overrides still win over
-                // it, as they are applied just below.
-                let config = crate::gui_settings::apply_to_lua(&lua, config)?;
+                // it, as they are applied just below. The sidecar is resolved
+                // against the effective config file's directory, not the
+                // ambient env/XDG path (WEZ-CFG-01).
+                let config = crate::gui_settings::apply_to_lua(&lua, config, p.parent())?;
                 let config = Config::apply_overrides_to(&lua, config)?;
                 let config = Config::apply_overrides_obj_to(&lua, config, overrides)?;
                 cfg = Config::from_lua(config, &lua).with_context(|| {

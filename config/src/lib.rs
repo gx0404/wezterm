@@ -335,8 +335,9 @@ fn default_config_with_overrides_applied() -> anyhow::Result<Config> {
     let lua = lua::make_lua_context(Path::new("override")).context("make_lua_context")?;
     let table = mlua::Value::Table(lua.create_table()?);
     // fork: apply the GUI settings sidecar beneath the CLI overrides so
-    // gui-settings.json also works without a wezterm.lua file
-    let table = gui_settings::apply_to_lua(&lua, table)?;
+    // gui-settings.json also works without a wezterm.lua file; with no
+    // config file in play the ambient settings_path() is used (WEZ-CFG-01).
+    let table = gui_settings::apply_to_lua(&lua, table, None)?;
     let config = Config::apply_overrides_to(&lua, table).context("apply_overrides_to")?;
 
     let dyn_config = luahelper::lua_value_to_dynamic(config)?;
@@ -356,6 +357,30 @@ fn default_config_with_overrides_applied() -> anyhow::Result<Config> {
     cfg.check_consistency().context("check_consistency")?;
 
     Ok(cfg)
+}
+
+// fork: validate only the CLI `--config name=value` overrides against the
+// strict (Deny) conversion. The GUI settings sidecar must not participate:
+// its stale keys are warned-and-skipped at real load time, but Deny would
+// turn them fatal here (WEZ-CFG-01).
+fn validate_cli_overrides() -> anyhow::Result<()> {
+    let lua = lua::make_lua_context(Path::new("override")).context("make_lua_context")?;
+    let table = mlua::Value::Table(lua.create_table()?);
+    let config = Config::apply_overrides_to(&lua, table).context("apply_overrides_to")?;
+    let dyn_config = luahelper::lua_value_to_dynamic(config)?;
+    let cfg: Config = Config::from_dynamic(
+        &dyn_config,
+        FromDynamicOptions {
+            unknown_fields: UnknownFieldAction::Deny,
+            deprecated_fields: UnknownFieldAction::Warn,
+        },
+    )
+    .context("Error converting lua value from overrides to Config struct")?;
+    // Compute but discard the key bindings here so that we raise any
+    // problems earlier than we use them.
+    let _ = cfg.key_bindings();
+    cfg.check_consistency().context("check_consistency")?;
+    Ok(())
 }
 
 pub fn common_init(
@@ -504,7 +529,9 @@ pub fn set_config_overrides(items: &[(String, String)]) -> anyhow::Result<()> {
     }
     *CONFIG_OVERRIDES.lock().unwrap() = expanded;
 
-    let _ = default_config_with_overrides_applied()?;
+    // fork: early-validate the CLI overrides only; the GUI settings
+    // sidecar is layered on at real load time (WEZ-CFG-01)
+    validate_cli_overrides()?;
     Ok(())
 }
 
