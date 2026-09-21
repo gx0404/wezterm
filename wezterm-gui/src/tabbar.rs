@@ -506,7 +506,7 @@ impl TabBarState {
         let titles_len: usize = tab_titles.iter().map(|s| s.len).sum();
         let number_of_tabs = tab_titles.len();
 
-        // WZ-14: the tab width budget must also reserve the ☰ menu
+        // fork (WZ-14): the tab width budget must also reserve the ☰ menu
         // button, otherwise a crowded bar pushes it (and the right
         // status area) past the right edge of the line.
         let menu_button_cells = if config.show_menu_button_in_tab_bar {
@@ -646,7 +646,7 @@ impl TabBarState {
 
         // Main menu button (fork): opens the herdr-style main menu
         if config.show_menu_button_in_tab_bar {
-            // WZ-13: the hover zone must use the rendered cell width;
+            // fork (WZ-13): the hover zone must use the rendered cell width;
             // " ☰ " is 5 bytes but only MENU_BUTTON_DISPLAY_CELLS wide.
             let hover = is_tab_hover(mouse_x, x, menu_button_display_cells());
             let mut attrs = if config.use_fancy_tab_bar {
@@ -884,7 +884,7 @@ mod tests {
 
     #[test]
     fn menu_button_width_is_cells_not_bytes() {
-        // WZ-13: " ☰ " is 5 bytes but 4 cells (☰ is double-width); the
+        // fork (WZ-13): " ☰ " is 5 bytes but 4 cells (☰ is double-width); the
         // hover zone and the tab-width budget must agree on the cell
         // width, not the byte length
         assert_eq!(MENU_BUTTON_TEXT.len(), 5);

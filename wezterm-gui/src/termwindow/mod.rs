@@ -4011,22 +4011,25 @@ mod bell_throttle_tests {
     fn bell_throttle_lets_one_bell_through_per_window() {
         let t0 = Instant::now();
         let cooldown = Duration::from_millis(100);
-        // 首声放行并开窗
+        // first bell is let through and opens the window
         let (cool, mut last) = bell_throttle(None, t0, cooldown);
         assert!(!cool);
-        // 窗内连响被压；时间戳不后移（throttle，不是 debounce）
+        // in-window bells are suppressed; the timestamp does NOT move
+        // forward (throttle, not debounce)
         let (cool, next) = bell_throttle(last, t0 + Duration::from_millis(50), cooldown);
         assert!(cool);
         assert_eq!(next, last);
         let (cool, next) = bell_throttle(last, t0 + Duration::from_millis(99), cooldown);
         assert!(cool);
         assert_eq!(next, last);
-        // 窗后放行并重开窗——持续响铃流保持每窗一声，不会永久静音
+        // after the window the next bell is let through and reopens it —
+        // a sustained stream stays audible at one-bell-per-window cadence
+        // instead of being muted forever
         let (cool, next) = bell_throttle(last, t0 + Duration::from_millis(101), cooldown);
         assert!(!cool);
         assert_eq!(next, Some(t0 + Duration::from_millis(101)));
         last = next;
-        // 冷却 0 = 不节流（保留旧语义）
+        // a zero cooldown disables throttling (preserving the old semantic)
         let (cool, next) = bell_throttle(last, t0 + Duration::from_millis(102), Duration::ZERO);
         assert!(!cool);
         assert_eq!(next, last);

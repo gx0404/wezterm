@@ -39,19 +39,21 @@ lazy_static::lazy_static! {
 
 const SEARCH_CHUNK_SIZE: StableRowIndex = 1000;
 
-/// 行是否空白：任一可见 cell 含非空白字符即非空。`visible_cells`
-/// 不分配字符串（WZ-10 的取数判定路径），宽字符的续 cell 不在迭代
-/// 结果里——与整行拼字符串再 trim 的旧实现判定一致。
+/// fork (WZ-10): whether a row is blank — true unless any visible cell
+/// holds a non-whitespace character. `visible_cells` allocates nothing
+/// (the fetch path of the paragraph scan) and skips wide-char
+/// continuation cells, matching the old join-and-trim judgement.
 fn line_is_blank(line: &Line) -> bool {
     !line
         .visible_cells()
         .any(|cell| cell.str().chars().any(|c| !c.is_whitespace()))
 }
 
-/// WZ-10 分块取数的窗口计算（纯函数）：查询行 `i` 落在当前缓存窗口
-/// `[start, start+len)` 之外时，给出下一次千行块的取数区间 `[s, e)`
-/// （向段首扫覆盖 `i` 向上回溯，向段尾扫覆盖 `i` 向下顺延）；
-/// 命中缓存返回 None。
+/// fork (WZ-10): window computation for chunked fetching (pure). When
+/// the queried row `i` falls outside the cached window
+/// `[start, start+len)`, returns the next thousand-row fetch range
+/// `[s, e)` — reaching backwards for paragraph-start scans, forwards
+/// for paragraph-end scans. `None` on cache hit.
 fn paragraph_chunk_window(
     i: usize,
     start: usize,
@@ -1180,10 +1182,13 @@ impl CopyRenderable {
         let top = dims.scrollback_top;
         let rows = dims.scrollback_rows as usize;
         let idx = (self.cursor.y - top).max(0) as usize;
-        // WZ-10 计时埋点（trace 级）：`WEZTERM_LOG=wezterm_gui::overlay::copy=trace`
+        // fork (WZ-10): trace-level timing for the paragraph scan
+        // (`WEZTERM_LOG=wezterm_gui::overlay::copy=trace`)
         let scan_start = std::time::Instant::now();
-        // WZ-10：分块预取代替逐行 get_lines——200k 行无空行日志曾要
-        // 20 万次单行取数，UI 秒级假死；现在 200 次千行块取数。
+        // fork (WZ-10): chunked prefetch instead of one get_lines call
+        // per row — a 200k-row unbroken log used to cost 200k
+        // single-row fetches and froze the UI for seconds; now ~200
+        // thousand-row chunks.
         const CHUNK: usize = 1000;
         let cache: std::cell::RefCell<(usize, Vec<bool>)> =
             std::cell::RefCell::new((usize::MAX, Vec::new()));
@@ -2383,8 +2388,9 @@ mod paragraph_tests {
 
     #[test]
     fn paragraph_scan_fetches_in_thousand_row_chunks() {
-        // WZ-10：200k 行无空行日志的段落跳转，取数次数 ≈ 行数/1000
-        // 而不是逐行一次（旧实现 20 万次单行 get_lines 秒级假死）
+        // fork (WZ-10): a paragraph jump across a 200k-row unbroken log
+        // must fetch in ~rows/1000 chunks, not once per row (the old
+        // implementation made 200k single-row get_lines calls)
         use super::paragraph_chunk_window;
         let rows = 200_000usize;
         for want_start in [true, false] {

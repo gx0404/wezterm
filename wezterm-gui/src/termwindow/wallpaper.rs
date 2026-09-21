@@ -906,7 +906,8 @@ impl Modal for WallpaperOverlay {
                 // fork: accept SHIFT for shifted characters (~, :, capitals)
                 // in the path input (review M1), same NONE|SHIFT idiom as
                 // the settings overlay filter
-                (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
+                (KeyCode::Char(c), KeyModifiers::NONE)
+                | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
                     let mut input = input;
                     input.push(c);
                     *self.mode.borrow_mut() = Mode::Adding(input);
