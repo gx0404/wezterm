@@ -260,6 +260,7 @@ local keys = {
    { key = 'k', mods = 'LEADER', action = act.ShowKeybinds },
    { key = 'm', mods = 'LEADER', action = act.ShowMainMenu },
    { key = 's', mods = 'LEADER', action = act.OpenSettings },
+   { key = 'w', mods = 'LEADER', action = act.ShowWallpaperOverlay },
 
    -- plugins: workspace switcher (智能项目切换)
    {

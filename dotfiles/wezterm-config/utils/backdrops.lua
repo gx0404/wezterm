@@ -77,6 +77,25 @@ function BackDrops:set_default(filename)
    return self
 end
 
+---fork（批 13）：壁纸管理浮层把持久化选择写在 gui-settings.json 的
+---wallpaper 键；启动/重载时优先按它覆盖默认（只认 basename 且必须在
+---目录内——set_default 的查找天然挡掉目录外与缺失条目）。
+function BackDrops:set_default_from_sidecar()
+   local f = io.open(wezterm.config_dir .. '/gui-settings.json', 'r')
+   if not f then
+      return self
+   end
+   local text = f:read('*a')
+   f:close()
+   -- gui-settings.json 由 fork 的 store_key 原子写入（顶层键形状固定）；
+   -- 轻量提取，不为一个键引入 JSON 解析器。
+   local name = text:match('"wallpaper"%s*:%s*"([^"]+)"')
+   if name and name:match('^[^/\\]+$') then
+      self:set_default(name)
+   end
+   return self
+end
+
 ---Override the default `focus_color`
 ---Default `focus_color` is `colors.custom.background`
 ---@param focus_color string background color when in focus mode

@@ -92,6 +92,7 @@ pub mod resize;
 mod selection;
 pub mod settings;
 pub mod spawn;
+pub mod wallpaper;
 pub mod webgpu;
 use crate::spawn::SpawnWhere;
 use prevcursor::PrevCursorPos;
@@ -3357,6 +3358,9 @@ impl TermWindow {
                         dims.pixel_height as f32 / 2.,
                     ),
                 );
+            }
+            ShowWallpaperOverlay => {
+                crate::termwindow::wallpaper::open_wallpaper_overlay(self);
             }
             PromptInputLine(args) => self.show_prompt_input_line(args),
             InputSelector(args) => self.show_input_selector(args),

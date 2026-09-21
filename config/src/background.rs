@@ -18,6 +18,14 @@ pub struct ImageFileSourceWrap {
     inner: ImageFileSource,
 }
 
+// fork: allow constructing a File background layer from Rust
+// (the wallpaper overlay builds preview layers, batch 13)
+impl From<ImageFileSource> for ImageFileSourceWrap {
+    fn from(inner: ImageFileSource) -> Self {
+        Self { inner }
+    }
+}
+
 impl std::ops::Deref for ImageFileSourceWrap {
     type Target = ImageFileSource;
     fn deref(&self) -> &ImageFileSource {

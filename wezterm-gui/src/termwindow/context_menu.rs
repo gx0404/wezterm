@@ -243,6 +243,10 @@ impl ContextMenu {
                     Some(KeyAssignment::OpenSettings),
                 ),
                 (
+                    Some(tr("Manage Wallpapers").into_owned()),
+                    Some(KeyAssignment::ShowWallpaperOverlay),
+                ),
+                (
                     Some(tr("Reload configuration").into_owned()),
                     Some(KeyAssignment::ReloadConfiguration),
                 ),

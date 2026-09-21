@@ -15,6 +15,25 @@
 
 
 ### Added
+- 壁纸管理浮层（批 13，`wezterm-gui/src/termwindow/wallpaper.rs`，入口：
+  主菜单项与 `KeyAssignment::ShowWallpaperOverlay`，dotfiles 绑
+  `Leader w`）：列出壁纸目录图片（文件名/尺寸/大小/当前标记），
+  ↑↓/j/k/n/p 移动即实时预览（只替换窗口背景层栈——克隆进入时层
+  定义、第一层换图、遮罩层原样保留，不重载 Lua，与批 5 预览同一
+  口径）；Enter 应用并持久化到 `gui-settings.json` 的 `wallpaper`
+  键（重启生效：Lua 侧 `utils/backdrops.lua::set_default_from_sidecar`
+  启动/重载时读回，只认 basename 与目录内条目）；`r` 随机预览；
+  `a` 添加——路径输入（Tab 补全/`~` 展开/剪贴板粘贴），校验可解码
+  图片（读头，不解码整图）后复制进壁纸目录（同名同内容复用、
+  不同内容哈希后缀）；`d` 删除（`y` 二次确认，只删目录内条目，
+  删当前壁纸时清 sidecar 并回退预览/快照）；空态提示与行内错误
+  不关浮层；Esc/点外/被顶掉经 `Modal::on_dismissed` 还原未确认
+  预览。`gui_settings` 新增 `delete_key` 与 `GUI_OWNED_KEYS`
+  （fork 自有键静默跳过，不再每次加载告警）；`load_background_layer`
+  crate 内公开、`ImageFileSourceWrap` 补 Rust 构造器。大图沿用
+  backdrops 现有惰性解码路径（EncodedFile 首次渲染时解码），
+  未引入额外线程。6 条纯函数单测（扫描/校验/补全/复制去重/
+  预览层栈/空目录）+ Xvfb 沙箱 9 张场景截图读回。
 - CLI 帮助全面 zh-CN 汉化（wezterm 与 wezterm-gui 两二进制的全部子命令
   树）：clap derive 的帮助文本来自 doc 注释，采取**运行时本地化**——
   parse 前经 `wezterm-gui-subcommands::localize_clap` 遍历命令树

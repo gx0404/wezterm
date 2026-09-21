@@ -2292,6 +2292,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["Shell"],
             icon: None,
         },
+        ShowWallpaperOverlay => CommandDef {
+            brief: "Manage Wallpapers".into(),
+            doc: "Shows the wallpaper manager overlay (batch 13)".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["WezTerm"],
+            icon: Some("md_image"),
+        },
     })
 }
 
@@ -2339,6 +2347,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ShowMainMenu,
         ShowKeybinds,
         ShowPaneContextMenu,
+        ShowWallpaperOverlay,
         // ----------------- View
         DecreaseFontSize,
         IncreaseFontSize,

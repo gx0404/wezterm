@@ -242,12 +242,15 @@ impl CachedImage {
     }
 }
 
+#[derive(Clone)]
 pub struct LoadedBackgroundLayer {
     pub source: Arc<ImageData>,
     pub def: BackgroundLayer,
 }
 
-fn load_background_layer(
+// fork: crate-visible so the wallpaper overlay can build preview layers
+// without touching the config (batch 13)
+pub(crate) fn load_background_layer(
     layer: &BackgroundLayer,
     dimensions: &Dimensions,
     render_metrics: &RenderMetrics,

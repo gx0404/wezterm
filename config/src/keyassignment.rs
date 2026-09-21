@@ -657,6 +657,8 @@ pub enum KeyAssignment {
     /// from a mouse binding it opens at the click position, otherwise
     /// centered in the window
     ShowPaneContextMenu,
+    /// fork: open the wallpaper manager overlay (batch 13)
+    ShowWallpaperOverlay,
     ActivateWindow(usize),
     ActivateWindowRelative(isize),
     ActivateWindowRelativeNoWrap(isize),

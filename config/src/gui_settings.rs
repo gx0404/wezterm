@@ -106,6 +106,13 @@ pub fn apply_to_lua<'l>(
         .eval()?;
 
     for (key, value) in obj {
+        // fork: fork-owned overlay keys are not Config fields; skip
+        // silently instead of warning on every load (batch 13)
+        if let Value::String(name) = key {
+            if GUI_OWNED_KEYS.contains(&name.as_str()) {
+                continue;
+            }
+        }
         let lkey = match luahelper::dynamic_to_lua_value(lua, key.clone()) {
             Ok(v) => v,
             Err(err) => {
@@ -199,6 +206,40 @@ pub fn store_key_in_dir(dir: Option<&Path>, key: &str, value: &Value) -> anyhow:
 pub fn peek_language() -> Option<UiLanguage> {
     let root = parse_file(&settings_path())?;
     root.get("language")?.as_str().and_then(UiLanguage::parse)
+}
+
+/// fork: keys owned by fork GUI overlays rather than the Config struct
+/// (e.g. the wallpaper overlay's `wallpaper` key, batch 13). They are
+/// persisted in the sidecar but consumed by the overlay / the lua
+/// backdrops module; applying them onto the lua config would warn
+/// about an invalid key on every load, so skip them silently here.
+const GUI_OWNED_KEYS: &[&str] = &["wallpaper"];
+
+/// Remove a single settings key, preserving the others (atomic write
+/// like `store_key`). Missing file / missing key is a no-op.
+pub fn delete_key(key: &str) -> anyhow::Result<()> {
+    delete_key_in_dir(None, key)
+}
+
+/// `delete_key` against an explicit config directory (WEZ-CFG-01).
+pub fn delete_key_in_dir(dir: Option<&Path>, key: &str) -> anyhow::Result<()> {
+    let path = settings_file_in_dir(dir);
+    let Some(mut root) = parse_file(&path) else {
+        return Ok(());
+    };
+    let Some(obj) = root.as_object_mut() else {
+        return Ok(());
+    };
+    if obj.remove(key).is_none() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&root)?)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
 }
 
 #[cfg(test)]
