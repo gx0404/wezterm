@@ -45,6 +45,32 @@ pub struct AgentProxy {
     sender: SyncSender<()>,
 }
 
+/// fork (WEZ-PERF-03/W12): remove agent.<pid> symlinks whose pid no
+/// longer exists. Runs once at mux startup; EPERM means the pid is
+/// alive but owned by someone else, which we must not reap.
+#[cfg(unix)]
+fn reap_dead_agent_links() {
+    let Ok(entries) = std::fs::read_dir(&*config::RUNTIME_DIR) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(|s| s.to_string()) else {
+            continue;
+        };
+        let Some(pid_str) = name.strip_prefix("agent.") else {
+            continue;
+        };
+        let Ok(pid) = pid_str.parse::<libc::pid_t>() else {
+            continue;
+        };
+        let alive = unsafe { libc::kill(pid, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+        if !alive {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 impl Drop for AgentProxy {
     fn drop(&mut self) {
         std::fs::remove_file(&self.sock_path).ok();
@@ -83,6 +109,12 @@ impl AgentProxy {
     pub fn new() -> Self {
         let pid = unsafe { libc::getpid() };
         let sock_path = config::RUNTIME_DIR.join(format!("agent.{pid}"));
+
+        // fork (WEZ-PERF-03/W12): reap agent.* symlinks whose owning
+        // pid is gone — a crashed or SIGKILLed mux never runs Drop, and
+        // the links used to accumulate forever (31 dead links observed
+        // on the dev machine).
+        reap_dead_agent_links();
 
         if let Some(inherited) = Self::default_ssh_auth_sock() {
             if let Err(err) = update_symlink(&inherited, &sock_path) {

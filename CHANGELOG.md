@@ -150,6 +150,11 @@
   wezterm 走 XIM（`xim_im_name`），这两个变量对它无效却经环境继承
   泄进每个 pane 子进程（pane 里的 GTK/Qt 程序被强指 fcitx，ibus
   机器错配）；Exec 行只保留 `XMODIFIERS`。
+- mux 启动时回收死 PID 的 `agent.<pid>` 符号链接（WEZ-PERF-03/W12）：
+  mux 崩溃/SIGKILL 时 `AgentProxy::drop` 不跑，链接永久残留（真机
+  31 个死链接实证）；`AgentProxy::new` 现在先 `reap_dead_agent_links()`
+  （kill(pid,0) 探活，EPERM 视为他人进程不碰）。gui-sock 死链已有
+  `discover_gui_socks` 清理；日志已有 GUI 启动时 7 天 prune。
 - 四个浮层响应滚轮（WZ-11）：设置/快捷键速查/命令面板/壁纸浮层
   的滚轮事件原先被 modal 的兜底 arm 静默吞掉；现在滚轮滚动列表
   视口（只滚 `top_row`，**不改键盘选中**——吸取 herdr C-20「浮层
