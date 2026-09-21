@@ -1757,6 +1757,28 @@ impl TermWindow {
     }
 }
 
+/// fork (WZ-15/W7): per-pane bell throttle decision, extracted pure so
+/// the debounce-vs-throttle semantics are unit testable. Returns
+/// (on_cooldown, next timestamp): the timestamp only moves when a bell
+/// is let through (throttle); a cooldown of zero disables throttling.
+fn bell_throttle(
+    last: Option<Instant>,
+    now: Instant,
+    cooldown: Duration,
+) -> (bool, Option<Instant>) {
+    if cooldown.is_zero() {
+        return (false, last);
+    }
+    let on_cooldown = last
+        .map(|at| now.duration_since(at) < cooldown)
+        .unwrap_or(false);
+    if on_cooldown {
+        (true, last)
+    } else {
+        (false, Some(now))
+    }
+}
+
 impl TermWindow {
     fn palette(&mut self) -> &ColorPalette {
         if self.palette.is_none() {
@@ -2011,20 +2033,18 @@ impl TermWindow {
 
     /// Returns true when this pane already rang within the configured
     /// `bell_cooldown_ms` window, so that bell storms from busy
-    /// programs collapse into a single audible/visual bell. Always
-    /// updates the per-pane bell timestamp.
+    /// `bell_cooldown_ms` window, so that bell storms from busy
+    /// programs collapse into a single audible/visual bell per window.
+    /// fork (WZ-15/W7): throttle, not debounce — the timestamp only
+    /// advances when a bell is let through, so a sustained bell stream
+    /// stays audible at one-bell-per-window cadence; advancing it on
+    /// every bell (debounce) muted the stream forever.
     fn bell_on_cooldown(&mut self, pane_id: PaneId) -> bool {
         let cooldown = Duration::from_millis(self.config.bell_cooldown_ms);
-        if cooldown.is_zero() {
-            return false;
-        }
         let now = Instant::now();
         let mut state = self.pane_state(pane_id);
-        let on_cooldown = state
-            .last_bell_at
-            .map(|at| now.duration_since(at) < cooldown)
-            .unwrap_or(false);
-        state.last_bell_at.replace(now);
+        let (on_cooldown, next) = bell_throttle(state.last_bell_at, now, cooldown);
+        state.last_bell_at = next;
         on_cooldown
     }
 
@@ -3932,5 +3952,36 @@ mod bell_suppression_tests {
                 "case {handling:?} focused={window_focused} in_tab={in_tab} in_pane={in_pane}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod bell_throttle_tests {
+    use super::bell_throttle;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn bell_throttle_lets_one_bell_through_per_window() {
+        let t0 = Instant::now();
+        let cooldown = Duration::from_millis(100);
+        // 首声放行并开窗
+        let (cool, mut last) = bell_throttle(None, t0, cooldown);
+        assert!(!cool);
+        // 窗内连响被压；时间戳不后移（throttle，不是 debounce）
+        let (cool, next) = bell_throttle(last, t0 + Duration::from_millis(50), cooldown);
+        assert!(cool);
+        assert_eq!(next, last);
+        let (cool, next) = bell_throttle(last, t0 + Duration::from_millis(99), cooldown);
+        assert!(cool);
+        assert_eq!(next, last);
+        // 窗后放行并重开窗——持续响铃流保持每窗一声，不会永久静音
+        let (cool, next) = bell_throttle(last, t0 + Duration::from_millis(101), cooldown);
+        assert!(!cool);
+        assert_eq!(next, Some(t0 + Duration::from_millis(101)));
+        last = next;
+        // 冷却 0 = 不节流（保留旧语义）
+        let (cool, next) = bell_throttle(last, t0 + Duration::from_millis(102), Duration::ZERO);
+        assert!(!cool);
+        assert_eq!(next, last);
     }
 }

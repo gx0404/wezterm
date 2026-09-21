@@ -139,6 +139,10 @@
 
 ### Fixed
 
+- bell 冷却从 debounce 改为 throttle（WZ-15/W7）：原先每次响铃都
+  后移冷却窗口，持续响铃流（构建日志/编译告警连发）被永久静音；
+  现在只在放行时开启新窗口，持续响铃保持「每窗口一声」的节奏可闻。
+  判定抽成纯函数 `bell_throttle` 并补 cadence 单测。
 - 菜单弹出后的配对 Release 不再穿透给应用（WZ-22）：菜单经鼠标
   绑定打开时（如 `ShowPaneContextMenu`），Press 已被 GUI 消费，
   松开时若指针在菜单外，Release 会落到 pane 形成孤儿 Release；
