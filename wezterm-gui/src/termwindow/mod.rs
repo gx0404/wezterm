@@ -3461,13 +3461,41 @@ impl TermWindow {
             match command.spawn() {
                 Ok(mut child) => {
                     use std::io::Write;
-                    if let Some(stdin) = child.stdin.as_mut() {
-                        if let Err(err) = stdin.write_all(text.as_bytes()) {
-                            log::error!("while piping selection: {err:#}");
+                    // fork (WZ-23): bound the pipe write and the child
+                    // wait. A child that never reads stdin used to pin a
+                    // detached thread forever on every invocation; now the
+                    // write happens on a helper thread and a stuck child is
+                    // killed after 5s (the write then fails with
+                    // BrokenPipe and both threads return).
+                    let writer = child.stdin.take().map(|mut stdin| {
+                        std::thread::spawn(move || {
+                            if let Err(err) = stdin.write_all(text.as_bytes()) {
+                                log::error!("while piping selection: {err:#}");
+                            }
+                        })
+                    });
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(_)) => break,
+                            Ok(None) if Instant::now() < deadline => {
+                                std::thread::sleep(Duration::from_millis(10));
+                            }
+                            Ok(None) => {
+                                log::error!("pipe selection command timed out after 5s; killing");
+                                let _ = child.kill();
+                                let _ = child.wait();
+                                break;
+                            }
+                            Err(err) => {
+                                log::error!("waiting for pipe selection child: {err:#}");
+                                break;
+                            }
                         }
                     }
-                    drop(child.stdin.take());
-                    let _ = child.wait();
+                    if let Some(writer) = writer {
+                        let _ = writer.join();
+                    }
                 }
                 Err(err) => log::error!("failed to spawn pipe selection command: {err:#}"),
             }
