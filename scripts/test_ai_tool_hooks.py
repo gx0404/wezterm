@@ -73,6 +73,31 @@ class EngineSemantics(unittest.TestCase):
         level, _ = self._eval("Bash", {"command": "git add -A"})
         self.assertEqual(level, "ask")
 
+    def test_ask_matches_command_position_only(self) -> None:
+        # ask 级模式锚定命令位置：真执行（含链式/包装/环境变量前缀）升级，
+        # 文本提及（heredoc 正文、搜索关键字、commit message）不命中。
+        for command in (
+            "pkill -9 wezterm",
+            "cargo build && pkill wezterm-gui",
+            "sudo killall wezterm",
+            "pgrep wezterm | xargs -r pkill -f",
+            "bash -c 'pkill wezterm'",
+            "bash <<'EOF'\npkill wezterm\nEOF",
+            "WEZTERM_X=1 pkill wezterm",
+            "cd /tmp && git add -A",
+            "if true; then git reset --hard HEAD~1; fi",
+            "git clean -fd",
+        ):
+            level, _ = self._eval("Bash", {"command": command})
+            self.assertEqual(level, "ask", command)
+        for command in (
+            "rg pkill docs/",
+            "python3 - <<'PYEOF'\ntext = '禁 pkill/猜 PID'\nprint(len(text))\nPYEOF",
+            "python3 - <<'PYEOF'\ntext = '禁 git add -A、git reset --hard 与 git clean'\nPYEOF",
+            "git commit -m 'docs: 说明为何不用 git add --all'",
+        ):
+            self.assertEqual(self._eval("Bash", {"command": command}), (None, None), command)
+
     def test_deny_read_credentials_via_cat(self) -> None:
         level, _ = self._eval("Bash", {"command": "cat ~/.ssh/id_rsa"})
         self.assertEqual(level, "deny")

@@ -10,6 +10,10 @@
 
 ## 0.2.0(2026-09-21)
 
+- `fix(hooks)`：PreToolUse 安全门的 ask 级模式（kill 类、`git add -A`、
+  `reset --hard`、`clean`、`--force-with-lease`）改为只在命令位置命中；heredoc
+  正文、搜索关键字、commit message 里的文本提及不再弹确认，真执行（含链式、
+  `sudo`/`xargs`/`bash -c` 包装、环境变量前缀）仍升级为 ask。
 - `fix(dotfiles)`：统一 Herdr/WezTerm 前缀和鼠标归属，修复独立配置误载旧模块；
   Windows shell 自动回退、WSL 使用发行版默认用户，正文改用常规字重。
 
