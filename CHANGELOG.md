@@ -139,6 +139,11 @@
 
 ### Fixed
 
+- 菜单弹出后的配对 Release 不再穿透给应用（WZ-22）：菜单经鼠标
+  绑定打开时（如 `ShowPaneContextMenu`），Press 已被 GUI 消费，
+  松开时若指针在菜单外，Release 会落到 pane 形成孤儿 Release；
+  modal 存在期间落点在外的 Release 一律吞掉（点外关闭仍只认
+  Press）。
 - 浮层定位的 `tab_bar_pixel_height().unwrap()` 全部改走
   `tab_bar_pixel_height_lossy()`（W8）：fancy tab bar 标题字体解析
   失败时，设置/快捷键/命令面板/壁纸等浮层在 GUI 事件循环里 unwrap

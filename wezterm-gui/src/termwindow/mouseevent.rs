@@ -420,6 +420,14 @@ impl super::TermWindow {
                 self.cancel_modal();
                 return;
             }
+            // fork (WZ-22): a release outside the modal is swallowed too.
+            // The press that opened the menu (eg: ShowPaneContextMenu on
+            // a mouse binding) was consumed by the GUI; letting the paired
+            // release fall through hands the application an orphan release
+            // it never saw the press for.
+            if !on_modal && matches!(event.kind, WMEK::Release(_)) {
+                return;
+            }
         }
 
         if let Some(item) = ui_item.clone() {
