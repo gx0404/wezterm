@@ -98,6 +98,28 @@ class EngineSemantics(unittest.TestCase):
         ):
             self.assertEqual(self._eval("Bash", {"command": command}), (None, None), command)
 
+    def test_deny_matches_command_position_only(self) -> None:
+        # deny 级同样锚定命令位置；重定向类模式（> 路径）无命令位置，不在此列。
+        for command in (
+            "make test && git push origin main --force",
+            "git -C /tmp/x push -f origin main",
+            "git --no-pager push upstream feature/x",
+            "bash -c 'cargo publish'",
+            "GH_TOKEN=x gh release create v9.9.9",
+            "bash <<'EOF'\ngit filter-branch --all\nEOF",
+            "echo x | sudo tee docs/changelog.md",
+            "if true; then git commit -m x --no-verify; fi",
+        ):
+            level, _ = self._eval("Bash", {"command": command})
+            self.assertEqual(level, "deny", command)
+        for command in (
+            "rg 'cargo publish' docs/",
+            "python3 - <<'PYEOF'\ntext = '禁 git push --force、git push upstream 与 cargo publish'\nPYEOF",
+            "python3 - <<'PYEOF'\ntext = '勿用 sed 改 docs/changelog.md，勿 cat ~/.ssh/id_rsa'\nPYEOF",
+            "git commit -m 'docs: 解释为何禁止 git push --force 与 gh release create'",
+        ):
+            self.assertEqual(self._eval("Bash", {"command": command}), (None, None), command)
+
     def test_deny_read_credentials_via_cat(self) -> None:
         level, _ = self._eval("Bash", {"command": "cat ~/.ssh/id_rsa"})
         self.assertEqual(level, "deny")
