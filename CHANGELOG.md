@@ -146,6 +146,10 @@
   pcall，空目录时 `_create_opts` 退化为纯色遮罩（不再产生
   `File=nil` 层），random/cycle 空表提前返回（`math.random(0)`
   抛错）。隔离验证：无 backdrops 目录的配置 `show-keys` 正常加载。
+- desktop entry 不再注入 `GTK_IM_MODULE`/`QT_IM_MODULE`（WEZ-CFG-06）：
+  wezterm 走 XIM（`xim_im_name`），这两个变量对它无效却经环境继承
+  泄进每个 pane 子进程（pane 里的 GTK/Qt 程序被强指 fcitx，ibus
+  机器错配）；Exec 行只保留 `XMODIFIERS`。
 - 四个浮层响应滚轮（WZ-11）：设置/快捷键速查/命令面板/壁纸浮层
   的滚轮事件原先被 modal 的兜底 arm 静默吞掉；现在滚轮滚动列表
   视口（只滚 `top_row`，**不改键盘选中**——吸取 herdr C-20「浮层

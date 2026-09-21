@@ -162,8 +162,10 @@ if [ -e "$HOME/.wezterm.lua" ]; then
 fi
 
 case "$IM" in
-   fcitx) IM_ENV="/usr/bin/env XMODIFIERS=@im=fcitx GTK_IM_MODULE=fcitx QT_IM_MODULE=fcitx " ;;
-   ibus)  IM_ENV="/usr/bin/env XMODIFIERS=@im=ibus GTK_IM_MODULE=ibus QT_IM_MODULE=ibus " ;;
+   # fork（WEZ-CFG-06）：wezterm 走 XIM（xim_im_name），GTK/QT_IM_MODULE
+   # 对它无效却经环境继承泄进每个 pane 子进程；只注入 XMODIFIERS。
+   fcitx) IM_ENV="/usr/bin/env XMODIFIERS=@im=fcitx " ;;
+   ibus)  IM_ENV="/usr/bin/env XMODIFIERS=@im=ibus " ;;
    none)  IM_ENV="" ;;
    *) die "--im must be fcitx|ibus|none" ;;
 esac
