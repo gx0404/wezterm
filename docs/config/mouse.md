@@ -131,6 +131,16 @@ Each entry in the mouse binding table can have the following fields:
   exception being that mouse wheel scrolling only applies when
   `alt_screen=false`, as the mouse wheel is typically mapped to arrow keys by
   the terminal in alt screen mode. {{since('20220807-113146-c2fee766', inline=True)}}.
+* `region` - an optional field that defaults to `'Any'` and scopes the
+  binding to a specific window region. {{since('nightly', inline=True)}}
+  Possible values: `'Pane'` (the terminal pane area), `'Tab'`, `'TabBar'`,
+  `'CloseTab'`, `'NewTabButton'`, `'MenuButton'` (the ☰ main-menu button),
+  `'LeftStatus'`, `'RightStatus'`, `'WindowButton'`, `'ScrollThumb'`,
+  `'AboveScrollThumb'`, `'BelowScrollThumb'`, `'Split'` and `'Modal'`
+  (modal overlays such as the command palette or context menus).
+  Bindings that name a region take precedence over region-less bindings
+  inside that region; region-less bindings never hijack clicks on window
+  chrome (they only match the pane area).
 
 The `action` and `mods` portions are described in more detail in the key assignment
 information below.

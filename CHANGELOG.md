@@ -104,6 +104,15 @@
   （workflow_dispatch / gx-v* tag 触发，产出四件套 zip 供 gx-bundle 组装）。
 - 领域规则 `docs/AGENT_RULES/dotfiles.md` + 路由；`dist/`、`target-gx-*/`
   入 `.gitignore` fork 段。
+- fork 新增配置项与 KeyAssignment 补全文档页（WZ-24）：
+  `docs/config/lua/config/` 新增 `language`、`mouse_right_click_menu`、
+  `show_menu_button_in_tab_bar`、`bell_notification_handling`、
+  `bell_requests_attention`、`bell_cooldown_ms`、`copy_mode_mark` 页；
+  `docs/config/lua/keyassignment/` 新增 `OpenSettings`、`ShowMainMenu`、
+  `ShowKeybinds`、`ShowPaneContextMenu`、`ShowWallpaperOverlay`、
+  `PipeSelection`、`MoveToLine` 页；`docs/config/mouse.md` 补 `region`
+  字段段。索引/nav 由 `ci/generate-docs.py` 链生成（`index.md` 是
+  ignored 生成物）。
 - `gx-sync --check` 接入 `make framework-check` 守门（WEZ-CFG-02）：
   本机配置/插件与仓库快照出现非登记差异时退出码 1，提示两个方向的
   补救命令（部署 `make gx-upgrade` / 回收 `GX_SYNC_WRITE=1 make gx-sync`）；
