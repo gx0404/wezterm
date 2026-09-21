@@ -903,12 +903,16 @@ impl Modal for WallpaperOverlay {
                     let (completed, _) = complete_path(&input);
                     *self.mode.borrow_mut() = Mode::Adding(completed);
                 }
-                (KeyCode::Char(c), KeyModifiers::NONE) => {
+                // fork: accept SHIFT for shifted characters (~, :, capitals)
+                // in the path input (review M1), same NONE|SHIFT idiom as
+                // the settings overlay filter
+                (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
                     let mut input = input;
                     input.push(c);
                     *self.mode.borrow_mut() = Mode::Adding(input);
                 }
-                _ => return Ok(false),
+                // 未消费键也吞掉，不泄漏给下层 pane（复审 M1）
+                _ => {}
             },
             Mode::ConfirmDelete(idx) => {
                 match (key, mods) {
