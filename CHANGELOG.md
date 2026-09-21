@@ -181,6 +181,21 @@
   的滚轮事件原先被 modal 的兜底 arm 静默吞掉；现在滚轮滚动列表
   视口（只滚 `top_row`，**不改键盘选中**——吸取 herdr C-20「浮层
   滚轮改写选中」的教训），Xvfb 截图核对视口滚动而选中行不动。
+- Shift+PageUp/Down 改 alt-screen 感知（WEZ-CFG-04）：原先宿主无条件
+  滚动 scrollback，alt screen 应用（herdr/Claude Code/vim）里静默
+  空操作；现在 alt screen 激活时透传 `\x1b[5;2~`/`\x1b[6;2~` 给应用，
+  普通 scrollback 下照旧 `ScrollByPage`。
+- 配置快照卫生（WEZ-HYG-01、WEZ-CFG-05）：删除死模块
+  `events/left-status.lua` 与 `utils/gpu-adapter.lua`（全树无
+  require）、`backups/` 4 个 2026-07 pre-flicker .bak 与
+  `config/appearance.lua.bak`（不再随安装分发）；删除
+  smart_workspace_switcher 的 `apply_to_config` 死 stub（从未调用，
+  本配置只手动绑定 `switch_workspace()`，避免插件默认键位与 leader
+  层冲突）。
+- 状态栏电池枚举早退与窗口状态表回收（WEZ-PERF-04）：无电池机器
+  （台式机）原先每 2 秒经 D-Bus 枚举一次电池；首次枚举为空即记住，
+  后续不再枚举；`last_status_by_window` 按 `gui_windows()` 对照回收
+  已关闭窗口的表项（原先永不回收）。
 - `PipeSelection` 的管道写与子进程等待加界（WZ-23）：原先每次
   调用新建一个 detached 线程，`write_all` 遇不读 stdin 的子进程
   永久阻塞、`wait` 无超时，线程逐次堆积。改为写入走辅助线程 +
