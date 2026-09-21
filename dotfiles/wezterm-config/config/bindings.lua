@@ -284,26 +284,26 @@ local keys = {
    { key = 's', mods = 'LEADER', action = act.OpenSettings },
    { key = 'w', mods = 'LEADER', action = act.ShowWallpaperOverlay },
 
-   -- plugins: workspace switcher (智能项目切换)
+   -- plugins: workspace switcher (智能项目切换；插件缺失时跳过，WEZ-CFG-03)
    {
       key = 's',
       mods = mod.SUPER,
-      action = workspace_switcher.switch_workspace(),
+      action = workspace_switcher and workspace_switcher.switch_workspace() or act.Nop,
    },
 
-   -- plugins: resurrect (会话保存/恢复)
+   -- plugins: resurrect (会话保存/恢复；插件缺失时跳过)
    {
       key = 'S',
       mods = mod.SUPER_REV,
-      action = wezterm.action_callback(function(win, _pane)
+      action = resurrect and wezterm.action_callback(function(win, _pane)
          resurrect.state_manager.save_state(resurrect.workspace_state.get_workspace_state())
          win:toast_notification('WezTerm', 'Workspace 状态已保存', nil, 2500)
-      end),
+      end) or act.Nop,
    },
    {
       key = 'r',
       mods = mod.SUPER_REV,
-      action = wezterm.action_callback(function(win, pane)
+      action = resurrect and wezterm.action_callback(function(win, pane)
          resurrect.fuzzy_loader.fuzzy_load(win, pane, function(id, _label)
             local state_type = string.match(id, '^([^/]+)')
             id = string.match(id, '([^/]+)$')
@@ -326,7 +326,7 @@ local keys = {
                resurrect.tab_state.restore_tab(pane:tab(), state, opts)
             end
          end)
-      end),
+      end) or act.Nop,
    },
 }
 

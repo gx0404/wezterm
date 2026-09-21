@@ -58,7 +58,10 @@ end
 ---   This throws a coroutine error if the function is invoked in outside of `wezterm.lua` in the -
 ---   initial load of the Terminal config.
 function BackDrops:set_images()
-   self.images = wezterm.glob(self.images_dir .. GLOB_PATTERN)
+   local ok, images = pcall(wezterm.glob, self.images_dir .. GLOB_PATTERN)
+   -- fork（WEZ-CFG-03）：glob 失败/目录不存在不拖垮配置加载；空表时
+   -- `_create_opts` 退化为纯色遮罩层。
+   self.images = (ok and images) or {}
    return self
 end
 
@@ -108,6 +111,10 @@ end
 ---@private
 ---@return table
 function BackDrops:_create_opts()
+   -- fork（WEZ-CFG-03）：壁纸目录为空时回退纯色遮罩，不产生 File=nil 层
+   if #self.images == 0 then
+      return self:_create_focus_opts()
+   end
    return {
       {
          source = { File = self.images[self.current_idx] },
@@ -202,6 +209,10 @@ end
 ---Pass in `Window` object to override the current window options
 ---@param window any? WezTerm `Window` see: https://wezfurlong.org/wezterm/config/lua/window/index.html
 function BackDrops:random(window)
+   -- fork（WEZ-CFG-03）：空目录时 math.random(0) 会抛错，提前返回
+   if #self.images == 0 then
+      return
+   end
    self.current_idx = math.random(#self.images)
 
    if window ~= nil then
@@ -212,6 +223,9 @@ end
 ---Cycle the loaded `files` and select the next background
 ---@param window any WezTerm `Window` see: https://wezfurlong.org/wezterm/config/lua/window/index.html
 function BackDrops:cycle_forward(window)
+   if #self.images == 0 then
+      return
+   end
    if self.current_idx == #self.images then
       self.current_idx = 1
    else
@@ -223,6 +237,9 @@ end
 ---Cycle the loaded `files` and select the previous background
 ---@param window any WezTerm `Window` see: https://wezfurlong.org/wezterm/config/lua/window/index.html
 function BackDrops:cycle_back(window)
+   if #self.images == 0 then
+      return
+   end
    if self.current_idx == 1 then
       self.current_idx = #self.images
    else

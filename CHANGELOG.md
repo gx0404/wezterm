@@ -139,6 +139,13 @@
 
 ### Fixed
 
+- 插件 require 与壁纸 glob 失败不再拖垮整份配置（WEZ-CFG-03）：
+  `config/plugins.lua` 的两个 `wezterm.plugin.require` 加 pcall，
+  离线/插件损坏时 bindings.lua 的三个插件键位降级为 `Nop`（其余
+  配置照常加载）；`utils/backdrops.lua` 的 `set_images` glob 加
+  pcall，空目录时 `_create_opts` 退化为纯色遮罩（不再产生
+  `File=nil` 层），random/cycle 空表提前返回（`math.random(0)`
+  抛错）。隔离验证：无 backdrops 目录的配置 `show-keys` 正常加载。
 - 四个浮层响应滚轮（WZ-11）：设置/快捷键速查/命令面板/壁纸浮层
   的滚轮事件原先被 modal 的兜底 arm 静默吞掉；现在滚轮滚动列表
   视口（只滚 `top_row`，**不改键盘选中**——吸取 herdr C-20「浮层
