@@ -1180,6 +1180,8 @@ impl CopyRenderable {
         let top = dims.scrollback_top;
         let rows = dims.scrollback_rows as usize;
         let idx = (self.cursor.y - top).max(0) as usize;
+        // WZ-10 计时埋点（trace 级）：`WEZTERM_LOG=wezterm_gui::overlay::copy=trace`
+        let scan_start = std::time::Instant::now();
         // WZ-10：分块预取代替逐行 get_lines——200k 行无空行日志曾要
         // 20 万次单行取数，UI 秒级假死；现在 200 次千行块取数。
         const CHUNK: usize = 1000;
@@ -1207,6 +1209,11 @@ impl CopyRenderable {
         });
         self.cursor.y = top + target as StableRowIndex;
         self.select_to_cursor_pos();
+        log::trace!(
+            "copy: paragraph scan of {} rows took {:?}",
+            rows,
+            scan_start.elapsed()
+        );
     }
 
     fn move_to_line(&mut self, line: isize) {
