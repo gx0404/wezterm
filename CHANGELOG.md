@@ -8,7 +8,7 @@
 `make version` 只读查询）。WezTerm 产品自身的版本号由 `wezterm-version/build.rs`
 按 git 提交时间与哈希生成，两套体系互不干扰（见 docs/RELEASE.md）。
 
-## 0.2.0(TBD)
+## 0.2.0(2026-09-21)
 
 - `fix(dotfiles)`：统一 Herdr/WezTerm 前缀和鼠标归属，修复独立配置误载旧模块；
   Windows shell 自动回退、WSL 使用发行版默认用户，正文改用常规字重。
@@ -433,7 +433,7 @@
   仅改 `dotfiles/wezterm-config/config/bindings.lua`；Oh My Zsh 侧
   `gx/wezterm/config/bindings.lua` 镜像由 ohmyzsh 车道同步。
 
-## 0.1.0(TBD)
+## 0.1.0(2026-09-20)
 
 ### Added
 
