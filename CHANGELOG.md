@@ -148,6 +148,19 @@
 
 ### Fixed
 
+- copy mode 段落跳转分块取行（WZ-10）：`move_to_paragraph_boundary`
+  原先对每行单独 `get_lines(y..y+1)`，200k 行无空行日志要 20 万次
+  单行取数（秒级假死）；改为千行块预取+缓存（取数次数 ≈ 行数/1000，
+  有单测钉住），空白判定改走 `visible_cells` 无分配迭代（与整行拼
+  字符串再 trim 判定一致）。既有 7 组 scan_paragraph 单测保持绿。
+  「扫描上限」经评估不引入：分块后全扫成本已在毫秒级，人为上限会
+  改变找不到空行时的语义。
+- 两个每帧热点的早退（W5/W14）：
+  `check_for_dirty_lines_and_invalidate_selection` 在无选区时直接
+  返回（原先每帧无条件取终端锁走视口算 dirty range——dirty 结果
+  只用于清选区，无选区必无效果；overlay pane 由同一路径覆盖）；
+  `update_text_cursor` 记住上次投递的光标矩形，相同则跳过
+  （原先每帧跨线程投递 promise）。
 - 插件 require 与壁纸 glob 失败不再拖垮整份配置（WEZ-CFG-03）：
   `config/plugins.lua` 的两个 `wezterm.plugin.require` 加 pcall，
   离线/插件损坏时 bindings.lua 的三个插件键位降级为 `Nop`（其余

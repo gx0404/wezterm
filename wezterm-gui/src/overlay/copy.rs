@@ -39,6 +39,38 @@ lazy_static::lazy_static! {
 
 const SEARCH_CHUNK_SIZE: StableRowIndex = 1000;
 
+/// 行是否空白：任一可见 cell 含非空白字符即非空。`visible_cells`
+/// 不分配字符串（WZ-10 的取数判定路径），宽字符的续 cell 不在迭代
+/// 结果里——与整行拼字符串再 trim 的旧实现判定一致。
+fn line_is_blank(line: &Line) -> bool {
+    !line
+        .visible_cells()
+        .any(|cell| cell.str().chars().any(|c| !c.is_whitespace()))
+}
+
+/// WZ-10 分块取数的窗口计算（纯函数）：查询行 `i` 落在当前缓存窗口
+/// `[start, start+len)` 之外时，给出下一次千行块的取数区间 `[s, e)`
+/// （向段首扫覆盖 `i` 向上回溯，向段尾扫覆盖 `i` 向下顺延）；
+/// 命中缓存返回 None。
+fn paragraph_chunk_window(
+    i: usize,
+    start: usize,
+    len: usize,
+    rows: usize,
+    want_start: bool,
+) -> Option<(usize, usize)> {
+    const CHUNK: usize = 1000;
+    if i >= start && i < start + len {
+        return None;
+    }
+    let (s, e) = if want_start {
+        (i.saturating_sub(CHUNK - 1), (i + 1).min(rows))
+    } else {
+        (i, (i + CHUNK).min(rows))
+    };
+    Some((s, e))
+}
+
 /// Scan for the first/last row of the paragraph containing (or, when
 /// starting from a blank separator row or from an existing boundary,
 /// the adjacent paragraph in the requested direction). `is_blank(i)`
@@ -1142,22 +1174,36 @@ impl CopyRenderable {
         self.window.invalidate();
     }
 
-    fn row_is_blank(&self, y: StableRowIndex) -> bool {
-        let (_top, lines) = self.delegate.get_lines(y..y + 1);
-        match lines.get(0) {
-            Some(line) => line.columns_as_str(0..line.len()).trim().is_empty(),
-            None => true,
-        }
-    }
-
     fn move_to_paragraph_boundary(&mut self, want_start: bool) {
         self.clamp_cursor_to_scrollback();
         let dims = self.delegate.get_dimensions();
         let top = dims.scrollback_top;
         let rows = dims.scrollback_rows as usize;
         let idx = (self.cursor.y - top).max(0) as usize;
+        // WZ-10：分块预取代替逐行 get_lines——200k 行无空行日志曾要
+        // 20 万次单行取数，UI 秒级假死；现在 200 次千行块取数。
+        const CHUNK: usize = 1000;
+        let cache: std::cell::RefCell<(usize, Vec<bool>)> =
+            std::cell::RefCell::new((usize::MAX, Vec::new()));
         let target = scan_paragraph(rows, idx, want_start, |i| {
-            self.row_is_blank(top + i as StableRowIndex)
+            let mut c = cache.borrow_mut();
+            let (ref mut start, ref mut blanks) = *c;
+            if let Some((s, e)) = paragraph_chunk_window(i, *start, blanks.len(), rows, want_start)
+            {
+                let (_t, lines) = self
+                    .delegate
+                    .get_lines(top + s as StableRowIndex..top + e as StableRowIndex);
+                *blanks = (s..e)
+                    .map(|r| {
+                        lines
+                            .get(r - s)
+                            .map(|line| line_is_blank(line))
+                            .unwrap_or(true)
+                    })
+                    .collect();
+                *start = s;
+            }
+            blanks[i - *start]
         });
         self.cursor.y = top + target as StableRowIndex;
         self.select_to_cursor_pos();
@@ -2326,5 +2372,35 @@ mod paragraph_tests {
         // A cursor beyond the end is clamped to the last row
         assert_eq!(scan("TT_TT", 9, false), 4);
         assert_eq!(scan("TT_TT", 9, true), 3);
+    }
+
+    #[test]
+    fn paragraph_scan_fetches_in_thousand_row_chunks() {
+        // WZ-10：200k 行无空行日志的段落跳转，取数次数 ≈ 行数/1000
+        // 而不是逐行一次（旧实现 20 万次单行 get_lines 秒级假死）
+        use super::paragraph_chunk_window;
+        let rows = 200_000usize;
+        for want_start in [true, false] {
+            let fetches = std::cell::Cell::new(0usize);
+            let window = std::cell::RefCell::new((usize::MAX, 0usize)); // (start, len)
+            let cursor = if want_start { rows - 1 } else { 0 };
+            let target = scan_paragraph(rows, cursor, want_start, |i| {
+                let mut w = window.borrow_mut();
+                if let Some((s, e)) = paragraph_chunk_window(i, w.0, w.1, rows, want_start) {
+                    assert!(i >= s && i < e, "chunk [{s},{e}) must contain {i}");
+                    fetches.set(fetches.get() + 1);
+                    *w = (s, e - s);
+                }
+                false // no blank rows anywhere
+            });
+            // no blank separator: start stays at row 0 / end at the last row
+            assert_eq!(target, if want_start { 0 } else { rows - 1 });
+            let fetches = fetches.get();
+            assert!(
+                fetches <= rows / 1000 + 2,
+                "want_start={want_start}: {fetches} fetches, expected ~{}",
+                rows / 1000
+            );
+        }
     }
 }

@@ -422,6 +422,10 @@ pub struct TermWindow {
     current_mouse_event: Option<MouseEvent>,
     prev_cursor: PrevCursorPos,
     last_scroll_info: RenderableDimensions,
+    /// fork (W14): last text-cursor rect delivered to the window; the
+    /// delivery crosses a thread boundary, so repeat positions are
+    /// suppressed locally instead of round-tripping every frame.
+    last_text_cursor_rect: Option<Rect>,
 
     tab_state: RefCell<HashMap<TabId, TabState>>,
     pane_state: RefCell<HashMap<PaneId, PaneState>>,
@@ -754,6 +758,7 @@ impl TermWindow {
             current_modifier_and_leds: Default::default(),
             prev_cursor: PrevCursorPos::new(),
             last_scroll_info: RenderableDimensions::default(),
+            last_text_cursor_rect: None,
             tab_state: RefCell::new(HashMap::new()),
             pane_state: RefCell::new(HashMap::new()),
             current_mouse_buttons: vec![],
@@ -1719,6 +1724,13 @@ impl TermWindow {
     }
 
     fn check_for_dirty_lines_and_invalidate_selection(&mut self, pane: &Arc<dyn Pane>) {
+        // fork (W5): with no selection there is nothing to invalidate;
+        // computing the dirty range takes the terminal lock and walks the
+        // viewport on every frame otherwise. Overlay panes are covered by
+        // the same early-exit: the overlay arm below never clears anyway.
+        if self.selection(pane.pane_id()).range.is_none() {
+            return;
+        }
         let dims = pane.get_dimensions();
         let viewport = self
             .get_viewport(pane.pane_id())
@@ -2311,6 +2323,13 @@ impl TermWindow {
                 ),
                 self.render_metrics.cell_size,
             );
+            // fork (W14): set_text_cursor_position crosses a thread
+            // boundary on every call; skip the delivery when the rect
+            // didn't change (the cursor sits still between frames).
+            if self.last_text_cursor_rect == Some(r) {
+                return;
+            }
+            self.last_text_cursor_rect = Some(r);
             win.set_text_cursor_position(r);
         }
     }
