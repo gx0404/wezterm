@@ -36,6 +36,14 @@
   浮层入口三键 `Leader m` 主菜单 / `Leader s` 设置 / `Leader k` 快捷键
   速查（fork 的 `disable_default_key_bindings=true` 使内建默认键
   `Ctrl+Shift+M/,//` 不生效，需显式绑定）。
+- 2026-09-21 批 12（WEZ-CFG-04）：`config/bindings.lua` 的
+  `Shift+PageUp/Down` 改为 alt-screen 感知——alt screen 应用（herdr/
+  Claude Code/vim）里透传 `\x1b[5;2~`/`\x1b[6;2~`，普通 scrollback
+  下照旧 `ScrollByPage`；原先宿主无条件滚动，alt screen 下静默空操作。
+- 2026-09-21 批 13：壁纸管理浮层键位 `Leader w`（`ShowWallpaperOverlay`）；
+  `utils/backdrops.lua` 新增 `set_default_from_sidecar()`（启动/重载时
+  按 `gui-settings.json` 的 `wallpaper` 键覆盖默认壁纸），wezterm.lua
+  在 `set_default` 后链式调用。
 
 ## plugins/
 

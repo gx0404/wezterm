@@ -231,8 +231,30 @@ local keys = {
    -- panes: scroll pane
    { key = 'u',        mods = mod.SUPER, action = act.ScrollByLine(-5) },
    { key = 'd',        mods = mod.SUPER, action = act.ScrollByLine(5) },
-   { key = 'PageUp',   mods = platform.is_linux and 'SHIFT' or 'NONE', action = act.ScrollByPage(-0.75) },
-   { key = 'PageDown', mods = platform.is_linux and 'SHIFT' or 'NONE', action = act.ScrollByPage(0.75) },
+   -- WEZ-CFG-04：alt-screen 应用（herdr/Claude Code/vim）里 Shift+PageUp/Down
+   -- 透传给应用；宿主 ScrollByPage 在 alt screen 下是静默空操作。
+   {
+      key = 'PageUp',
+      mods = platform.is_linux and 'SHIFT' or 'NONE',
+      action = wezterm.action_callback(function(window, pane)
+         if pane:is_alt_screen_active() then
+            window:perform_action(act.SendString('\x1b[5;2~'), pane)
+         else
+            window:perform_action(act.ScrollByPage(-0.75), pane)
+         end
+      end),
+   },
+   {
+      key = 'PageDown',
+      mods = platform.is_linux and 'SHIFT' or 'NONE',
+      action = wezterm.action_callback(function(window, pane)
+         if pane:is_alt_screen_active() then
+            window:perform_action(act.SendString('\x1b[6;2~'), pane)
+         else
+            window:perform_action(act.ScrollByPage(0.75), pane)
+         end
+      end),
+   },
 
    -- key-tables --
    -- resizes fonts
