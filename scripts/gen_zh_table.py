@@ -749,7 +749,11 @@ def esc(s: str) -> str:
 def main() -> None:
     pairs = sorted(PAIRS, key=lambda p: p[0].encode("utf-8"))
     keys = [k for k, _ in pairs]
-    assert len(keys) == len(set(keys)), "duplicate keys!"
+    # fork (WEZ-GEN-01): explicit check instead of assert so `python -O`
+    # cannot silently skip it
+    if len(keys) != len(set(keys)):
+        dupes = sorted({k for k in keys if keys.count(k) > 1})
+        raise SystemExit(f"duplicate keys in PAIRS: {dupes}")
     print("//! zh-CN 译表：按 key（英文原文）字典序排序，binary_search 查找。")
     print("//! 新增条目必须保持有序（`i18n::tests::zh_table_sorted_unique` 守门）；")
     print("//! 重建用 `python3 scripts/gen_zh_table.py`（见脚本内说明）。")

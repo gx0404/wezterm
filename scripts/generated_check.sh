@@ -66,6 +66,16 @@ if [ -d "${TMP}/docs" ]; then
     done < <(git -C "${ROOT}" ls-files -- docs)
 fi
 
+# fork（WEZ-GEN-01）：zh-CN 译表派生比对——重跑 gen_zh_table.py
+# 与入库的 config/src/i18n/zh_cn.rs 逐字节比对
+if python3 "${ROOT}/scripts/gen_zh_table.py" > "${TMP}/zh_cn.rs" 2>/dev/null; then
+    if ! cmp -s "${TMP}/zh_cn.rs" "${ROOT}/config/src/i18n/zh_cn.rs"; then
+        bad "config/src/i18n/zh_cn.rs（重跑 python3 scripts/gen_zh_table.py > config/src/i18n/zh_cn.rs）"
+    fi
+else
+    note "gen_zh_table.py 执行失败，跳过译表比对"
+fi
+
 if [ "${fail}" -ne 0 ]; then
     echo "[generated-check] FAIL：存在漂移（见上）" >&2
     exit 1
