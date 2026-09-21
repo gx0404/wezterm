@@ -16,9 +16,9 @@ local resurrect = try_require('https://github.com/MLFlexer/resurrect.wezterm')
 
 -- smart_workspace_switcher: 智能 workspace 切换
 local workspace_switcher = try_require('https://github.com/MLFlexer/smart_workspace_switcher.wezterm')
-if workspace_switcher then
-   workspace_switcher.apply_to_config = workspace_switcher.apply_to_config or function() end
-end
+-- fork（WEZ-CFG-05）：不调用 apply_to_config——本配置只手动绑定
+-- switch_workspace()（SUPER+s），避免插件默认键位/事件与本仓 leader
+-- 层冲突；原先给 apply_to_config 打的 stub 是死代码，已删除。
 
 return {
    resurrect = resurrect,
