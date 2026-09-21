@@ -394,7 +394,7 @@ impl CharSelector {
         let metrics = RenderMetrics::with_font_metrics(&font.metrics());
 
         let top_bar_height = if term_window.show_tab_bar && !term_window.config.tab_bar_at_bottom {
-            term_window.tab_bar_pixel_height().unwrap()
+            term_window.tab_bar_pixel_height_lossy()
         } else {
             0.
         };

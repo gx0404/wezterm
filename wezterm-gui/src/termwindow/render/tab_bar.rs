@@ -122,4 +122,18 @@ impl crate::TermWindow {
     pub fn tab_bar_pixel_height(&self) -> anyhow::Result<f32> {
         Self::tab_bar_pixel_height_impl(&self.config, &self.fonts, &self.render_metrics)
     }
+
+    /// fork (W8): lossy variant for overlay positioning. The fancy bar's
+    /// title font may fail to resolve; unwrapping that Result inside the
+    /// GUI event loop (settings/keybinds/menu overlays) used to panic the
+    /// whole process. Fall back to the cell height with a warning.
+    pub fn tab_bar_pixel_height_lossy(&self) -> f32 {
+        match self.tab_bar_pixel_height() {
+            Ok(h) => h,
+            Err(err) => {
+                log::warn!("tab_bar_pixel_height: {err:#}");
+                self.render_metrics.cell_size.height as f32
+            }
+        }
+    }
 }

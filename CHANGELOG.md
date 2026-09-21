@@ -139,6 +139,11 @@
 
 ### Fixed
 
+- 浮层定位的 `tab_bar_pixel_height().unwrap()` 全部改走
+  `tab_bar_pixel_height_lossy()`（W8）：fancy tab bar 标题字体解析
+  失败时，设置/快捷键/命令面板/壁纸等浮层在 GUI 事件循环里 unwrap
+  一个 Result 直接 panic 整个进程；回退到单元格高度并告警（渲染
+  主路径本就走 `?`/容错，不受影响）。
 - 设置页枚举分支新增 key 不再 panic（WZ-21）：`next_enum_value` /
   `enum_display` 的兜底 `unreachable!()` 改为告警并回退（Null 哨兵
   由 `activate` 守卫不落盘、显示占位「?」），漏加分支从 GUI 崩溃

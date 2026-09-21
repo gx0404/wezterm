@@ -274,7 +274,7 @@ impl CommandPalette {
             .scale_line_height(term_window.config.command_palette_line_height);
 
         let top_bar_height = if term_window.show_tab_bar && !term_window.config.tab_bar_at_bottom {
-            term_window.tab_bar_pixel_height().unwrap()
+            term_window.tab_bar_pixel_height_lossy()
         } else {
             0.
         };

@@ -2274,7 +2274,7 @@ impl TermWindow {
             let cursor = pos.pane.get_cursor_position();
             let top = pos.pane.get_dimensions().physical_top;
             let tab_bar_height = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
-                self.tab_bar_pixel_height().unwrap()
+                self.tab_bar_pixel_height_lossy()
             } else {
                 0.0
             };
@@ -3331,7 +3331,7 @@ impl TermWindow {
                 // ☰ button dropdown placement
                 let border = self.get_os_border();
                 let top_bar_height = if self.show_tab_bar && !self.config.tab_bar_at_bottom {
-                    self.tab_bar_pixel_height().unwrap()
+                    self.tab_bar_pixel_height_lossy()
                 } else {
                     0.
                 };
