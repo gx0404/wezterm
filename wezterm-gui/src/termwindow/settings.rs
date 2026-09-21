@@ -408,6 +408,15 @@ impl SettingsOverlay {
         self.top_row.replace(0);
     }
 
+    fn scroll_rows(&self, delta: isize) {
+        let items_len = self.visible_items().len();
+        let max_rows = (*self.visible_rows.borrow()).max(1);
+        let max_top = items_len.saturating_sub(max_rows);
+        let mut top_row = self.top_row.borrow_mut();
+        // WZ-11：滚轮只滚视口，不改键盘选中（herdr C-20 同款教训）
+        *top_row = (*top_row as isize + delta).clamp(0, max_top as isize) as usize;
+    }
+
     /// 移动选中行，并在配色列表里顺带预览
     fn move_and_preview(&self, delta: isize, term_window: &mut TermWindow) {
         self.move_selection(delta);
@@ -987,6 +996,11 @@ impl Modal for SettingsOverlay {
             return Ok(());
         }
         match event.kind {
+            // WZ-11：滚轮滚视口（不改键盘选中）
+            WMEK::VertWheel(amount) => {
+                self.scroll_rows(-amount as isize);
+                term_window.invalidate_modal();
+            }
             WMEK::Move => {
                 let items = self.visible_items();
                 if row < items.len() && *self.selected.borrow() != row {

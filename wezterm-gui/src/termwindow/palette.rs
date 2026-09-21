@@ -549,6 +549,20 @@ impl CommandPalette {
             *top_row = row.saturating_sub(max_rows_on_screen - 1);
         }
     }
+
+    /// fork (WZ-11)：滚轮只滚视口，不改键盘/悬停选中
+    fn scroll_rows(&self, delta: isize) {
+        let limit = self
+            .matches
+            .borrow()
+            .as_ref()
+            .map(|m| m.matches.len())
+            .unwrap_or_else(|| self.commands.len());
+        let max_rows = (*self.max_rows_on_screen.borrow()).max(1);
+        let max_top = limit.saturating_sub(max_rows);
+        let mut top_row = self.top_row.borrow_mut();
+        *top_row = (*top_row as isize + delta).clamp(0, max_top as isize) as usize;
+    }
 }
 
 impl CommandPalette {
@@ -598,6 +612,11 @@ impl Modal for CommandPalette {
             return Ok(());
         }
         match event.kind {
+            // fork (WZ-11)：滚轮滚视口
+            WMEK::VertWheel(amount) => {
+                self.scroll_rows(-(amount as isize));
+                term_window.invalidate_modal();
+            }
             WMEK::Move => {
                 // Hovering a row selects it, mirroring the keyboard UX
                 if row < self.commands.len() && *self.selected_row.borrow() != row {

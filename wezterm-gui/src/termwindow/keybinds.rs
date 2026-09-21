@@ -58,6 +58,15 @@ impl KeybindsOverlay {
         }
     }
 
+    /// WZ-11：滚轮只滚视口，不改选中
+    fn scroll_rows(&self, delta: isize) {
+        let len = self.commands.len();
+        let max_rows = (*self.max_rows_on_screen.borrow()).max(1);
+        let max_top = len.saturating_sub(max_rows);
+        let mut top_row = self.top_row.borrow_mut();
+        *top_row = (*top_row as isize + delta).clamp(0, max_top as isize) as usize;
+    }
+
     fn compute(&self, term_window: &mut TermWindow) -> anyhow::Result<Vec<ComputedElement>> {
         let font = term_window
             .fonts
@@ -304,6 +313,12 @@ impl Modal for KeybindsOverlay {
     ) -> anyhow::Result<()> {
         use ::window::MouseEventKind as WMEK;
         if row == MODAL_CHROME_ROW {
+            return Ok(());
+        }
+        // WZ-11：滚轮滚视口
+        if let WMEK::VertWheel(amount) = event.kind {
+            self.scroll_rows(-(amount as isize));
+            term_window.invalidate_modal();
             return Ok(());
         }
         if let WMEK::Move = event.kind {

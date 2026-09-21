@@ -326,6 +326,15 @@ impl WallpaperOverlay {
         true
     }
 
+    /// WZ-11：滚轮只滚视口，不改键盘选中
+    fn scroll_rows(&self, delta: isize) {
+        let len = self.entries.borrow().len();
+        let max_rows = (*self.max_rows_on_screen.borrow()).max(1);
+        let max_top = len.saturating_sub(max_rows);
+        let mut top_row = self.top_row.borrow_mut();
+        *top_row = (*top_row as isize + delta).clamp(0, max_top as isize) as usize;
+    }
+
     /// 实时预览选中行（只换背景层，不重载 Lua）
     fn preview_selected(&self, term_window: &mut TermWindow) {
         let entries = self.entries.borrow();
@@ -798,6 +807,11 @@ impl Modal for WallpaperOverlay {
             return Ok(());
         }
         match event.kind {
+            // WZ-11：滚轮滚视口
+            WMEK::VertWheel(amount) => {
+                self.scroll_rows(-(amount as isize));
+                term_window.invalidate_modal();
+            }
             WMEK::Move => {
                 let len = self.entries.borrow().len();
                 if row < len && *self.selected.borrow() != row {
