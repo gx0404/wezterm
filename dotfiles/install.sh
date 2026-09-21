@@ -78,7 +78,7 @@ fi
 log()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
-plan() { [ "$CHECK" = 1 ] && printf '  [plan] %s\n' "$*" || log "$*"; }
+plan() { if [ "$CHECK" = 1 ]; then printf '  [plan] %s\n' "$*"; else log "$*"; fi; }
 
 # ---------------------------------------------------------------- preflight --
 command -v ldd >/dev/null || die "ldd not found; cannot verify binary compatibility"
@@ -87,7 +87,7 @@ ARCH="$(uname -m)"
 
 GLIBC_MIN="2.31"
 if [ -f "$ROOT/manifest.env" ]; then
-   # shellcheck disable=SC1091
+   # shellcheck source=/dev/null
    . "$ROOT/manifest.env"
 fi
 # 注意：pipefail 下不要用 `cmd | head -n1`——head 早退会让上游吃 SIGPIPE(141)，
@@ -158,6 +158,7 @@ if [ "$(id -u)" = 0 ]; then
    warn "running as root: everything installs under $HOME only"
 fi
 if [ -e "$HOME/.wezterm.lua" ]; then
+   # shellcheck disable=SC2088 # 提示文案故意原样显示 ~
    warn "~/.wezterm.lua exists and takes precedence over ~/.config/wezterm/wezterm.lua"
 fi
 
@@ -172,7 +173,8 @@ esac
 
 backup_existing() {
    [ ! -e "$1" ] && return 0
-   local bk="$1.bak-gx-$(date +%Y%m%d-%H%M%S)"
+   local bk
+   bk="$1.bak-gx-$(date +%Y%m%d-%H%M%S)"
    plan "backup $1 -> $bk"
    [ "$CHECK" = 1 ] && return 0
    cp -a "$1" "$bk"
@@ -277,7 +279,9 @@ if [ "$WANT_DESKTOP" = 1 ]; then
           -e "s|__TRYEXEC__|$BIN_DIR/wezterm-gui|g" \
           -e "s|__EXEC__|$IM_ENV$BIN_DIR/wezterm-gui start --cwd .|g" \
           "$DOTFILES/templates/org.wezfurlong.wezterm.desktop.template" > "$ENTRY"
-      command -v update-desktop-database >/dev/null && update-desktop-database "$APPS" || true
+      if command -v update-desktop-database >/dev/null; then
+         update-desktop-database "$APPS" || true
+      fi
    fi
 else
    step "desktop entry skipped (--no-desktop)"

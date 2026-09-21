@@ -17,7 +17,7 @@ if ! command -v cargo >/dev/null; then
    say "cargo not found"
    if ask "install rustup (stable, minimal profile) now?"; then
       curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
-      # shellcheck disable=SC1091
+      # shellcheck source=/dev/null
       . "$HOME/.cargo/env"
    else
       echo "install rust first: https://wezterm.org/install/source.html" >&2
