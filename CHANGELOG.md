@@ -139,6 +139,10 @@
 
 ### Fixed
 
+- 设置页枚举分支新增 key 不再 panic（WZ-21）：`next_enum_value` /
+  `enum_display` 的兜底 `unreachable!()` 改为告警并回退（Null 哨兵
+  由 `activate` 守卫不落盘、显示占位「?」），漏加分支从 GUI 崩溃
+  降级为一次日志。
 - 修复全是分隔符的上下文菜单按方向键死循环冻结 GUI（WZ-17）：
   `ContextMenu::move_selection` 的「跳到可选行」循环无上限，整圈
   无可选行时永不退出；改为最多扫一遍（len 步），全分隔符菜单

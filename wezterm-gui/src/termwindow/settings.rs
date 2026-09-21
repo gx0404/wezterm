@@ -436,6 +436,12 @@ impl SettingsOverlay {
         // 预览是窗口级临时状态，落地前一律丢掉，让持久化后的配置成为唯一真源
         self.clear_preview(term_window);
         let (key, value) = pending_write(&item, &current_config());
+        // WZ-21 守卫：未知枚举 key 的 Null 哨兵不落盘（正常写入路径
+        // 永远不会写 Null）
+        if matches!(value, Value::Null) {
+            log::warn!("settings: skip persist for unknown enum key {key:?}");
+            return;
+        }
         if let Err(err) = persist_and_reload(key, &value) {
             log::error!("settings: failed to apply: {err:#}");
         }
@@ -862,7 +868,12 @@ fn next_enum_value(config: &Config, key: &str) -> Value {
             };
             next.to_dynamic()
         }
-        _ => unreachable!("unknown enum settings key"),
+        // fork (WZ-21): 新增枚举 key 漏加分支时告警并回退 Null（调用方
+        // 守卫不写），不 panic 整个 GUI 进程
+        _ => {
+            log::warn!("settings: unknown enum settings key {key:?}");
+            Value::Null
+        }
     }
 }
 
@@ -876,7 +887,11 @@ fn enum_display(config: &Config, key: &str) -> std::borrow::Cow<'static, str> {
             WindowCloseConfirmation::AlwaysPrompt => tr("Always prompt"),
             WindowCloseConfirmation::NeverPrompt => tr("Never prompt"),
         },
-        _ => unreachable!("unknown enum settings key"),
+        // fork (WZ-21): 同 next_enum_value，告警并显示占位而不 panic
+        _ => {
+            log::warn!("settings: unknown enum settings key {key:?}");
+            "?".into()
+        }
     }
 }
 
