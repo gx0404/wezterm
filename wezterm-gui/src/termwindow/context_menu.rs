@@ -110,12 +110,17 @@ impl ContextMenu {
             return;
         }
         let mut selected = self.selected.borrow_mut();
-        loop {
+        // fork (WZ-17): bail out after a full lap without finding a
+        // selectable row — a menu of pure separators used to spin here
+        // and freeze the GUI.
+        for _ in 0..len {
             let next = (*selected as isize + delta).rem_euclid(len as isize) as usize;
-            *selected = next;
             if self.row_is_selectable(next) {
+                *selected = next;
                 break;
             }
+            // 把游标先挪过去，下一圈才能继续探测后面的行
+            *selected = next;
         }
     }
 
@@ -522,5 +527,25 @@ mod tests {
         let (_, height) = menu_box_size(MIN_WIDTH_CELLS, 3, 9., 20.);
         let rows = 3. * 20. * (1. + 2. * ROW_PADDING_V_CELLS);
         assert!(height > rows, "height={} rows={}", height, rows);
+    }
+
+    #[test]
+    fn all_separator_menu_does_not_hang() {
+        // WZ-17：全是分隔符的菜单按方向键必须在有限步内返回
+        let menu = ContextMenu::new(vec![(None, None), (None, None), (None, None)], 0., 0.);
+        menu.move_selection(1);
+        menu.move_selection(-1);
+        // 部分可选时照旧跳到可选行
+        let menu2 = ContextMenu::new(
+            vec![
+                (None, None),
+                (Some("x".to_string()), Some(KeyAssignment::Nop)),
+                (None, None),
+            ],
+            0.,
+            0.,
+        );
+        menu2.move_selection(1);
+        assert_eq!(*menu2.selected.borrow(), 1);
     }
 }
