@@ -1939,20 +1939,26 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
                 icon: Some("oct_browser"),
             },
         },
-        SendString(text) => CommandDef {
-            brief: fillc(
-                &tr("Sends `{text}` to the active pane, as though you typed it"),
-                &[("text", text)],
-            ),
-            doc: fillc(
-                &tr("Sends `{text}` to the active pane, as though you typed it"),
-                &[("text", text)],
-            ),
-            keys: vec![],
-            args: &[],
-            menubar: &[],
-            icon: Some("md_keyboard_variant"),
-        },
+        SendString(text) => {
+            // fork: escape ASCII control characters so the cheatsheet and
+            // command palette don't ask fonts for glyphs of C0 codes
+            // (e.g. SendString '\x12' used to trigger a \u{12} font warning).
+            let display: String = text.chars().flat_map(|c| c.escape_debug()).collect();
+            CommandDef {
+                brief: fillc(
+                    &tr("Sends `{text}` to the active pane, as though you typed it"),
+                    &[("text", &display)],
+                ),
+                doc: fillc(
+                    &tr("Sends `{text}` to the active pane, as though you typed it"),
+                    &[("text", &display)],
+                ),
+                keys: vec![],
+                args: &[],
+                menubar: &[],
+                icon: Some("md_keyboard_variant"),
+            }
+        }
         SendKey(key) => CommandDef {
             brief: fillc(
                 &tr("Sends {key} to the active pane, as though you typed it"),
@@ -2468,6 +2474,26 @@ mod tests {
             "command table localization gaps:\n{}",
             missing.join("\n")
         );
+    }
+
+    #[test]
+    fn send_string_brief_escapes_control_characters() {
+        // fork: SendString payloads may embed C0 controls (F8 -> '\x12');
+        // the rendered brief/doc must not contain raw control chars,
+        // otherwise the GUI asks fonts for e.g. \u{12} glyphs.
+        let def = derive_command_from_key_assignment(&KeyAssignment::SendString("\x12".into()))
+            .expect("SendString maps to a command");
+        for text in [&def.brief, &def.doc] {
+            assert!(text.contains("\\u{12}"), "escaped form present: {text}");
+            assert!(
+                !text.chars().any(|c| c.is_ascii_control()),
+                "no raw control chars: {text:?}"
+            );
+        }
+        // printable text passes through untouched
+        let def = derive_command_from_key_assignment(&KeyAssignment::SendString("ls -la".into()))
+            .expect("SendString maps to a command");
+        assert!(def.brief.contains("ls -la"), "{}", def.brief);
     }
 
     #[test]

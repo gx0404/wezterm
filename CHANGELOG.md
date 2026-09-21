@@ -148,6 +148,13 @@
 
 ### Fixed
 
+- 键表速查浮层与命令面板渲染 `SendString` 动作时转义 ASCII 控制字符
+  （`escape_debug`，与 `inputmap.rs` 既有惯例一致）：配置里
+  `act.SendString '\x12'`（F8=Ctrl+R 历史搜索）这类绑定此前把字面
+  C0 控制字符塞进显示文本，触发「Font problem: no fonts contain glyphs
+  for \u{12}」告警并显示占位符；现在显示为可读的 `\u{12}` 转义形式。
+  新增单测 `send_string_brief_escapes_control_characters` 钉住
+  「无原始控制字符 + 可打印文本透传」。
 - copy mode 段落跳转分块取行（WZ-10）：`move_to_paragraph_boundary`
   原先对每行单独 `get_lines(y..y+1)`，200k 行无空行日志要 20 万次
   单行取数（秒级假死）；改为千行块预取+缓存（取数次数 ≈ 行数/1000，
