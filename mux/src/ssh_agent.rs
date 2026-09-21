@@ -71,6 +71,12 @@ fn reap_dead_agent_links() {
     }
 }
 
+/// fork: no-op on non-unix targets (review S1) — the caller in
+/// `AgentProxy::new` is unconditional and there is no pid-probing
+/// equivalent to reuse here; dead links are a unix-socket artifact.
+#[cfg(not(unix))]
+fn reap_dead_agent_links() {}
+
 impl Drop for AgentProxy {
     fn drop(&mut self) {
         std::fs::remove_file(&self.sock_path).ok();
