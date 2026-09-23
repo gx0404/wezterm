@@ -209,6 +209,19 @@ check('clean.windows_path_exe', tab_title.clean_process_name('C:\\Users\\x\\herd
 check('clean.bare_name', tab_title.clean_process_name('herdr'), 'herdr')
 check('clean.empty', tab_title.clean_process_name(''), '')
 
+-- toggled_tab_bar_overrides（events/tab-title.lua 手动切换 tab bar）
+do
+   local toggled = tab_title.toggled_tab_bar_overrides
+   local input = { background = 'wallpaper-sentinel', enable_tab_bar = false }
+   local out = toggled(input, false)
+   check('toggle.show', out.enable_tab_bar, true)
+   check('toggle.keeps_other_keys', out.background, 'wallpaper-sentinel')
+   check('toggle.input_untouched', input.enable_tab_bar, false)
+   out = toggled(nil, true)
+   check('toggle.hide_from_nil', out.enable_tab_bar, false)
+   check('toggle.no_background', out.background, nil)
+end
+
 -- 防回归：wezterm.lua 里 append 进 Config 的每个模块，每个键都必须是合法的
 -- wezterm Config 字段。纯表配置按 unknown_fields=Warn 转换，未知键不会报错，
 -- 只会在下次 wezterm-gui 启动时弹 Configuration Error 窗口；这里借严格模式的
