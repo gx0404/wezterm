@@ -1,4 +1,4 @@
--- 纯函数用例：herdr 应用模式判定 + tab 标题进程名清洗。
+-- 纯函数用例：herdr 应用模式判定 + tab 标题进程名清洗 + Config 字段守门。
 --
 -- 仓库没有 lua5.4/busted 等独立解释器（机器上只装了 liblua 库，没有 CLI），
 -- 这里借用 wezterm 自带的 mlua 运行时当解释器：wezterm --config-file 会把
@@ -49,6 +49,41 @@ check('clean.unix_path', tab_title.clean_process_name('/usr/bin/herdr'), 'herdr'
 check('clean.windows_path_exe', tab_title.clean_process_name('C:\\Users\\x\\herdr.exe'), 'herdr')
 check('clean.bare_name', tab_title.clean_process_name('herdr'), 'herdr')
 check('clean.empty', tab_title.clean_process_name(''), '')
+
+-- 防回归：wezterm.lua 里 append 进 Config 的每个模块，每个键都必须是合法的
+-- wezterm Config 字段。纯表配置按 unknown_fields=Warn 转换，未知键不会报错，
+-- 只会在下次 wezterm-gui 启动时弹 Configuration Error 窗口；这里借严格模式的
+-- config_builder() 逐键赋值，未知键会被拒绝。模块清单直接从 wezterm.lua 的
+-- `:append(require('...'))` 解析，新增模块自动纳入。
+local function appended_config_modules()
+   local file = io.open(config_root .. '/wezterm.lua', 'r')
+   if not file then
+      return {}
+   end
+   local source = file:read('a')
+   file:close()
+   local modules = {}
+   for name in source:gmatch(":append%(%s*require%(%s*'([%w%._%-]+)'%s*%)%s*%)") do
+      table.insert(modules, name)
+   end
+   return modules
+end
+
+local config_modules = appended_config_modules()
+check('config_keys.modules_found', #config_modules > 0, true)
+for _, module_name in ipairs(config_modules) do
+   local loaded, options = pcall(require, module_name)
+   check('config_keys.load.' .. module_name, loaded, true)
+   if loaded and type(options) == 'table' then
+      local builder = wezterm.config_builder()
+      for key, value in pairs(options) do
+         local accepted = pcall(function()
+            builder[key] = value
+         end)
+         check('config_keys.' .. module_name .. '.' .. tostring(key), accepted, true)
+      end
+   end
+end
 
 if failures == 0 then
    print(string.format('PURE_FN_TEST: ALL PASS (%d cases)', total))
