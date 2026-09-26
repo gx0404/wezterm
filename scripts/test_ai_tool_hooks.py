@@ -69,9 +69,9 @@ class EngineSemantics(unittest.TestCase):
         level, _ = self._eval("Bash", {"command": "cargo publish"})
         self.assertEqual(level, "deny")
 
-    def test_ask_git_add_all(self) -> None:
-        level, _ = self._eval("Bash", {"command": "git add -A"})
-        self.assertEqual(level, "ask")
+    def test_git_add_all_allowed(self) -> None:
+        # 常规暂存已按 2026-09 用户基线放行（原 ask 规则已删）。
+        self.assertEqual(self._eval("Bash", {"command": "git add -A"}), (None, None))
 
     def test_ask_matches_command_position_only(self) -> None:
         # ask 级模式锚定命令位置：真执行（含链式/包装/环境变量前缀）升级，
@@ -84,7 +84,6 @@ class EngineSemantics(unittest.TestCase):
             "bash -c 'pkill wezterm'",
             "bash <<'EOF'\npkill wezterm\nEOF",
             "WEZTERM_X=1 pkill wezterm",
-            "cd /tmp && git add -A",
             "if true; then git reset --hard HEAD~1; fi",
             "git clean -fd",
         ):
@@ -92,6 +91,7 @@ class EngineSemantics(unittest.TestCase):
             self.assertEqual(level, "ask", command)
         for command in (
             "rg pkill docs/",
+            "cd /tmp && git add -A",
             "python3 - <<'PYEOF'\ntext = '禁 pkill/猜 PID'\nprint(len(text))\nPYEOF",
             "python3 - <<'PYEOF'\ntext = '禁 git add -A、git reset --hard 与 git clean'\nPYEOF",
             "git commit -m 'docs: 说明为何不用 git add --all'",
