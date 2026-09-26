@@ -9,7 +9,7 @@ use crate::{
 };
 use anyhow::{bail, Context};
 use async_trait::async_trait;
-use config::{ConfigHandle, ImePreeditRendering, SystemBackdrop};
+use config::{ConfigHandle, ImePreeditRendering, SrgbaTuple, SystemBackdrop};
 use lazy_static::lazy_static;
 use promise::Future;
 use raw_window_handle::{
@@ -44,7 +44,11 @@ use winapi::um::sysinfoapi::{GetTickCount, GetVersionExW};
 use winapi::um::uxtheme::{
     CloseThemeData, GetThemeFont, GetThemeSysFont, OpenThemeData, SetWindowTheme,
 };
-use winapi::um::wingdi::{LOGFONTW, MAKEPOINTS};
+use winapi::um::wingdi::{
+    AlphaBlend, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject,
+    AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
+    LOGFONTW, MAKEPOINTS,
+};
 use winapi::um::winnt::OSVERSIONINFOW;
 use winapi::um::winuser::*;
 use windows::UI::Color as WUIColor;
@@ -127,6 +131,12 @@ pub(crate) struct WindowInner {
     config: ConfigHandle,
     paint_throttled: bool,
     invalidated: bool,
+    /// fork: 首帧 present 之前不执行 ShowWindow，避免 DWM 合成未初始化的
+    /// 表面产生白帧；挂起的 show 命令存在 pending_show，兜底定时器由
+    /// show_fallback_armed 保证只装一次
+    first_frame_presented: bool,
+    pending_show: Option<ShowWindowCommand>,
+    show_fallback_armed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -547,6 +557,9 @@ impl Window {
             config: config.clone(),
             paint_throttled: false,
             invalidated: true,
+            first_frame_presented: false,
+            pending_show: None,
+            show_fallback_armed: false,
         }));
 
         // Careful: `raw` owns a ref to inner, but there is no Drop impl
@@ -620,6 +633,50 @@ impl WindowInner {
             unsafe {
                 DestroyWindow(hwnd.0);
             }
+        })
+        .detach();
+    }
+
+    /// fork: 首帧 present 之前把 show 请求挂起，等 notify_first_frame_presented
+    /// 或兜底定时器再真正 ShowWindow。隐藏窗口收不到 WM_PAINT，所以主动派发
+    /// NeedRepaint 驱动 GPU 尽快出帧；schedule_show_window 自身是排队执行，
+    /// 在此处持锁调用是安全的
+    fn request_show(&mut self, show: ShowWindowCommand) {
+        if self.first_frame_presented {
+            schedule_show_window(self.hwnd, show);
+            return;
+        }
+        log::trace!("deferring {show:?} until first frame is presented");
+        self.pending_show.replace(show);
+        self.arm_first_frame_fallback();
+        self.events.dispatch(WindowEvent::NeedRepaint);
+    }
+
+    fn first_frame_presented(&mut self) {
+        self.first_frame_presented = true;
+        if let Some(show) = self.pending_show.take() {
+            log::trace!("first frame presented; applying deferred {show:?}");
+            schedule_show_window(self.hwnd, show);
+        }
+    }
+
+    /// 首帧永远失败（如 GPU 初始化失败）时也不能让用户面对无窗口进程，
+    /// 超时后照常把窗口显示出来
+    fn arm_first_frame_fallback(&mut self) {
+        if self.show_fallback_armed {
+            return;
+        }
+        self.show_fallback_armed = true;
+        let hwnd = self.hwnd;
+        promise::spawn::spawn(async move {
+            async_io::Timer::after(std::time::Duration::from_millis(1500)).await;
+            Connection::with_window_inner(hwnd, |inner| {
+                if !inner.first_frame_presented {
+                    log::warn!("no frame presented within 1.5s of show(); showing window anyway");
+                    inner.first_frame_presented();
+                }
+                Ok(())
+            });
         })
         .detach();
     }
@@ -790,10 +847,18 @@ impl WindowOps for Window {
     }
 
     fn show(&self) {
-        schedule_show_window(self.0, ShowWindowCommand::Normal);
+        Connection::with_window_inner(self.0, |inner| {
+            inner.request_show(ShowWindowCommand::Normal);
+            Ok(())
+        });
     }
 
     fn hide(&self) {
+        Connection::with_window_inner(self.0, |inner| {
+            // fork: 显式 hide 优先于挂起的 show，避免首帧后又把窗口弹回来
+            inner.pending_show.take();
+            Ok(())
+        });
         schedule_show_window(self.0, ShowWindowCommand::Minimize);
     }
 
@@ -847,11 +912,24 @@ impl WindowOps for Window {
     }
 
     fn maximize(&self) {
-        schedule_show_window(self.0, ShowWindowCommand::Maximize);
+        Connection::with_window_inner(self.0, |inner| {
+            inner.request_show(ShowWindowCommand::Maximize);
+            Ok(())
+        });
     }
 
     fn restore(&self) {
-        schedule_show_window(self.0, ShowWindowCommand::Normal);
+        Connection::with_window_inner(self.0, |inner| {
+            inner.request_show(ShowWindowCommand::Normal);
+            Ok(())
+        });
+    }
+
+    fn notify_first_frame_presented(&self) {
+        Connection::with_window_inner(self.0, |inner| {
+            inner.first_frame_presented();
+            Ok(())
+        });
     }
 
     fn set_cursor(&self, cursor: Option<CursorIcon>) {
@@ -1608,6 +1686,75 @@ unsafe fn wm_kill_focus(
     None
 }
 
+/// fork: 首帧尚未 present 时把更新区域填成终端背景色，避免窗口在 GPU
+/// 管线就绪前露出白帧。依赖 per-pixel alpha 的配置（系统 backdrop 材质、
+/// 半透明窗口）直接跳过：GDI 写 alpha=0，会破坏这些效果
+fn fill_unpresented_background(config: &ConfigHandle, hdc: HDC, rc: &RECT) {
+    if !matches!(
+        config.win32_system_backdrop,
+        SystemBackdrop::Auto | SystemBackdrop::Disable
+    ) || config.window_background_opacity < 1.0
+    {
+        return;
+    }
+
+    // 与 term::color::ColorPalette::default() 一致：未配置时背景为黑色
+    let background = config
+        .resolved_palette
+        .background
+        .map(SrgbaTuple::from)
+        .unwrap_or_default();
+    let (red, green, blue, _) = background.as_rgba_u8();
+
+    unsafe {
+        // 创建窗口时 enable_blur_behind 让 DWM 尊重表面的 alpha 通道，而
+        // GDI 自身绘制写的是 alpha=0（会被合成成透明），所以改用 1x1 不透明
+        // DIB 经 AlphaBlend 拉伸填充
+        let mut info: BITMAPINFO = std::mem::zeroed();
+        info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as _;
+        info.bmiHeader.biWidth = 1;
+        info.bmiHeader.biHeight = 1;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+
+        let mut bits: *mut winapi::ctypes::c_void = null_mut();
+        let dib = CreateDIBSection(hdc, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+        if dib.is_null() || bits.is_null() {
+            return;
+        }
+        *(bits as *mut u32) = 0xff00_0000 | (red as u32) << 16 | (green as u32) << 8 | blue as u32;
+
+        let mem_dc = CreateCompatibleDC(hdc);
+        if mem_dc.is_null() {
+            DeleteObject(dib as _);
+            return;
+        }
+        let old_bitmap = SelectObject(mem_dc, dib as _);
+        AlphaBlend(
+            hdc,
+            rc.left,
+            rc.top,
+            rect_width(rc),
+            rect_height(rc),
+            mem_dc,
+            0,
+            0,
+            1,
+            1,
+            BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER,
+                BlendFlags: 0,
+                SourceConstantAlpha: 255,
+                AlphaFormat: AC_SRC_ALPHA,
+            },
+        );
+        SelectObject(mem_dc, old_bitmap);
+        DeleteDC(mem_dc);
+        DeleteObject(dib as _);
+    }
+}
+
 unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
     let inner = rc_from_hwnd(hwnd)?;
     let mut inner = inner.borrow_mut();
@@ -1631,7 +1778,9 @@ unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> 
         rgbReserved: [0; 32],
     };
     let _ = BeginPaint(hwnd, &mut ps);
-    // Do nothing right now
+    if !inner.first_frame_presented {
+        fill_unpresented_background(&inner.config, ps.hdc, &ps.rcPaint);
+    }
     EndPaint(hwnd, &mut ps);
 
     inner.invalidated = false;

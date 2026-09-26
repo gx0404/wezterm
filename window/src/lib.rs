@@ -261,6 +261,12 @@ pub trait WindowOps {
         Ok(())
     }
 
+    /// Advise the window that the application has presented its first
+    /// frame of content. Platforms that defer making the window visible
+    /// until content is available use this as the signal to show it.
+    /// The default implementation does nothing.
+    fn notify_first_frame_presented(&self) {}
+
     /// Hide a visible window
     fn hide(&self);
 

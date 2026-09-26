@@ -7,6 +7,7 @@ use ::window::glium::uniforms::{
     MagnifySamplerFilter, MinifySamplerFilter, Sampler, SamplerWrapFunction,
 };
 use ::window::glium::{BlendingFunction, LinearBlendingFactor, Surface};
+use ::window::WindowOps;
 use config::FreeTypeLoadTarget;
 
 impl crate::TermWindow {
@@ -145,6 +146,14 @@ impl crate::TermWindow {
         // submit will accept anything that implements IntoIter
         webgpu.queue.submit(std::iter::once(encoder.finish()));
         output.present();
+
+        // fork: 与 glium 后端一样，首帧 present 成功后通知 window crate 一次
+        if !self.notified_first_frame {
+            self.notified_first_frame = true;
+            if let Some(window) = self.window.as_ref() {
+                window.notify_first_frame_presented();
+            }
+        }
 
         Ok(())
     }

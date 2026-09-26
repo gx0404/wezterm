@@ -392,6 +392,9 @@ pub struct TermWindow {
     pub window_state: WindowState,
     pub resizes_pending: usize,
     is_repaint_pending: bool,
+    /// fork: 首帧成功 present 后只需通知 window crate 一次；Windows 端
+    /// 据此把 ShowWindow 推迟到首帧之后，消除启动白帧
+    notified_first_frame: bool,
     pending_scale_changes: LinkedList<resize::ScaleChange>,
     /// Terminal dimensions
     terminal_size: TerminalSize,
@@ -740,6 +743,7 @@ impl TermWindow {
             window_state: WindowState::default(),
             resizes_pending: 0,
             is_repaint_pending: false,
+            notified_first_frame: false,
             pending_scale_changes: LinkedList::new(),
             terminal_size,
             render_state,
@@ -1121,7 +1125,12 @@ impl TermWindow {
             ),
         );
         self.paint_impl(&mut RenderFrame::Glium(&mut frame));
-        window.finish_frame(frame).is_ok()
+        let presented = window.finish_frame(frame).is_ok();
+        if presented && !self.notified_first_frame {
+            self.notified_first_frame = true;
+            window.notify_first_frame_presented();
+        }
+        presented
     }
 
     fn do_paint_webgpu(&mut self) -> anyhow::Result<bool> {
