@@ -205,7 +205,7 @@ jobs:
           docker run --rm --volume "$PWD:/workspace" --workdir /workspace "ubuntu:$GX_UBUNTU" bash -eu -c '
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            apt-get install -y xvfb xauth x11-apps ffmpeg
+            apt-get install -y xvfb xauth x11-apps ffmpeg git
             useradd --create-home gx-smoke
             GX_SMOKE_USER=gx-smoke bash scripts/gx_smoke_linux.sh --allow-system-install
           '

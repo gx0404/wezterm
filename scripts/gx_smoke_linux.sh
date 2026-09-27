@@ -32,14 +32,17 @@ trap '"${privileged[@]}" apt-get remove -y wezterm-gx' EXIT
 run_user() {
     "${as_user[@]}" env HOME="$test_home" XDG_CONFIG_HOME="$test_home/.config" XDG_DATA_HOME="$test_home/.local/share" "$@"
 }
+assert_config_log() {
+    if grep -Eq 'plugin load failed|Error loading configuration|Failed to require' "$1"; then
+        cat "$1" >&2
+        exit 1
+    fi
+}
 run_user wezterm-gx --gx-initialize-only
 test -f "$test_home/.config/wezterm/wezterm.lua"
 test "$(find "$test_home/.local/share/wezterm/plugins" -name HEAD -path '*/.git/HEAD' | wc -l)" -eq 4
 run_user wezterm-gx ls-fonts > "$evidence/fonts.log" 2>&1
-if grep -Eq 'plugin load failed|Error loading configuration' "$evidence/fonts.log"; then
-    cat "$evidence/fonts.log" >&2
-    exit 1
-fi
+assert_config_log "$evidence/fonts.log"
 grep -q '/usr/share/fonts/truetype/wezterm-gx/JetBrainsMonoNerdFont-Regular.ttf' "$evidence/fonts.log"
 grep -q '/usr/share/fonts/truetype/wezterm-gx/NotoSansCJK-Regular.ttc' "$evidence/fonts.log"
 state="$test_home/.local/share/wezterm/plugins/httpssCssZssZsgithubsDscomsZsMLFlexersZsresurrectsDswezterm/state/workspace/gx-preserve.json"
@@ -48,9 +51,14 @@ printf '\n-- gx-upgrade-preserve-marker\n' >> "$test_home/.config/wezterm/wezter
 run_user sh -c 'printf "%s\n" "{\"wallpaper\":\"user wallpaper.png\"}" > "$HOME/.config/wezterm/gui-settings.json"
     mkdir -p "$XDG_DATA_HOME/wezterm/plugins/user-plugin/plugin"
     printf "return {}\n" > "$XDG_DATA_HOME/wezterm/plugins/user-plugin/plugin/init.lua"'
+# plugin.list requires a repository and remote even for an offline custom plugin.
+custom_plugin="$test_home/.local/share/wezterm/plugins/user-plugin"
+run_user git init --quiet "$custom_plugin"
+run_user git -C "$custom_plugin" config remote.origin.url https://example.invalid/gx-user-plugin
 sha256sum "$test_home/.config/wezterm/wezterm.lua" "$state" \
     "$test_home/.config/wezterm/gui-settings.json" \
-    "$test_home/.local/share/wezterm/plugins/user-plugin/plugin/init.lua" > "$evidence/user-data.sha256"
+    "$custom_plugin/plugin/init.lua" "$custom_plugin/.git/HEAD" \
+    "$custom_plugin/.git/config" > "$evidence/user-data.sha256"
 "${privileged[@]}" apt-get install -y --reinstall "${packages[0]}"
 run_user sh -c 'printf "older\n" > "$HOME/.local/share/wezterm-gx/resource-version"'
 run_user wezterm-gx --gx-initialize-only
@@ -58,6 +66,8 @@ grep -q gx-upgrade-preserve-marker "$test_home/.config/wezterm/wezterm.lua"
 grep -q preserve "$state"
 test -d "$test_home/.local/share/wezterm-gx/backups"
 sha256sum -c "$evidence/user-data.sha256"
+run_user wezterm-gx ls-fonts > "$evidence/upgrade-fonts.log" 2>&1
+assert_config_log "$evidence/upgrade-fonts.log"
 # Exercise the packaged default shell, including its normal startup files.
 run_user tee "$test_home/.zshrc" >/dev/null <<'ZSH'
 print 'GX package smoke - default zsh, fonts and plugins loaded'
@@ -78,6 +88,7 @@ run_user timeout 45 xvfb-run -a bash -c '
     ffmpeg -hide_banner -loglevel error -y -i "$1/screen.xwd" -frames:v 1 "$1/linux.png"
     wait "$gui_pid"
 ' bash "$evidence"
+assert_config_log "$evidence/gui.log"
 "${privileged[@]}" apt-get remove -y wezterm-gx
 trap - EXIT
 test -f "$test_home/.config/wezterm/wezterm.lua"

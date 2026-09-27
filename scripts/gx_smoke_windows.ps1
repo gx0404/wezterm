@@ -19,6 +19,19 @@ function Run-Checked([string]$File, [string[]]$Arguments) {
     $result = Start-Process -FilePath $File -ArgumentList $Arguments -WindowStyle Hidden -Wait -PassThru
     if ($result.ExitCode -ne 0) { throw "$File returned $($result.ExitCode)" }
 }
+function Assert-BundledConfiguration([string]$Install, [string]$Config, [string]$Label) {
+    $fontLog = & (Join-Path $Install 'wezterm.exe') --config-file $Config ls-fonts 2>&1
+    $fontExit = $LASTEXITCODE
+    $fontLog | Set-Content -LiteralPath (Join-Path $evidence "$Label-fonts.log") -Encoding utf8
+    if ($fontExit -ne 0) { throw 'Bundled Lua configuration/font smoke failed' }
+    if ($fontLog -match 'plugin load failed|Error loading configuration|Failed to require') {
+        throw 'Bundled plugins failed to load'
+    }
+    $fontText = $fontLog -join "`n"
+    if ($fontText -notmatch 'JetBrainsMono Nerd Font' -or $fontText -notmatch 'Noto Sans CJK SC') {
+        throw 'Bundled primary/CJK fonts were not resolved'
+    }
+}
 try {
     foreach ($scope in @('CURRENTUSER', 'ALLUSERS')) {
         $install = Join-Path $testRoot $scope
@@ -31,26 +44,25 @@ try {
         foreach ($plugin in $pluginDirs) {
             if (-not (Test-Path -LiteralPath (Join-Path $plugin.FullName '.git/HEAD'))) { throw 'gitdir was not restored' }
         }
-        $fontLog = & (Join-Path $install 'wezterm.exe') --config-file $config ls-fonts 2>&1
-        $fontExit = $LASTEXITCODE
-        $fontLog | Set-Content -LiteralPath (Join-Path $evidence "$scope-fonts.log") -Encoding utf8
-        if ($fontExit -ne 0) { throw 'Bundled Lua configuration/font smoke failed' }
-        if ($fontLog -match 'plugin load failed|Error loading configuration') { throw 'Bundled plugins failed to load' }
-        $fontText = $fontLog -join "`n"
-        if ($fontText -notmatch 'JetBrainsMono Nerd Font' -or $fontText -notmatch 'Noto Sans CJK SC') {
-            throw 'Bundled primary/CJK fonts were not resolved'
-        }
+        Assert-BundledConfiguration $install $config $scope
         $state = Join-Path $pluginDirs[0].FullName 'state/gx-preserve.json'
         New-Item -ItemType Directory -Force (Split-Path $state) | Out-Null
         Set-Content -LiteralPath $state -Value '{"preserve":true}'
         Add-Content -LiteralPath $config -Value '-- gx-upgrade-preserve-marker'
         $sidecar = Join-Path (Split-Path $config) 'gui-settings.json'
         Set-Content -LiteralPath $sidecar -Value '{"wallpaper":"user wallpaper.png"}'
-        $customPlugin = Join-Path $plugins 'user-plugin/plugin/init.lua'
+        $customRoot = Join-Path $plugins 'user-plugin'
+        $customPlugin = Join-Path $customRoot 'plugin/init.lua'
         New-Item -ItemType Directory -Force (Split-Path $customPlugin) | Out-Null
         Set-Content -LiteralPath $customPlugin -Value 'return {}'
+        # plugin.list requires every plugin directory to be a Git repository with a remote.
+        & git init --quiet $customRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot initialize user-plugin fixture' }
+        & git -C $customRoot config remote.origin.url https://example.invalid/gx-user-plugin
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot configure user-plugin fixture' }
         $preserved = @{}
-        foreach ($path in @($config, $state, $sidecar, $customPlugin)) {
+        foreach ($path in @($config, $state, $sidecar, $customPlugin,
+                (Join-Path $customRoot '.git/HEAD'), (Join-Path $customRoot '.git/config'))) {
             $preserved[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
         }
         Run-Checked (Join-Path $install 'wezterm-gx-cli.exe') @('--gx-initialize-only')
@@ -61,6 +73,7 @@ try {
         Set-Content -LiteralPath (Join-Path $managed 'resource-version') -Value 'older' -Encoding ascii
         Run-Checked (Join-Path $install 'wezterm-gx-cli.exe') @('--gx-initialize-only')
         if (-not (Test-Path -LiteralPath (Join-Path $managed 'backups'))) { throw 'Plugin upgrade backup missing' }
+        Assert-BundledConfiguration $install $config "$scope-upgrade"
         Run-Checked (Join-Path $install 'unins000.exe') @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$evidence/$scope-uninstall.log`"")
         if (-not (Test-Path -LiteralPath $config)) { throw 'Uninstall deleted user configuration' }
         if (-not (Test-Path -LiteralPath $state)) { throw 'Uninstall deleted user session data' }
