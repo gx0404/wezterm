@@ -13,6 +13,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +33,7 @@ RUNTIME_DEPS = (
 )
 LINUX_BASELINE = "20.04"
 MAX_GLIBC = (2, 31)
+RUST_VERSION = "1.96.1"
 
 
 def audit_linux_binary(path: Path) -> dict:
@@ -71,12 +73,22 @@ def version_from_changelog(root: Path = ROOT) -> str:
     return ".".join(map(str, max(tuple(map(int, v)) for v in matches)))
 
 
-def validate_version(version: str, root: Path = ROOT) -> str:
+def validate_version(version: str | None, root: Path = ROOT) -> str:
+    expected = version_from_changelog(root)
+    version = (version or "").strip()
+    if not version:
+        return expected
     if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
-        raise ValueError("version must be X.Y.Z (without the gx-v prefix)")
-    if version != version_from_changelog(root):
-        raise ValueError("version must match the maximum SemVer in CHANGELOG.md")
+        raise ValueError(f"version must be X.Y.Z without a prefix; leave it empty to use CHANGELOG.md ({expected})")
+    if version != expected:
+        raise ValueError(f"requested version {version}, but this commit's CHANGELOG.md requires {expected}; "
+                         f"leave version empty or enter {expected}. To release a different version, update CHANGELOG.md first")
     return version
+
+
+def product_version_from_source(sha: str, root: Path = ROOT) -> str:
+    timestamp = int(output(["git", "-C", root, "show", "-s", "--format=%ct", sha]))
+    return datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y%m%d-%H%M%S-") + sha[:8]
 
 
 def tool(name: str) -> Path:
@@ -342,7 +354,7 @@ def container_deb(args, version: str):
                              (ROOT / "scripts/packaging/ubuntu2004.Dockerfile", "Dockerfile")):
             (context / name).write_bytes(source.read_bytes().replace(b"\r\n", b"\n"))
             (context / name).chmod(0o644 if name == "Dockerfile" else 0o755)
-        run([docker, "build", "--tag", image, context])
+        run([docker, "build", "--build-arg", f"RUST_TOOLCHAIN={RUST_VERSION}", "--tag", image, context])
     dest = args.output_dir.resolve()
     dest.mkdir(parents=True, exist_ok=True)
     common = (ROOT / output(["git", "-C", ROOT, "rev-parse", "--git-common-dir"])).resolve()
@@ -356,7 +368,15 @@ def container_deb(args, version: str):
         cmd += ["--volume", f"{path}:{path}"]
     for name, path in (("registry", "/usr/local/cargo/registry"),
                        ("git", "/usr/local/cargo/git"), ("target", "/gx-target")):
-        cmd += ["--volume", f"wezterm-gx-focal-{name}:{path}"]
+        cache = f"wezterm-gx-focal-{name}"
+        if args.cache_dir:
+            directory = args.cache_dir.resolve() / name
+            directory.mkdir(parents=True, exist_ok=True)
+            cache = str(directory)
+        cmd += ["--volume", f"{cache}:{path}"]
+    for name in ("CARGO_BUILD_JOBS", "CARGO_INCREMENTAL"):
+        if name in os.environ:
+            cmd += ["--env", f"{name}={os.environ[name]}"]
     cmd += ["--env", "CARGO_TARGET_DIR=/gx-target", "--env", "TZ=UTC", image,
             "python3", ROOT / "scripts/gx_package.py", "deb", "--version", version,
             "--output-dir", dest]
@@ -378,10 +398,13 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=ROOT / "dist")
     parser.add_argument("--check", action="store_true", help="read-only preflight; never builds or installs")
     parser.add_argument("--container", action="store_true", help="build deb in Ubuntu 20.04 using Docker on Linux/WSL")
+    parser.add_argument("--cache-dir", type=Path, help="host directory for reusable --container Cargo caches")
     args = parser.parse_args()
     try:
         kind = ("windows" if os.name == "nt" else "deb") if args.platform == "auto" else args.platform
-        version = validate_version(args.version or version_from_changelog())
+        version = validate_version(args.version)
+        if args.cache_dir and not args.container:
+            raise ValueError("--cache-dir requires --container")
         if args.container:
             if kind != "deb":
                 raise ValueError("--container is only supported for deb")
@@ -396,6 +419,9 @@ def main() -> int:
             print(f"PASS preflight: {kind}, GX {version}, {sha}, dirty={dirty}")
             return 0
         if not args.bin_dir:
+            # The upstream build script reads .tag. Pin UTC date/hash before
+            # Cargo runs so cached builds and both operating systems agree.
+            (ROOT / ".tag").write_text(product_version_from_source(sha) + "\n", encoding="ascii")
             cmd = [tool("cargo"), "build", "--locked", "--release",
                    *[v for name in BINARIES for v in ("-p", name)]]
             env = os.environ.copy()

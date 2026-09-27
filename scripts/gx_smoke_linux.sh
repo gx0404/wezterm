@@ -45,11 +45,19 @@ grep -q '/usr/share/fonts/truetype/wezterm-gx/NotoSansCJK-Regular.ttc' "$evidenc
 state="$test_home/.local/share/wezterm/plugins/httpssCssZssZsgithubsDscomsZsMLFlexersZsresurrectsDswezterm/state/workspace/gx-preserve.json"
 run_user sh -c 'printf "%s\n" "{\"preserve\":true}" > "$1"' sh "$state"
 printf '\n-- gx-upgrade-preserve-marker\n' >> "$test_home/.config/wezterm/wezterm.lua"
+run_user sh -c 'printf "%s\n" "{\"wallpaper\":\"user wallpaper.png\"}" > "$HOME/.config/wezterm/gui-settings.json"
+    mkdir -p "$XDG_DATA_HOME/wezterm/plugins/user-plugin/plugin"
+    printf "return {}\n" > "$XDG_DATA_HOME/wezterm/plugins/user-plugin/plugin/init.lua"'
+sha256sum "$test_home/.config/wezterm/wezterm.lua" "$state" \
+    "$test_home/.config/wezterm/gui-settings.json" \
+    "$test_home/.local/share/wezterm/plugins/user-plugin/plugin/init.lua" > "$evidence/user-data.sha256"
 "${privileged[@]}" apt-get install -y --reinstall "${packages[0]}"
 run_user sh -c 'printf "older\n" > "$HOME/.local/share/wezterm-gx/resource-version"'
 run_user wezterm-gx --gx-initialize-only
 grep -q gx-upgrade-preserve-marker "$test_home/.config/wezterm/wezterm.lua"
 grep -q preserve "$state"
+test -d "$test_home/.local/share/wezterm-gx/backups"
+sha256sum -c "$evidence/user-data.sha256"
 # Exercise the packaged default shell, including its normal startup files.
 run_user tee "$test_home/.zshrc" >/dev/null <<'ZSH'
 print 'GX package smoke - default zsh, fonts and plugins loaded'
@@ -75,4 +83,5 @@ trap - EXIT
 test -f "$test_home/.config/wezterm/wezterm.lua"
 test -f "$state"
 test ! -e /usr/bin/wezterm-gx
-echo "PASS: deb installation, first launch, reinstallation, GUI and uninstall; test home: $test_home"
+sha256sum -c "$evidence/user-data.sha256"
+echo "PASS: deb installation, first launch, reinstallation, GUI and uninstall; test home: $test_home" | tee "$evidence/result.txt"

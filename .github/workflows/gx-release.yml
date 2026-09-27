@@ -1,19 +1,20 @@
 name: gx-release
+run-name: "${{ inputs.publish && 'Release' || 'Build only' }} · ${{ inputs.version || 'CHANGELOG version' }} · ${{ inputs.ref }}"
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch, tag or commit to build
+        description: 构建分支、标签或提交（main 用于同步上游）
         required: true
         default: feature/gx_wezterm
         type: string
       version:
-        description: GX version X.Y.Z (must match the selected commit's CHANGELOG)
-        required: true
+        description: 包版本（留空自动读取 CHANGELOG；手填 X.Y.Z 必须与其一致）
+        required: false
         type: string
       publish:
-        description: Publish both tested installers to GitHub Releases
+        description: 发布到 Releases（取消勾选只构建和验证，从 Artifacts 下载）
         default: true
         type: boolean
 
@@ -21,26 +22,33 @@ permissions:
   contents: read
 
 concurrency:
-  group: gx-release-${{ inputs.version }}
+  group: gx-release
   cancel-in-progress: false
 
 jobs:
   prepare:
     if: github.repository == 'gx0404/wezterm'
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       sha: ${{ steps.prepare.outputs.sha }}
       version: ${{ steps.prepare.outputs.version }}
+      rust: ${{ steps.prepare.outputs.rust }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref }}
-          fetch-depth: 0
           persist-credentials: false
-      - id: prepare
+      - name: Resolve source/version and check release conflicts
+        id: prepare
         env:
+          GH_TOKEN: ${{ github.token }}
           GX_VERSION: ${{ inputs.version }}
-        run: python3 scripts/gx_release.py prepare --version "$GX_VERSION"
+          GX_PUBLISH: ${{ inputs.publish }}
+        run: |
+          args=()
+          if [ "$GX_PUBLISH" = true ]; then args+=(--publish); fi
+          python3 scripts/gx_release.py prepare --version "$GX_VERSION" "${args[@]}"
       - name: Validate fork rules and command configuration
         run: |
           python3 scripts/resolve_agent_rules.py --check
@@ -50,8 +58,10 @@ jobs:
   windows:
     needs: prepare
     runs-on: windows-2025
+    timeout-minutes: 120
     env:
       CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
       TZ: UTC
     steps:
       - run: git config --global core.autocrlf false
@@ -59,9 +69,10 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           submodules: recursive
-          fetch-depth: 0
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust }}
       - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install pinned Inno Setup
         shell: pwsh
@@ -94,29 +105,50 @@ jobs:
           name: gx-windows-installer
           path: dist/WezTerm-GX-*
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Save Windows installer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: evidence-windows
+          path: .ui-evidence/gx-package-windows/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
 
   linux:
     needs: prepare
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     env:
       CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
       TZ: UTC
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           submodules: recursive
-          fetch-depth: 0
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ needs.prepare.outputs.rust }}
+          components: rustfmt
+      - name: Restore Ubuntu 20.04 Cargo cache
+        uses: actions/cache@v6
+        with:
+          path: .local/gx-deb-cache
+          key: gx-focal-amd64-${{ needs.prepare.outputs.rust }}-${{ hashFiles('Cargo.lock', 'get-deps', 'scripts/packaging/ubuntu2004.Dockerfile') }}-${{ needs.prepare.outputs.sha }}
+          restore-keys: |
+            gx-focal-amd64-${{ needs.prepare.outputs.rust }}-${{ hashFiles('Cargo.lock', 'get-deps', 'scripts/packaging/ubuntu2004.Dockerfile') }}-
       - name: Install build and validation tools
         run: |
           sudo apt-get update
           sudo apt-get install -y lua5.4
       - name: Test packaging, Lua and launcher
         run: |
-          rustup toolchain install nightly --profile minimal --component rustfmt
-          rustfmt +nightly --edition 2021 --check scripts/gx-launcher/main.rs
+          rustfmt --edition 2021 --check scripts/gx-launcher/main.rs
           python3 -m unittest discover -s scripts -p 'test_gx_*.py'
           lua5.4 scripts/tests/gx_resurrect.lua
           mkdir -p .local/gx-tests
@@ -125,16 +157,19 @@ jobs:
       - name: Build one portable deb on the Ubuntu 20.04 baseline
         env:
           GX_VERSION: ${{ needs.prepare.outputs.version }}
-        run: python3 scripts/gx_package.py deb --container --version "$GX_VERSION"
+        run: python3 scripts/gx_package.py deb --container --cache-dir .local/gx-deb-cache --version "$GX_VERSION"
       - uses: actions/upload-artifact@v7
         with:
           name: gx-linux-deb
           path: dist/wezterm-gx_*
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
   linux-verify:
     needs: [prepare, linux]
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -167,11 +202,33 @@ jobs:
           name: evidence-linux-${{ matrix.ubuntu }}
           path: .ui-evidence/gx-package-linux/
           include-hidden-files: true
+          retention-days: 14
+
+  verify:
+    needs: [prepare, windows, linux, linux-verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: gx-*
+          merge-multiple: true
+          path: dist
+      - name: Verify both packages even in build-only mode
+        env:
+          GX_VERSION: ${{ needs.prepare.outputs.version }}
+          GX_SHA: ${{ needs.prepare.outputs.sha }}
+        run: python3 scripts/gx_release.py verify --version "$GX_VERSION" --sha "$GX_SHA"
 
   publish:
-    needs: [prepare, windows, linux, linux-verify]
+    needs: [prepare, verify]
     if: inputs.publish && github.repository == 'gx0404/wezterm'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:

@@ -1,5 +1,6 @@
 # gx_package.py prepares the three-file build context for this image.
 FROM ubuntu:20.04
+ARG RUST_TOOLCHAIN
 ENV DEBIAN_FRONTEND=noninteractive \
     CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
@@ -7,7 +8,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git lsb-release pkg-config perl \
     && rm -rf /var/lib/apt/lists/*
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh \
-    && sh /tmp/rustup.sh -y --profile minimal --default-toolchain stable --no-modify-path \
+    && test -n "$RUST_TOOLCHAIN" \
+    && sh /tmp/rustup.sh -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN" --no-modify-path \
     && rm /tmp/rustup.sh
 WORKDIR /gx-deps
 COPY get-deps ./

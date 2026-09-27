@@ -6,22 +6,27 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from gx_package import BINARIES, MAX_GLIBC, ROOT, digest, output, source_info, validate_version
+from gx_package import BINARIES, MAX_GLIBC, ROOT, RUST_VERSION, digest, source_info, validate_version
 
 REPOSITORY = "gx0404/wezterm"
 
 
-def tag_commit(tag: str) -> str | None:
-    import subprocess
-    result = subprocess.run(["git", "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}"],
-                            cwd=ROOT, capture_output=True, text=True)
-    return result.stdout.strip() if result.returncode == 0 else None
+def is_hash(value, length=64) -> bool:
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{%d}" % length, value) is not None
+
+
+def summary(text: str):
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as stream:
+            stream.write(text + "\n")
 
 
 def verify_tag(existing: str | None, expected: str):
@@ -30,7 +35,7 @@ def verify_tag(existing: str | None, expected: str):
 
 
 def verify_artifacts(folder: Path, version: str, sha: str) -> list[Path]:
-    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+    if not is_hash(sha, 40):
         raise ValueError("expected a complete source commit SHA")
     names = [(f"WezTerm-GX-{version}-Setup-x64.exe", "windows"),
              (f"wezterm-gx_{version}_amd64.deb", "deb")]
@@ -42,24 +47,35 @@ def verify_artifacts(folder: Path, version: str, sha: str) -> list[Path]:
         for path in (artifact, metadata, checksums):
             if not path.is_file() or path.is_symlink():
                 raise ValueError(f"missing release artifact: {path.name}")
+            if path.stat().st_size == 0:
+                raise ValueError(f"empty release artifact: {path.name}")
         info = json.loads(metadata.read_text(encoding="utf-8"))
+        if not isinstance(info, dict):
+            raise ValueError(f"{name}: manifest must be an object")
         expected = {"schema": 1, "package_version": version, "source_commit": sha,
                     "source_dirty": False, "platform": kind, "architecture": "amd64", "artifact": name}
         for key, value in expected.items():
-            if info.get(key) != value:
+            if type(info.get(key)) is not type(value) or info[key] != value:
                 raise ValueError(f"{name}: manifest {key} differs from the release inputs")
+        binaries = info.get("binaries")
+        suffix = ".exe" if kind == "windows" else ""
+        if (not isinstance(binaries, dict) or set(binaries) != {b + suffix for b in BINARIES}
+                or not all(is_hash(value) for value in binaries.values())):
+            raise ValueError(f"{name}: incomplete binary SHA-256 manifest")
         if kind == "deb":
             compatibility = info.get("linux_compatibility", {})
-            if (compatibility.get("build_ubuntu") != "20.04"
+            if (not isinstance(compatibility, dict) or compatibility.get("build_ubuntu") != "20.04"
                     or compatibility.get("supported_ubuntu") != ["20.04", "24.04"]
                     or compatibility.get("openssl") != "static"):
                 raise ValueError(f"{name}: missing portable Ubuntu compatibility audit")
             elf = compatibility.get("elf", {})
-            if set(elf) != set(BINARIES) | {"wezterm-gx", "wezterm-gx-gui"}:
+            if not isinstance(elf, dict) or set(elf) != set(BINARIES) | {"wezterm-gx", "wezterm-gx-gui"}:
                 raise ValueError(f"{name}: incomplete Linux executable audit")
             for binary, audit in elf.items():
+                if not isinstance(audit, dict):
+                    raise ValueError(f"{name}: invalid audit for {binary}")
                 glibc = audit.get("max_glibc", "")
-                if (not re.fullmatch(r"\d+(?:\.\d+)+", glibc)
+                if (not isinstance(glibc, str) or not re.fullmatch(r"\d+(?:\.\d+)+", glibc)
                         or tuple(map(int, glibc.split("."))) > MAX_GLIBC
                         or not isinstance(audit.get("needed"), list)
                         or any(not isinstance(lib, str) or re.match(r"lib(?:ssl|crypto)\.so", lib)
@@ -70,10 +86,11 @@ def verify_artifacts(folder: Path, version: str, sha: str) -> list[Path]:
         expected_sums = f"{digest(artifact)}  {name}\n{digest(metadata)}  {metadata.name}\n"
         if checksums.read_text(encoding="ascii") != expected_sums:
             raise ValueError(f"{name}: checksum file mismatch")
-        if not re.fullmatch(r"[0-9a-f]{64}", info.get("resource_version", "")):
+        if not is_hash(info.get("resource_version")):
             raise ValueError(f"{name}: invalid resource version")
         product = info.get("product_version", "")
-        if not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8,40}", product) or not sha.startswith(product.rsplit("-", 1)[1]):
+        if (not isinstance(product, str) or not re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8,40}", product)
+                or not sha.startswith(product.rsplit("-", 1)[1])):
             raise ValueError(f"{name}: product is not built from the requested commit")
         resource_versions.add(info["resource_version"])
         product_versions.add(product)
@@ -95,15 +112,27 @@ class GitHub:
                    "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "wezterm-gx-release",
                    "Content-Type": "application/octet-stream" if binary else "application/json"}
         request = urllib.request.Request(url, data=body, headers=headers, method=method)
-        with urllib.request.urlopen(request, timeout=180) as response:
-            payload = response.read()
-            return json.loads(payload) if payload else None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request, timeout=180) as response:
+                    payload = response.read()
+                    return json.loads(payload) if payload else None
+            except (urllib.error.URLError, TimeoutError) as error:
+                transient = not isinstance(error, urllib.error.HTTPError) or error.code in (429, 500, 502, 503, 504)
+                # Mutations may have succeeded remotely even when their response was lost.
+                # Leave the draft for a checked resume instead of repeating a POST/PATCH.
+                if method != "GET" or not transient or attempt == 2:
+                    raise
+                if isinstance(error, urllib.error.HTTPError):
+                    error.close()
+                time.sleep(2 ** attempt)
 
     def optional(self, path: str):
         try:
             return self.request("GET", path)
         except urllib.error.HTTPError as error:
             if error.code == 404:
+                error.close()
                 return None
             raise
 
@@ -122,6 +151,48 @@ def remote_commit(api: GitHub, tag: str) -> str | None:
     raise ValueError("release tag does not resolve to a commit")
 
 
+def release_state(api: GitHub, version: str, sha: str):
+    tag = f"gx-v{version}"
+    commit = remote_commit(api, tag)
+    verify_tag(commit, sha)
+    release = api.optional("/releases/tags/" + urllib.parse.quote(tag, safe=""))
+    if release and not release["draft"]:
+        raise ValueError(f"{tag} is already published; bump CHANGELOG.md and use a new version")
+    if release and commit is None:
+        raise ValueError("existing draft has no immutable source tag; inspect it before retrying")
+    return commit, release
+
+
+def prepare(version: str, publish_requested: bool):
+    sha, dirty = source_info()
+    if dirty:
+        raise ValueError("release preparation requires a clean checkout")
+    if publish_requested:
+        release_state(GitHub(), version, sha)
+    record = f"sha={sha}\nversion={version}\ntag=gx-v{version}\nrust={RUST_VERSION}\n"
+    print(record, end="")
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
+            stream.write(record)
+    mode = "Publish after all checks" if publish_requested else "Build and verify only (no tag or Release writes)"
+    summary(f"## GX {version}\n\n- Source: `{sha}`\n- Rust: `{RUST_VERSION}`\n- Mode: {mode}\n"
+            "- Packages: Windows x64 EXE; one amd64 deb tested on Ubuntu 20.04 and 24.04\n")
+
+
+def verify_remote_assets(assets, files: list[Path], complete: bool):
+    expected = {path.name: path for path in files}
+    names = [asset["name"] for asset in assets]
+    if (len(set(names)) != len(names) or not set(names) <= set(expected)
+            or (complete and set(names) != set(expected))):
+        raise ValueError("draft assets are incomplete or unexpected; draft remains unpublished")
+    for asset in assets:
+        path = expected[asset["name"]]
+        if (asset.get("state") != "uploaded" or asset.get("size") != path.stat().st_size
+                or asset.get("digest") != "sha256:" + digest(path)):
+            raise ValueError(f"draft asset failed size/SHA-256 verification: {path.name}; draft remains unpublished")
+    return set(names)
+
+
 def publish(folder: Path, version: str, sha: str):
     if (os.environ.get("GITHUB_ACTIONS") != "true"
             or os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
@@ -130,11 +201,7 @@ def publish(folder: Path, version: str, sha: str):
     files = verify_artifacts(folder, version, sha)
     tag = f"gx-v{version}"
     api = GitHub()
-    existing_commit = remote_commit(api, tag)
-    verify_tag(existing_commit, sha)
-    release = api.optional("/releases/tags/" + urllib.parse.quote(tag, safe=""))
-    if release and not release["draft"]:
-        raise ValueError("this version is already published; choose a new version")
+    existing_commit, release = release_state(api, version, sha)
     if existing_commit is None:
         api.request("POST", "/git/refs", {"ref": "refs/tags/" + tag, "sha": sha})
     if release is None:
@@ -145,51 +212,45 @@ def publish(folder: Path, version: str, sha: str):
                     "Windows packages are unsigned. Verify downloads using the attached SHA-256 files.",
         })
     # Resume an interrupted draft only when its immutable tag still names this SHA.
-    assets = {a["name"]: a for a in api.request("GET", f'/releases/{release["id"]}/assets?per_page=100')}
+    assets_path = f'/releases/{release["id"]}/assets?per_page=100'
+    assets = verify_remote_assets(api.request("GET", assets_path), files, complete=False)
     upload = release["upload_url"].split("{", 1)[0]
     for path in files:
         if path.name in assets:
-            asset = assets[path.name]
-            if asset.get("digest") == "sha256:" + digest(path):
-                continue
-            raise ValueError(f"draft already has a different asset: {path.name}; use a new release version")
+            continue
         api.request("POST", upload + "?name=" + urllib.parse.quote(path.name, safe=""), binary=path)
     # Check the remote list before making a partially uploaded draft public.
-    uploaded = api.request("GET", f'/releases/{release["id"]}/assets?per_page=100')
-    if {a["name"] for a in uploaded if a["state"] == "uploaded"} != {p.name for p in files}:
-        raise ValueError("draft assets are incomplete or unexpected; draft remains unpublished")
+    verify_remote_assets(api.request("GET", assets_path), files, complete=True)
     if remote_commit(api, tag) != sha:
         raise ValueError("release tag changed or disappeared; draft remains unpublished")
+    if not api.request("GET", f'/releases/{release["id"]}')["draft"]:
+        raise ValueError("release was published concurrently; refusing to modify it")
     result = api.request("PATCH", f'/releases/{release["id"]}', {"draft": False})
     print(result["html_url"])
+    summary(f"Published [WezTerm GX {version}]({result['html_url']}) with all six verified files.")
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["prepare", "verify", "publish"])
-    parser.add_argument("--version", required=True)
+    parser.add_argument("--version", help="X.Y.Z; empty or omitted reads the selected commit's CHANGELOG")
+    parser.add_argument("--publish", action="store_true", help="prepare: check remote release/tag conflicts before building")
     parser.add_argument("--sha")
     parser.add_argument("--artifacts", type=Path, default=ROOT / "dist")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         version = validate_version(args.version)
         if args.action == "prepare":
-            sha, dirty = source_info()
-            if dirty:
-                raise ValueError("release preparation requires a clean checkout")
-            verify_tag(tag_commit(f"gx-v{version}"), sha)
-            record = f"sha={sha}\nversion={version}\ntag=gx-v{version}\n"
-            print(record, end="")
-            if os.environ.get("GITHUB_OUTPUT"):
-                with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
-                    stream.write(record)
+            prepare(version, args.publish)
         elif args.action == "verify":
             files = verify_artifacts(args.artifacts, version, args.sha or "")
             print(f"PASS: verified {len(files)} release files")
+            summary(f"Verified both packages and all six release files for `{args.sha}`. "
+                    "Download `gx-windows-installer` and `gx-linux-deb` from this run's Artifacts.")
         else:
             publish(args.artifacts, version, args.sha or "")
         return 0
-    except (ValueError, OSError, KeyError) as error:
+    except (ValueError, OSError, KeyError, subprocess.CalledProcessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
 

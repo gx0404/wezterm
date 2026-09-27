@@ -24,6 +24,8 @@
 原生安装包版本来自根 CHANGELOG 最大 SemVer，正式标签为 `gx-vX.Y.Z`。
 四个程序仍使用原有日期/hash 版本；构建清单同时记录包版本、产品版本、完整
 提交 SHA、资源指纹、二进制校验和与 dirty 状态。dirty 包可供本地验证，不能发布。
+GX 编译前将提交的 UTC 时间与 8 位 SHA 写入 ignored `.tag`，沿用上游版本格式，
+保证 Windows/Linux 以及缓存重建得到同一产品版本。
 
 本地命令（仓库根目录）：
 
@@ -47,6 +49,9 @@ amd64，先安装 Rust，再执行根 `get-deps`；打包还需 pkg-config、bin
 较新的 Linux/WSL 使用 `--container`，自动准备 Ubuntu 20.04 Docker 构建环境；
 `--container --check` 只检查 Docker，不下载镜像或安装依赖。Cargo 缓存与构建产物
 使用独立 `wezterm-gx-focal-*` Docker volumes，最终包仍写入宿主的 `dist/`。
+也可指定 `--cache-dir <dir>` 将 registry/git/target 缓存放在宿主目录；CI 使用
+`.local/gx-deb-cache` 并通过 Actions cache 跨 runner 复用。容器和两平台 CI
+共用 `scripts/gx_package.py::RUST_VERSION` 钉定的 Rust 版本，升级只改此处。
 
 同一个 deb 支持 Ubuntu 20.04 和 24.04，无须用户选择发行版或手动更换库。
 构建沿用现有 `wezterm-ssh/vendored-openssl` feature 静态链接 OpenSSL，证书仍来自
@@ -81,19 +86,33 @@ GitHub 操作流程：
    `gx-release` 必须存在于默认分支，目标构建分支也须含同版打包脚本；
    GitHub 的手动入口要求的是默认分支，不限定分支名为 `main`。
 2. Actions → gx-release → Run workflow，Branch 选择 `feature/gx_wezterm`，
-   填写 ref（默认同一分支）和 X.Y.Z（必须匹配目标提交的 CHANGELOG）。
-   publish 默认为 true；关掉只构建。
-3. prepare 固定 SHA → Windows 构建及安装冒烟；Linux 在 20.04 容器构建一次，
+   ref 保持默认即可，**version 留空自动取目标提交的 CHANGELOG 版本**。
+   若手填 X.Y.Z，必须与 CHANGELOG 一致；错误会同时显示输入值、期望值和修正方式。
+   publish 默认为 true；关掉仍完整构建和验证，但不创建标签或 Release。
+3. prepare 固定 SHA/版本/工具链；发布模式先只读检查正式版本和标签冲突，再开始
+   Windows 构建及安装冒烟；Linux 在 20.04 容器构建一次，
    同一个 deb 分别在干净 20.04、24.04 容器安装、升级、GUI 冒烟及卸载。
-4. publish=true 且两平台成功时核对清单，创建/复用同 SHA 标签，上传完整草稿再公开。
+4. 独立 verify 任务在所有安装测试通过后核对双平台 SHA、产品版本、资源指纹、
+   完整二进制清单与校验和；**仅构建模式也必须通过该检查**。
+5. publish=true 时创建/复用同 SHA 标签，上传完整草稿，逐文件核对服务端大小和
+   SHA-256 后再公开；只有该任务拥有 contents: write 权限。
    已发布版本、指向其他提交的标签、不同资源、缺失或损坏文件均拒绝；失败草稿
-   仅在已上传文件摘要完全相同时可继续。普通 push/tag 不触发此发版流程。
+   仅在已上传文件大小和摘要完全相同时可继续。普通 push/tag 不触发此发版流程。
+
+同一仓库的 GX 运行串行排队，避免自动版本与手填版本同时发布同一标签。任务 Summary
+展示固定 SHA、版本、工具链和运行模式；关掉 publish 后，从成功运行底部 Artifacts
+下载 `gx-windows-installer` 和 `gx-linux-deb`（保留 14 天）。版本已经发布时，可关掉
+publish 做回归构建；要正式再发一个版本，先在 CHANGELOG 增加新的 SemVer 并提交。
+不要重跑旧失败任务期待它使用新代码；修复推送后重新 Run workflow。
 
 `gx_smoke_windows.ps1` 只允许运行在可丢弃 Actions runner；Linux 生命周期测试
 默认也限制在 Actions，本地可在测试系统显式传 `--allow-system-install`，且拒绝
 替换已有 wezterm-gx 包。用户初始化逻辑另有无需安装权限的原生单元测试。
 `linux-verify` 使用 20.04/24.04 矩阵，以普通测试账户启动 GUI；任一系统失败均
 阻止发布。截图分别上传到 `evidence-linux-20.04` 与 `evidence-linux-24.04`。
+Windows 安装/升级/卸载日志和字体加载记录上传到 `evidence-windows`。两平台测试
+均强制走插件升级分支，逐文件比较配置、壁纸设置、会话和自定义插件的 SHA-256，
+确认升级与卸载保留用户数据。该测试不等同于人工观察 Windows 冷启动闪窗。
 本地以 root 驱动测试时必须通过
 `GX_SMOKE_USER` 指定非 root 账户，安装动作与用户初始化分开执行。
 
