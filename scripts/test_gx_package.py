@@ -14,6 +14,29 @@ import gx_release as release
 
 
 class PackageTests(unittest.TestCase):
+    def test_explicit_inno_compiler_wins_over_preinstalled_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pinned = Path(directory) / "ISCC.exe"
+            pinned.write_bytes(b"fixture")
+            with patch.dict("os.environ", {"ISCC": str(pinned)}), \
+                    patch.object(package.shutil, "which", return_value="old-inno.exe"):
+                self.assertEqual(package.tool("iscc"), pinned)
+                pinned.unlink()
+                with self.assertRaisesRegex(ValueError, "ISCC points to a missing"):
+                    package.tool("iscc")
+
+    def test_inno_preflight_rejects_old_compilers_before_building(self):
+        with patch.object(package, "tool", return_value=Path("ISCC.exe")):
+            for version in ("6.7.1", "6.7.3", "7.0.0", "unknown"):
+                with patch.object(package, "output", return_value=version):
+                    with self.assertRaisesRegex(ValueError, "long plugin paths"):
+                        package.verify_inno()
+            with patch.object(package, "output", side_effect=subprocess.CalledProcessError(1, "ISCC")):
+                with self.assertRaisesRegex(ValueError, "Inno Setup >= 7.1"):
+                    package.verify_inno()
+            with patch.object(package, "output", return_value="7.1.0"):
+                package.verify_inno()
+
     def test_failed_container_build_returns_cache_ownership_without_touching_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

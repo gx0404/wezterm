@@ -80,10 +80,10 @@ jobs:
       - name: Install pinned Inno Setup
         shell: pwsh
         run: |
-          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.0-x64.exe'
           $destination = Join-Path $env:RUNNER_TEMP 'gx-inno'
-          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $installer
-          $expected = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe' -OutFile $installer
+          $expected = '0362a383ed217d4c4239b5933866dd96d3eb2102737da92f80f6057a4b40df2f'
           if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne $expected) { throw 'Inno Setup checksum mismatch' }
           $installed = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=`"$destination`"" -WindowStyle Hidden -Wait -PassThru
           if ($installed.ExitCode -ne 0) { throw "Inno Setup installation failed: $($installed.ExitCode)" }
@@ -101,6 +101,7 @@ jobs:
           & .local/gx-tests/launcher-tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build and package Windows installer
+        id: package
         shell: pwsh
         env:
           GX_VERSION: ${{ needs.prepare.outputs.version }}
@@ -113,6 +114,7 @@ jobs:
         shell: pwsh
         run: ./scripts/gx_smoke_windows.ps1
       - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         with:
           name: gx-windows-installer
           path: dist/WezTerm-GX-*

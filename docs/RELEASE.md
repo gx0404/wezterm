@@ -41,8 +41,8 @@ python3 scripts/gx_package.py deb --container
 `--bin-dir <dir>` 复用已构建的四个程序，仍检查其架构、版本与 HEAD；未指定时
 执行 `cargo build --locked --release`。`--output-dir <dir>` 更改输出目录；
 `make gx-package-windows` / `make gx-package-deb` / `make package` 是相应封装。
-Windows 需要 MSVC、Perl、Rust >= 1.89、Inno Setup 6.7.3；可用
-`winget install --id JRSoftware.InnoSetup --exact --version 6.7.3 --scope user`
+Windows 需要 MSVC、Perl、Rust >= 1.89、Inno Setup >= 7.1（长插件路径支持）；可用
+`winget install --id JRSoftware.InnoSetup.7 --exact --version 7.1.0 --scope user`
 安装编译器，非标准位置通过 `ISCC` 指定。Linux 原生构建基线固定 Ubuntu 20.04
 amd64，先安装 Rust，再执行根 `get-deps`；打包还需 pkg-config、binutils。
 打包入口兼容 20.04 自带的 Python 3.8，用户安装和运行不依赖 Python。
@@ -54,8 +54,10 @@ amd64，先安装 Rust，再执行根 `get-deps`；打包还需 pkg-config、bin
 构建退出时会将显式缓存目录归还宿主用户，确保含私有权限文件的 crate 也能归档。
 容器和两平台 CI 共用 `scripts/gx_package.py::RUST_VERSION` 钉定的 Rust 版本，
 升级只改此处。
-Windows CI 从 [Inno Setup 官方 Release](https://github.com/jrsoftware/issrc/releases/tag/is-6_7_3)
-下载 6.7.3 并核对固定 SHA-256，避免第三方软件源缺失该版本导致构建中断。
+Windows CI 从 [Inno Setup 官方 Release](https://github.com/jrsoftware/issrc/releases/tag/is-7_1_0)
+下载 7.1.0 并核对固定 SHA-256，避免第三方软件源缺失版本导致构建中断。
+`ISCC` 显式路径优先于 PATH；预检拒绝旧编译器，避免长 Git 插件元数据路径在
+安装时触发 MAX_PATH 限制。
 
 同一个 deb 支持 Ubuntu 20.04 和 24.04，无须用户选择发行版或手动更换库。
 构建沿用现有 `wezterm-ssh/vendored-openssl` feature 静态链接 OpenSSL，证书仍来自
@@ -114,8 +116,9 @@ publish 做回归构建；要正式再发一个版本，先在 CHANGELOG 增加�
 替换已有 wezterm-gx 包。用户初始化逻辑另有无需安装权限的原生单元测试。
 `linux-verify` 使用 20.04/24.04 矩阵，以普通测试账户启动 GUI；任一系统失败均
 阻止发布。截图分别上传到 `evidence-linux-20.04` 与 `evidence-linux-24.04`。
-Windows 安装/升级/卸载日志和字体加载记录上传到 `evidence-windows`。两平台测试
-均强制走插件升级分支，逐文件比较配置、壁纸设置、会话和自定义插件的 SHA-256，
+Windows 安装/升级/卸载日志和字体加载记录上传到 `evidence-windows`。
+构建成功后，即使 Windows 安装测试失败也保留安装器供排障；发布仍要求所有验证通过。
+两平台测试均强制走插件升级分支，逐文件比较配置、壁纸设置、会话和自定义插件的 SHA-256，
 确认升级与卸载保留用户数据。该测试不等同于人工观察 Windows 冷启动闪窗。
 本地以 root 驱动测试时必须通过
 `GX_SMOKE_USER` 指定非 root 账户，安装动作与用户初始化分开执行。

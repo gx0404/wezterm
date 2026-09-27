@@ -92,6 +92,11 @@ def product_version_from_source(sha: str, root: Path = ROOT) -> str:
 
 
 def tool(name: str) -> Path:
+    if name == "iscc" and os.environ.get("ISCC"):
+        override = Path(os.environ["ISCC"])
+        if not override.is_file():
+            raise ValueError(f"ISCC points to a missing compiler: {override}")
+        return override
     found = shutil.which(name)
     if found:
         return Path(found)
@@ -100,14 +105,26 @@ def tool(name: str) -> Path:
         if candidate.is_file():
             return candidate
     if name == "iscc":
-        candidates = [os.environ.get("ISCC", ""), ROOT / ".local/tools/inno/ISCC.exe"]
+        candidates = [ROOT / ".local/tools/inno7/ISCC.exe"]
         for env in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
             base = Path(os.environ.get(env, "C:/Program Files (x86)"))
-            candidates.extend([base / "Inno Setup 6/ISCC.exe", base / "Programs/Inno Setup 6/ISCC.exe"])
+            candidates.extend([base / "Inno Setup 7/ISCC.exe", base / "Programs/Inno Setup 7/ISCC.exe"])
         for candidate in candidates:
             if candidate and Path(candidate).is_file():
                 return Path(candidate)
     raise ValueError(f"required tool not found: {name}")
+
+
+def verify_inno():
+    message = "Inno Setup >= 7.1 is required for long plugin paths; install it and set ISCC to its ISCC.exe"
+    try:
+        version = output([tool("iscc"), "--version"])
+    except subprocess.CalledProcessError as error:
+        raise ValueError(message) from error
+    match = re.search(r"\b(\d+)\.(\d+)\.(\d+)\b", version)
+    if not match or tuple(map(int, match.groups())) < (7, 1, 0):
+        raise ValueError(message)
+    print(f"Inno Setup compiler: {match.group()}")
 
 
 def source_info(root: Path = ROOT) -> tuple[str, bool]:
@@ -315,6 +332,8 @@ def preflight(kind: str, bin_dir: Path | None):
         needed.append("cargo")
     for name in needed:
         print(f"FOUND {name}: {tool(name)}")
+    if kind == "windows":
+        verify_inno()
     if bin_dir is None:
         output([tool("cargo"), "--version"])
     rust = output([tool("rustc"), "--version"])
