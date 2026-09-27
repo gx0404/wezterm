@@ -40,6 +40,10 @@
 
 - gen_*.yml 是生成物：CI 行为改动只能改 `ci/generate-workflows.py` 然后
   重新生成全部 gen workflow，并审 diff。
+- GX 默认分支的 `.github/workflows/` 只保留 `gx-release.yml`；上游与旧版
+  workflow 可原样迁移到 `.github/workflows-archive/`，只改存放位置，不编辑
+  生成文件正文或上游生成器。`main` 保持上游同步分支；合并到 GX 后，核对
+  归档文件的上游更新，并将新引入的非 GX workflow 同样原样归档。
 - ssh e2e（wezterm-ssh/tests）在 CI 由工作流装 openssh-server 提供；本地跑
   需要 `/usr/sbin/sshd` 存在（`make test-integration` 会真实起 sshd 子进程）。
 - fmt 用 nightly（`.rustfmt.toml`）；lint 门是 `cargo +nightly fmt --check`。

@@ -77,10 +77,12 @@ Windows 默认用户安装到 `%LOCALAPPDATA%\Programs\WezTerm GX`，可在向�
 
 GitHub 操作流程：
 
-1. 将 `gx-release` 入口通过正常合并进入默认分支 `main`，目标构建分支也须含
-   同版打包脚本；只有默认分支存在 workflow_dispatch 才能从 Actions 页面运行。
-2. Actions → gx-release → Run workflow，填写 ref（默认 feature/gx_wezterm）
-   和 X.Y.Z（必须匹配目标提交的 CHANGELOG）。publish 默认为 true；关掉只构建。
+1. 本 fork 的默认分支设为 `feature/gx_wezterm`，`main` 专门同步上游。
+   `gx-release` 必须存在于默认分支，目标构建分支也须含同版打包脚本；
+   GitHub 的手动入口要求的是默认分支，不限定分支名为 `main`。
+2. Actions → gx-release → Run workflow，Branch 选择 `feature/gx_wezterm`，
+   填写 ref（默认同一分支）和 X.Y.Z（必须匹配目标提交的 CHANGELOG）。
+   publish 默认为 true；关掉只构建。
 3. prepare 固定 SHA → Windows 构建及安装冒烟；Linux 在 20.04 容器构建一次，
    同一个 deb 分别在干净 20.04、24.04 容器安装、升级、GUI 冒烟及卸载。
 4. publish=true 且两平台成功时核对清单，创建/复用同 SHA 标签，上传完整草稿再公开。
@@ -94,6 +96,21 @@ GitHub 操作流程：
 阻止发布。截图分别上传到 `evidence-linux-20.04` 与 `evidence-linux-24.04`。
 本地以 root 驱动测试时必须通过
 `GX_SMOKE_USER` 指定非 root 账户，安装动作与用户初始化分开执行。
+
+## 工作流目录与上游同步
+
+GX 分支的 `.github/workflows/` 只保留 `gx-release.yml`。35 个上游流程及旧版
+`gx-windows-build` 原样移入 `.github/workflows-archive/`，GitHub 不从归档目录
+加载工作流。停用操作本身不会隐藏侧栏条目；移出定义后，旧运行记录仍可能让
+对应的历史流程保留在列表中。本次保留旧 Windows 构建记录与产物。
+
+`main` 的上游工作流与提交历史保持原样。以后先在 `main` 同步上游，再正常
+合并到 GX 分支；Git 可通过文件重命名识别已归档流程，遇到冲突时保留归档
+路径并合入上游内容。合并后检查 `.github/workflows/`，将新引入的非 GX
+工作流也原样移入归档目录，逐文件核对内容并审阅 diff。
+
+上游生成器仍输出到原来的 `.github/workflows/`；若有意运行生成器，完成后
+按同样方式归档生成结果。归档只调整入口位置，不手改生成文件正文。
 
 ## 上游发布边界
 

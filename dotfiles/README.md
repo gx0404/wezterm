@@ -54,8 +54,8 @@ cd wezterm && make gx-install       # get-deps(需 sudo) → release 构建 → 
 
 **3. Windows 旧版 zip 部署**
 
-需要兼容旧安装脚本时，在 GitHub Actions 手动触发 `gx-windows-build` workflow 取得
-`wezterm-windows-*.zip`，与 `dotfiles/` 放同一目录后：
+旧版 `gx-windows-build` 已归档，新安装包通过 `gx-release` 获取。
+需要兼容旧安装脚本且已有 `wezterm-windows-*.zip` 时，与 `dotfiles/` 放同一目录后：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File dotfiles\install.ps1 -ZipPath <zip>
