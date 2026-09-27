@@ -19,6 +19,10 @@
   Windows 数据目录 = Roaming AppData（`config/src/config.rs::compute_data_dir`）。
 - 打包/同步：`scripts/gx_bundle.py`（`bundle` / `sync` 子命令）；
   源码路径安装 `scripts/gx_install.sh`；命令入口见根 Makefile 追加段。
+- 原生安装包：`scripts/gx_package.py`（Windows EXE / Ubuntu 20.04、24.04 通用 amd64 deb）；
+  `scripts/gx-launcher/` 是独立 std-only Rust 启动器（Rust >= 1.89），由 rustc
+  直接编译，不改变产品 Cargo workspace。首次启动初始化配置，已有配置保留；
+  插件升级备份在独立 wezterm-gx 数据目录，保留 state/，还原 gitdir → .git。
 - apt 构建依赖唯一真源：根 `get-deps`（docker 构建镜像与 gx-install 都
   调用它，不在 dotfiles/ 另立清单）。
 
@@ -39,6 +43,12 @@
 - bundle 二进制必须来自本分支构建：默认 docker `ubuntu:20.04` 容器保证
   glibc ≤ 2.31 兼容（目标机 20.04/24.04 通吃）；本机构建回退
   （`GX_USE_LOCAL=1`）必须在产物文件名与 manifest.env 标注 glibc 要求。
+- 原生 deb 同样固定在 Ubuntu 20.04 构建（新版 Linux 用 `--container`），沿用
+  vendored-openssl feature；全部程序与启动器检查 GLIBC ≤ 2.31、无动态 OpenSSL。
+  运行依赖经 dpkg-shlibdeps 生成并补齐 dlopen 图形库/字体缓存/zsh/CA 证书。
+  同一个包必须在干净 20.04 与 24.04 环境通过安装生命周期及 GUI 验证后才发布。
+- 安装器不以管理员/root 身份初始化其他用户 HOME；用户数据只由普通用户
+  启动器写入。卸载保留配置、插件会话与备份；用户/系统模式字体按对应范围安装。
 
 ## 禁止项
 

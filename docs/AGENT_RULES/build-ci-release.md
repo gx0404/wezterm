@@ -46,11 +46,16 @@
 - 发布链（tag.sh/create-release.sh/deploy.sh/appimage.sh/windows-installer.iss
   及分发渠道脚本）只在上游仓库运行；本 fork 改这些文件仅为了上游同步后可
   复用，不在本地执行发布动作（hooks 会拦）。
+- GX 自有链：`scripts/gx_package.py` + `scripts/packaging/` + `gx-release`
+  workflow；人类手动选择 ref/version/publish，两平台锁同一 SHA，构建 job
+  只读，发布 job 仅向 `gx0404/wezterm` 写入完整 Release，禁止覆盖正式版本或
+  移动标签。安装包版本取根 CHANGELOG；产品日期/hash 版本保持原链。
 
 ## 禁止项
 
 - 不手改 Cargo.lock 里钉版的子模块内容；不为绕过检查降级 deny.toml 规则。
-- 不在 fork 里启用 cargo-cooldown/发布类 workflow 的凭据。
+- 不在 fork 里启用上游 cargo-cooldown/发布 workflow 的凭据；GX 手动发布只用
+  发布 job 的临时 GITHUB_TOKEN，不引入 PAT 或上游渠道凭据。
 - 新依赖三步走：workspace.dependencies 登记 → cargo check 确认 feature 面
   → `cargo deny check` 通过；并在交付说明里给出理由。
 

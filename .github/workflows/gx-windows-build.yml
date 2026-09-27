@@ -2,15 +2,12 @@ name: gx-windows-build
 
 # fork(gx): build the four release binaries from this branch for the dotfiles
 # install chain (dotfiles/install.ps1 consumes the zip via make gx-bundle).
-# Manually dispatched or triggered by gx-v* tags. NOT part of the generated
+# Manually dispatched for legacy zip users. NOT part of the generated
 # gen_* matrix (ci/generate-workflows.py); packaging is a plain zip of the
 # binaries -- the upstream release chain (ci/deploy.sh etc.) is never invoked.
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "gx-v*"
 
 jobs:
   build:

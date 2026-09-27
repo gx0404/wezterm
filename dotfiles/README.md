@@ -19,7 +19,20 @@
 Windows 注意：配置装到 `%USERPROFILE%\.config\wezterm`（源码确认与 Linux 同一查找
 序）；插件装到 `%APPDATA%\wezterm\plugins`（Windows 数据目录是 Roaming AppData）。
 
-## 三种用法
+## 原生安装包（推荐）
+
+GitHub Actions 手动运行 `gx-release`，可下载完整的 Windows x64 安装 EXE 和
+兼容 Ubuntu 20.04 与 24.04 的同一个 amd64 deb。Windows 默认安装到当前用户的
+`%LOCALAPPDATA%\Programs\WezTerm GX`，也可选择所有用户；Linux 使用
+`sudo apt install ./wezterm-gx_X.Y.Z_amd64.deb`。构建命令、发版入口及校验方式
+见 [发布说明](../docs/RELEASE.md)。
+
+安装包带齐配置、插件、字体和壁纸。原生启动器在普通用户首次启动时初始化资源：
+已有配置及壁纸设置保留；包管理的四个插件备份后升级，保留 `state/`，其他插件
+不受影响。插件暂存、备份和版本标记在数据目录的 `wezterm-gx/` 下，位于插件扫描
+目录之外。卸载程序保留用户配置与会话。
+
+## 旧版 bundle 与源码安装
 
 **1. 离线 bundle（全新 Ubuntu 工控机，无需网络/工具链）**
 
@@ -39,9 +52,9 @@ git clone -b feature/gx_wezterm https://github.com/gx0404/wezterm.git
 cd wezterm && make gx-install       # get-deps(需 sudo) → release 构建 → 部署
 ```
 
-**3. Windows**
+**3. Windows 旧版 zip 部署**
 
-分支推送后在 GitHub Actions 手动触发 `gx-windows-build` workflow 取得
+需要兼容旧安装脚本时，在 GitHub Actions 手动触发 `gx-windows-build` workflow 取得
 `wezterm-windows-*.zip`，与 `dotfiles/` 放同一目录后：
 
 ```powershell

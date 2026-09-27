@@ -1,0 +1,192 @@
+name: gx-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build
+        required: true
+        default: feature/gx_wezterm
+        type: string
+      version:
+        description: GX version X.Y.Z (must match the selected commit's CHANGELOG)
+        required: true
+        type: string
+      publish:
+        description: Publish both tested installers to GitHub Releases
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gx-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'gx0404/wezterm'
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.prepare.outputs.sha }}
+      version: ${{ steps.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: prepare
+        env:
+          GX_VERSION: ${{ inputs.version }}
+        run: python3 scripts/gx_release.py prepare --version "$GX_VERSION"
+      - name: Validate fork rules and command configuration
+        run: |
+          python3 scripts/resolve_agent_rules.py --check
+          python3 scripts/dev_framework.py ready
+          python3 scripts/version.py --check
+
+  windows:
+    needs: prepare
+    runs-on: windows-2025
+    env:
+      CARGO_INCREMENTAL: '0'
+      TZ: UTC
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Install pinned Inno Setup
+        shell: pwsh
+        run: choco install innosetup --version=6.7.3 --yes --no-progress
+      - name: Test packaging and launcher
+        shell: pwsh
+        run: |
+          python -m unittest discover -s scripts -p test_gx_*.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force .local/gx-tests | Out-Null
+          rustc --edition=2021 --test scripts/gx-launcher/main.rs -o .local/gx-tests/launcher-tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .local/gx-tests/launcher-tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build and package Windows installer
+        shell: pwsh
+        env:
+          GX_VERSION: ${{ needs.prepare.outputs.version }}
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: 'true'
+        run: |
+          $env:PATH = "C:\Strawberry\perl\bin;" + $env:PATH
+          python scripts/gx_package.py windows --version $env:GX_VERSION
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install, initialize and uninstall in isolation
+        shell: pwsh
+        run: ./scripts/gx_smoke_windows.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gx-windows-installer
+          path: dist/WezTerm-GX-*
+          if-no-files-found: error
+
+  linux:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_INCREMENTAL: '0'
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          submodules: recursive
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install build and validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+      - name: Test packaging, Lua and launcher
+        run: |
+          rustup toolchain install nightly --profile minimal --component rustfmt
+          rustfmt +nightly --edition 2021 --check scripts/gx-launcher/main.rs
+          python3 -m unittest discover -s scripts -p 'test_gx_*.py'
+          lua5.4 scripts/tests/gx_resurrect.lua
+          mkdir -p .local/gx-tests
+          rustc --edition=2021 --test scripts/gx-launcher/main.rs -o .local/gx-tests/launcher-tests
+          .local/gx-tests/launcher-tests
+      - name: Build one portable deb on the Ubuntu 20.04 baseline
+        env:
+          GX_VERSION: ${{ needs.prepare.outputs.version }}
+        run: python3 scripts/gx_package.py deb --container --version "$GX_VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gx-linux-deb
+          path: dist/wezterm-gx_*
+          if-no-files-found: error
+
+  linux-verify:
+    needs: [prepare, linux]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ['20.04', '24.04']
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: gx-linux-deb
+          path: dist
+      - name: Validate the same deb in a clean Ubuntu container
+        env:
+          GX_UBUNTU: ${{ matrix.ubuntu }}
+        run: |
+          (cd dist && sha256sum -c ./*.sha256)
+          docker run --rm --volume "$PWD:/workspace" --workdir /workspace "ubuntu:$GX_UBUNTU" bash -eu -c '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y xvfb xauth x11-apps ffmpeg
+            useradd --create-home gx-smoke
+            GX_SMOKE_USER=gx-smoke bash scripts/gx_smoke_linux.sh --allow-system-install
+          '
+      - name: Save GUI smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: evidence-linux-${{ matrix.ubuntu }}
+          path: .ui-evidence/gx-package-linux/
+          include-hidden-files: true
+
+  publish:
+    needs: [prepare, windows, linux, linux-verify]
+    if: inputs.publish && github.repository == 'gx0404/wezterm'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: gx-*
+          merge-multiple: true
+          path: dist
+      - name: Verify both packages and publish complete draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GX_VERSION: ${{ needs.prepare.outputs.version }}
+          GX_SHA: ${{ needs.prepare.outputs.sha }}
+        run: python3 scripts/gx_release.py publish --version "$GX_VERSION" --sha "$GX_SHA"

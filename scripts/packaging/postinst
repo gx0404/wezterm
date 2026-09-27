@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ]; then
+    fc-cache -f /usr/share/fonts/truetype/wezterm-gx
+    update-desktop-database /usr/share/applications
+fi

@@ -71,10 +71,24 @@ end
 -- Create the folder if it does not exist
 ---@param path string
 function utils.ensure_folder_exists(path)
+	-- GX: config reloads run this three times. Existing directories need no
+	-- process, and run_child_process suppresses Windows console windows.
+	if pcall(wezterm.read_dir, path) then
+		return
+	end
+	local args
 	if utils.is_windows then
-		os.execute('mkdir /p "' .. path:gsub("/", "\\" .. '"'))
+		local literal = path:gsub("'", "''")
+		args = {
+			"powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+			"[System.IO.Directory]::CreateDirectory('" .. literal .. "') | Out-Null",
+		}
 	else
-		os.execute('mkdir -p "' .. path .. '"')
+		args = { "mkdir", "-p", "--", path }
+	end
+	local success, _, stderr = wezterm.run_child_process(args)
+	if not success or not pcall(wezterm.read_dir, path) then
+		error("Could not create state directory " .. path .. ": " .. (stderr or ""))
 	end
 end
 

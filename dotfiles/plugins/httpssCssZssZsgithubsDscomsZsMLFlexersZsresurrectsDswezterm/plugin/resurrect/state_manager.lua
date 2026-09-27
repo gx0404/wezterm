@@ -25,10 +25,13 @@ end
 ---@param opt_name? string
 function pub.save_state(state, opt_name)
 	if state.window_states then
+		utils.ensure_folder_exists(pub.save_state_dir .. "/workspace")
 		file_io.write_state(get_file_path(state.workspace, "workspace", opt_name), state, "workspace")
 	elseif state.tabs then
+		utils.ensure_folder_exists(pub.save_state_dir .. "/window")
 		file_io.write_state(get_file_path(state.title, "window", opt_name), state, "window")
 	elseif state.pane_tree then
+		utils.ensure_folder_exists(pub.save_state_dir .. "/tab")
 		file_io.write_state(get_file_path(state.title, "tab", opt_name), state, "tab")
 	end
 end
@@ -148,11 +151,27 @@ end
 ---Changes the directory to save the state to
 ---@param directory string
 function pub.change_state_save_dir(directory)
-	local types = { "workspace", "window", "tab" }
-	for _, type in ipairs(types) do
-		utils.ensure_folder_exists(directory .. "/" .. type)
-	end
 	pub.save_state_dir = directory
+	local types = { "workspace", "window", "tab" }
+	local missing = false
+	for _, type in ipairs(types) do
+		if not pcall(wezterm.read_dir, directory .. "/" .. type) then
+			missing = true
+		end
+	end
+	if not missing then return end
+	local function create_directories()
+		for _, type in ipairs(types) do
+			utils.ensure_folder_exists(directory .. "/" .. type)
+		end
+	end
+	-- Lua require() is a non-yieldable C boundary. Hidden child processes
+	-- must run after module loading; save_state also checks before writing.
+	if coroutine.isyieldable() then
+		create_directories()
+	else
+		wezterm.time.call_after(0, create_directories)
+	end
 end
 
 function pub.set_max_nlines(max_nlines)

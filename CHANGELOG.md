@@ -8,6 +8,24 @@
 `make version` 只读查询）。WezTerm 产品自身的版本号由 `wezterm-version/build.rs`
 按 git 提交时间与哈希生成，两套体系互不干扰（见 docs/RELEASE.md）。
 
+## 0.3.0(TBD)
+
+### Added
+- GX 原生安装包：Windows EXE 支持当前用户/所有用户、固定安装目录、字体、
+  快捷方式及卸载；同一个 amd64 deb 兼容 Ubuntu 20.04、24.04，包含程序、配置、
+  插件、字体和壁纸。Linux 固定 20.04 构建基线，静态链接 OpenSSL 并审计全部 ELF；
+  发布须通过两版 Ubuntu 安装验证。
+- `make gx-package-windows` / `make gx-package-deb` 共用 Python 打包入口，
+  核验四个程序的版本/架构/提交，生成构建清单与 SHA-256。
+- 无外部依赖的原生启动器：首次初始化用户配置，插件升级备份并保留会话，
+  同版本重复启动幂等；Windows GUI 入口不创建控制台。
+- `gx-release` 由 GitHub Actions 手动触发，同一 SHA 构建双平台安装包，
+  全部验证成功后上传草稿并发布；版本冲突、混版、脏构建及不完整产物拒绝发布。
+
+### Fixed
+- resurrect 初始化不再经 `os.execute` 连续启动建目录控制台；目录存在时不启动
+  子进程，缺失时使用隐藏进程接口并校验结果，正确处理 Windows 中文/空格/引号路径。
+
 ## 0.2.0(2026-09-21)
 
 - `fix(hooks)`：PreToolUse 安全门的 ask 级模式（kill 类、`git add -A`、

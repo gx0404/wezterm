@@ -62,7 +62,7 @@
 |---|---|---|---|
 | `httpssCssZssZsgithubsDscomsZschrisgvesZsdevsDswezterm` | github.com/chrisgve/dev.wezterm | `1b5d9e0` | 无（当前配置未引用，闲置） |
 | `httpssCssZssZsgithubsDscomsZsmichaelbrusegardsZstablinesDswez` | github.com/michaelbrusegard/tabline.wez | `5e148f0`（v1.6.0-14） | `plugin/tabline/components/window/cpu.lua` 有未上游化本地补丁（+27/-1）；当前配置未引用 |
-| `httpssCssZssZsgithubsDscomsZsMLFlexersZsresurrectsDswezterm` | github.com/MLFlexer/resurrect.wezterm | `47ce553`（v1.0.0-254） | 无；state/ 为空会话，无历史数据 |
+| `httpssCssZssZsgithubsDscomsZsMLFlexersZsresurrectsDswezterm` | github.com/MLFlexer/resurrect.wezterm | `47ce553`（v1.0.0-254） | GX：`utils.ensure_folder_exists` 先检查目录，再经 `run_child_process` 建目录并检查结果，修复 Windows 闪窗与转义；`state_manager` 在不可 yield 的 require 阶段延后创建，保存前再次检查；不收录 state/ |
 | `httpssCssZssZsgithubsDscomsZsMLFlexersZssmart_workspace_switchersDswezterm` | github.com/MLFlexer/smart_workspace_switcher.wezterm | `40228a0`（1.2.0-18） | 无 |
 
 ## fonts/

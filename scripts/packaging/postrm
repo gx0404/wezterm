@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+case "$1" in
+    remove|purge)
+        if command -v fc-cache >/dev/null 2>&1; then fc-cache -f; fi
+        if command -v update-desktop-database >/dev/null 2>&1; then
+            update-desktop-database /usr/share/applications
+        fi
+        ;;
+esac

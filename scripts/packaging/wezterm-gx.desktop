@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=WezTerm GX
+Comment=GPU accelerated terminal with the GX environment
+Exec=wezterm-gx-gui start --cwd .
+TryExec=wezterm-gx-gui
+Icon=wezterm-gx
+Type=Application
+Terminal=false
+Categories=System;TerminalEmulator;
+StartupWMClass=org.wezfurlong.wezterm

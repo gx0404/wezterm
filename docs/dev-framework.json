@@ -205,8 +205,19 @@
       "cwd": "."
     },
     "package": {
-      "status": "not-applicable",
-      "reason": "fork 不切发布；上游发布链（ci/tag.sh、ci/create-release.sh、ci/deploy.sh）由上游维护者在 wezterm/wezterm 仓库运行，不在本仓复建"
+      "status": "configured",
+      "argv": ["python3", "scripts/gx_package.py", "auto"],
+      "cwd": "."
+    },
+    "gx-package-windows": {
+      "status": "configured",
+      "argv": ["python3", "scripts/gx_package.py", "windows"],
+      "cwd": "."
+    },
+    "gx-package-deb": {
+      "status": "configured",
+      "argv": ["python3", "scripts/gx_package.py", "deb"],
+      "cwd": "."
     },
     "gx-upgrade": {
       "status": "configured",
