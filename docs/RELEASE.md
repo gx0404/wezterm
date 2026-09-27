@@ -50,8 +50,10 @@ amd64，先安装 Rust，再执行根 `get-deps`；打包还需 pkg-config、bin
 `--container --check` 只检查 Docker，不下载镜像或安装依赖。Cargo 缓存与构建产物
 使用独立 `wezterm-gx-focal-*` Docker volumes，最终包仍写入宿主的 `dist/`。
 也可指定 `--cache-dir <dir>` 将 registry/git/target 缓存放在宿主目录；CI 使用
-`.local/gx-deb-cache` 并通过 Actions cache 跨 runner 复用。容器和两平台 CI
-共用 `scripts/gx_package.py::RUST_VERSION` 钉定的 Rust 版本，升级只改此处。
+`.local/gx-deb-cache` 并通过 Actions cache 跨 runner 复用。
+构建退出时会将显式缓存目录归还宿主用户，确保含私有权限文件的 crate 也能归档。
+容器和两平台 CI 共用 `scripts/gx_package.py::RUST_VERSION` 钉定的 Rust 版本，
+升级只改此处。
 Windows CI 从 [Inno Setup 官方 Release](https://github.com/jrsoftware/issrc/releases/tag/is-6_7_3)
 下载 6.7.3 并核对固定 SHA-256，避免第三方软件源缺失该版本导致构建中断。
 

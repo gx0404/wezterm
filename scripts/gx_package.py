@@ -364,6 +364,7 @@ def container_deb(args, version: str):
     if args.bin_dir:
         mounts.append(args.bin_dir.resolve())
     cmd = [docker, "run", "--rm", "--workdir", ROOT]
+    host_caches = []
     for path in dict.fromkeys(mounts):
         cmd += ["--volume", f"{path}:{path}"]
     for name, path in (("registry", "/usr/local/cargo/registry"),
@@ -371,8 +372,11 @@ def container_deb(args, version: str):
         cache = f"wezterm-gx-focal-{name}"
         if args.cache_dir:
             directory = args.cache_dir.resolve() / name
+            if directory.is_symlink():
+                raise ValueError(f"cache subdirectory must not be a symlink: {directory}")
             directory.mkdir(parents=True, exist_ok=True)
             cache = str(directory)
+            host_caches.append(directory)
         cmd += ["--volume", f"{cache}:{path}"]
     for name in ("CARGO_BUILD_JOBS", "CARGO_INCREMENTAL"):
         if name in os.environ:
@@ -382,12 +386,27 @@ def container_deb(args, version: str):
             "--output-dir", dest]
     if args.bin_dir:
         cmd += ["--bin-dir", args.bin_dir.resolve()]
-    run(cmd)
-    # Only hand the three generated files back to the invoking host user.
-    name = f"wezterm-gx_{version}_amd64.deb"
-    run([docker, "run", "--rm", "--volume", f"{dest}:{dest}", image,
-         "chown", f"{os.getuid()}:{os.getgid()}",
-         *[dest / (name + suffix) for suffix in ("", ".manifest.json", ".sha256")]])
+    try:
+        run(cmd)
+    finally:
+        # Some crates contain owner-only files. The host must own the bind
+        # caches for Actions to archive them, including after a failed build.
+        name = f"wezterm-gx_{version}_amd64.deb"
+        owned = [dest / (name + suffix) for suffix in ("", ".manifest.json", ".sha256")
+                 if (dest / (name + suffix)).is_file()]
+        handoff = [docker, "run", "--rm", "--volume", f"{dest}:{dest}"]
+        if (ROOT / ".tag").is_file():
+            handoff += ["--volume", f"{ROOT / '.tag'}:/gx-build-tag"]
+            owned.append("/gx-build-tag")
+        for index, directory in enumerate(host_caches):
+            target = f"/gx-owned-cache-{index}"
+            handoff += ["--volume", f"{directory}:{target}"]
+            owned.append(target)
+        if owned:
+            # Scope changes to build metadata, outputs and explicit cache roots;
+            # never follow cache symlinks into the source tree or elsewhere.
+            run([*handoff, image, "chown", "--recursive", "--no-dereference",
+                 f"{os.getuid()}:{os.getgid()}", *owned])
 
 
 def main() -> int:

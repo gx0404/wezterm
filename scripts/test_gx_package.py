@@ -1,10 +1,12 @@
 """GX packaging contract checks; no compiler, install or network required."""
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import gx_package as package
@@ -12,6 +14,36 @@ import gx_release as release
 
 
 class PackageTests(unittest.TestCase):
+    def test_failed_container_build_returns_cache_ownership_without_touching_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in ("get-deps", "ci/check-rust-version.sh", "scripts/packaging/ubuntu2004.Dockerfile"):
+                source = root / relative
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("fixture\n")
+            args = SimpleNamespace(check=False, bin_dir=None, output_dir=root / "dist", cache_dir=root / "cache")
+            calls = []
+
+            def docker_run(command):
+                calls.append(list(map(str, command)))
+                if "python3" in command:
+                    raise subprocess.CalledProcessError(1, "container-build")
+
+            with patch.object(package, "ROOT", root), patch.object(package.sys, "platform", "linux"), \
+                    patch.object(package.platform, "machine", return_value="x86_64"), \
+                    patch.object(package, "tool", return_value="docker"), \
+                    patch.object(package, "output", side_effect=["linux", ".git"]), \
+                    patch.object(package.os, "getuid", return_value=1001, create=True), \
+                    patch.object(package.os, "getgid", return_value=1001, create=True), \
+                    patch.object(package, "run", side_effect=docker_run):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    package.container_deb(args, "1.2.3")
+            handoff = calls[-1]
+            self.assertIn("--no-dereference", handoff)
+            self.assertEqual(handoff[handoff.index("1001:1001") + 1:],
+                             ["/gx-owned-cache-0", "/gx-owned-cache-1", "/gx-owned-cache-2"])
+            self.assertNotIn(str(root), handoff)
+
     def test_resource_paths_have_the_same_case_sensitive_order_on_each_host(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -29,6 +29,8 @@
   安装验证增加用户数据逐文件校验和 Windows 日志产物，便于失败定位。
   修复 Chocolatey 缺少钉定 Inno Setup 版本导致 Windows 构建无法启动的问题，
   改用官方安装器及固定 SHA-256，并更新缓存 action 的 Node 运行时。
+  容器构建完成或失败后恢复宿主缓存所有权，修复 Cargo 缓存因 root 文件权限
+  导致 Actions 归档失败、后续仍需全量编译的问题。
 - resurrect 初始化不再经 `os.execute` 连续启动建目录控制台；目录存在时不启动
   子进程，缺失时使用隐藏进程接口并校验结果，正确处理 Windows 中文/空格/引号路径。
 - GX 默认分支只保留 `gx-release` 工作流入口，将 35 个上游流程及旧 Windows
