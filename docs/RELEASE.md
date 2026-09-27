@@ -52,6 +52,8 @@ amd64，先安装 Rust，再执行根 `get-deps`；打包还需 pkg-config、bin
 也可指定 `--cache-dir <dir>` 将 registry/git/target 缓存放在宿主目录；CI 使用
 `.local/gx-deb-cache` 并通过 Actions cache 跨 runner 复用。容器和两平台 CI
 共用 `scripts/gx_package.py::RUST_VERSION` 钉定的 Rust 版本，升级只改此处。
+Windows CI 从 [Inno Setup 官方 Release](https://github.com/jrsoftware/issrc/releases/tag/is-6_7_3)
+下载 6.7.3 并核对固定 SHA-256，避免第三方软件源缺失该版本导致构建中断。
 
 同一个 deb 支持 Ubuntu 20.04 和 24.04，无须用户选择发行版或手动更换库。
 构建沿用现有 `wezterm-ssh/vendored-openssl` feature 静态链接 OpenSSL，证书仍来自

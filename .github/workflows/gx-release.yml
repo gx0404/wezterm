@@ -62,6 +62,7 @@ jobs:
     env:
       CARGO_INCREMENTAL: '0'
       CARGO_BUILD_JOBS: '2'
+      SCCACHE_GHA_ENABLED: 'true'
       TZ: UTC
     steps:
       - run: git config --global core.autocrlf false
@@ -73,10 +74,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ needs.prepare.outputs.rust }}
-      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.18.0
       - name: Install pinned Inno Setup
         shell: pwsh
-        run: choco install innosetup --version=6.7.3 --yes --no-progress
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          $destination = Join-Path $env:RUNNER_TEMP 'gx-inno'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $installer
+          $expected = '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'
+          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne $expected) { throw 'Inno Setup checksum mismatch' }
+          $installed = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/DIR=`"$destination`"" -WindowStyle Hidden -Wait -PassThru
+          if ($installed.ExitCode -ne 0) { throw "Inno Setup installation failed: $($installed.ExitCode)" }
+          $compiler = Join-Path $destination 'ISCC.exe'
+          if (-not (Test-Path -LiteralPath $compiler)) { throw 'Inno Setup compiler missing' }
+          "ISCC=$compiler" >> $env:GITHUB_ENV
       - name: Test packaging and launcher
         shell: pwsh
         run: |
@@ -92,7 +105,6 @@ jobs:
         env:
           GX_VERSION: ${{ needs.prepare.outputs.version }}
           RUSTC_WRAPPER: sccache
-          SCCACHE_GHA_ENABLED: 'true'
         run: |
           $env:PATH = "C:\Strawberry\perl\bin;" + $env:PATH
           python scripts/gx_package.py windows --version $env:GX_VERSION

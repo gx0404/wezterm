@@ -1,4 +1,5 @@
 """GX packaging contract checks; no compiler, install or network required."""
+import io
 import json
 import tempfile
 import unittest
@@ -318,7 +319,7 @@ class GitHubTransportTests(unittest.TestCase):
             with patch.dict("os.environ", {"GH_TOKEN": "test"}), \
                     patch.object(release.urllib.request, "urlopen") as open_url, \
                     patch.object(release.time, "sleep"):
-                open_url.side_effect = urllib.error.HTTPError("https://api.github.com/test", code, "failure", {}, None)
+                open_url.side_effect = urllib.error.HTTPError("https://api.github.com/test", code, "failure", {}, io.BytesIO())
                 with self.assertRaises(urllib.error.HTTPError) as raised:
                     release.GitHub().request(method, "/releases")
                 raised.exception.close()
