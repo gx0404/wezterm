@@ -97,6 +97,7 @@ scripts/__pycache__/
 /.codex/*
 !/.codex/config.toml
 !/.codex/agents/
+!/.codex/hooks/
 !/.codex/README.md
 /.zcode/*
 !/.zcode/config.json

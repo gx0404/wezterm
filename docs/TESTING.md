@@ -18,6 +18,38 @@
 | 实机平台 | NixOS VM（上游流程） | nix | GNOME/KDE 下真实桌面行为 / 人工流程 |
 | 框架自身 | `make framework-test` | 无 | resolver/hooks/KB 契约 / 不测产品代码 |
 
+## Windows 本地验收前置
+
+在 Visual Studio 的 x64 Native Tools 命令提示符中运行，确保 `cl`、`nmake`、
+SDK、Strawberry Perl 和 nextest 可用。Rust 版本以 `scripts/gx_package.py` 为准，
+nextest 版本以 `scripts/setup_env.sh` 为准；只通过当前进程环境选择工具，不修改
+用户全局默认工具链。
+
+中文仓库路径配合非 UTF-8 系统代码页时，还需要：
+
+- C/C++ 编译参数追加 `/utf-8`，否则 OpenSSL 头文件预处理输出的路径可能不是
+  UTF-8，导致 `openssl-sys` 解析失败；这与 RC 模板中的 UTF-8 声明是不同层。
+- 使用支持中文调试信息路径的 NASM；本仓已验证 3.02。旧版本可能在生成
+  OpenSSL 汇编调试信息时报告 `unable to hash file`，不应关闭汇编绕过。
+- 使用 GNU Make 时将 `BUILD_OPTS=--locked` 设置为环境变量，不作为 Make 命令行
+  赋值传入，避免 GNU Make 的 `MAKEFLAGS` 被 OpenSSL 的 NMake 错误继承。
+
+例如在已配置上述工具 PATH 的 x64 Native Tools **cmd** 中：
+
+```bat
+set "RUSTUP_TOOLCHAIN=1.96.1"
+set "CFLAGS=%CFLAGS% /utf-8"
+set "CXXFLAGS=%CXXFLAGS% /utf-8"
+set "BUILD_OPTS=--locked"
+gmake check build
+cargo nextest run --locked --all --no-fail-fast --test-threads 2
+cargo nextest run --locked -p wezterm-escape-parser
+```
+
+`1.96.1` 是当前打包真源的值，升级时以真源为准。若工具只安装在仓库的
+`.local/tools/`，先将对应 `bin` 目录加到本次会话 PATH。Windows checkout 可能
+带 CRLF；Linux/WSL 验证应使用 Linux 的 LF checkout，不直接复用 CRLF shell 脚本。
+
 ## 测试约定
 
 - 断言库 k9：`k9::snapshot!` 快照 + `assert_equal` 别名；更新快照
@@ -45,10 +77,27 @@
 5. 手动配色截图（上游流程）：`ci/make-color-screen-shots.sh`（xwininfo
    选窗 + ImageMagick），产物进 `docs/colorschemes/`，属上游文档链。
 
-## CI（上游）
+## CI（GX）
 
-gen_* 工作流（由 `ci/generate-workflows.py` 生成）在 PR/push 时构建矩阵
-（centos/debian/fedora/macos/ubuntu/windows）并跑 `cargo nextest run
---all --no-fail-fast`；fmt.yml（nightly rustfmt --check）、termwiz.yml、
-wezterm_ssh.yml（双后端矩阵）独立触发。fork 不改这些工作流；本地等效门
-是 `make ci-check`。
+`.github/workflows/gx-ci.yml` 在 `feature/gx_wezterm` 的 push、目标为该分支的
+PR 时自动运行，也支持手动运行；不按文件类型过滤，避免漏掉 Lua、脚本或规则变更。
+
+- 快速检查：resolver 闭集、框架配置、版本、Python 框架测试与 nightly rustfmt。
+- Ubuntu 24.04 / Windows 2025：类型检查、四个产品二进制构建、nextest 全量测试，
+  以及 escape-parser 独立 no_std 测试轮。Rust 与 nextest 版本分别读取现有打包
+  脚本与环境安装脚本的钉版声明。
+- Linux 必须安装并确认 SSH 服务端和客户端工具可用，避免缺少 sshd 导致测试
+  静默跳过；Windows 源码中原有 ignored 的 SSH e2e 由 Linux 侧覆盖。
+- Windows 先确认 SDK 可用，再运行 `scripts/test_windows_resources.py`，用真实
+  RC 编译三个程序模板，验证中文/空格资源路径和非 UTF-8 默认代码页；SDK 缺失
+  在 CI 中直接失败，不接受跳过。
+
+自动 CI 只有只读仓库权限；同一 PR/分支的新提交取消旧检查，不取消 `gx-release`。
+它不替代手动发布流程的安装/升级/卸载及 GUI 冒烟，也不证明其它发行版或 macOS
+兼容性。本地聚合检查入口仍是 `make ci-check`，框架测试另跑 `make framework-test`。
+
+## CI（上游归档）
+
+由 `ci/generate-workflows.py` 生成的 gen_* 多平台矩阵，以及 fmt、termwiz、
+wezterm_ssh 双后端检查等工作流，原样保存在 `.github/workflows-archive/`。
+它们不在 GX 分支触发；上游生成器与工作流正文保持不变，`main` 用于同步上游。

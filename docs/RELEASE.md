@@ -127,10 +127,17 @@ Windows 安装/升级/卸载日志和字体加载记录上传到 `evidence-windo
 
 ## 工作流目录与上游同步
 
-GX 分支的 `.github/workflows/` 只保留 `gx-release.yml`。35 个上游流程及旧版
-`gx-windows-build` 原样移入 `.github/workflows-archive/`，GitHub 不从归档目录
-加载工作流。停用操作本身不会隐藏侧栏条目；移出定义后，旧运行记录仍可能让
-对应的历史流程保留在列表中。本次保留旧 Windows 构建记录与产物。
+GX 分支的 `.github/workflows/` 保留两个独立入口：
+
+- `gx-ci.yml`：`feature/gx_wezterm` 的 push、目标为该分支的 PR 自动触发，
+  也可手动运行。检查格式、框架规则及 Windows/Linux 构建与测试，不生成安装包
+  或发布 Release；同一 PR/分支的新运行取消旧 CI，不影响发布流程。
+- `gx-release.yml`：仅手动触发，构建并验证双平台安装包，按 `publish` 选项发布。
+
+35 个上游流程及旧版 `gx-windows-build` 仍原样保存在
+`.github/workflows-archive/`，GitHub 不从归档目录加载工作流。停用操作本身
+不会隐藏侧栏条目；移出定义后，旧运行记录仍可能让对应的历史流程保留在列表中。
+旧 Windows 构建记录与产物保留。
 
 `main` 的上游工作流与提交历史保持原样。以后先在 `main` 同步上游，再正常
 合并到 GX 分支；Git 可通过文件重命名识别已归档流程，遇到冲突时保留归档

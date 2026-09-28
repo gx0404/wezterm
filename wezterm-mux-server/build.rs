@@ -17,6 +17,7 @@ fn main() {
         write!(
             rcfile,
             r#"
+#pragma code_page(65001)
 #include <winres.h>
 1 RT_MANIFEST "{win}\\console.manifest"
 "#,

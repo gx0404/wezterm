@@ -100,6 +100,7 @@ fn main() {
         write!(
             rcfile,
             r#"
+#pragma code_page(65001)
 #include <winres.h>
 // This ID is coupled with code in window/src/os/windows/window.rs
 #define IDI_ICON 0x101

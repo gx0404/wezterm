@@ -219,8 +219,7 @@ pub fn make_lua_context(config_file: &Path) -> anyhow::Result<Lua> {
         let wezterm_mod = get_or_create_module(&lua, "wezterm")?;
 
         let package: Table = globals.get("package").context("get _G.package")?;
-        let package_path: String = package.get("path").context("get package.path as String")?;
-        let mut path_array: Vec<String> = package_path.split(";").map(|s| s.to_owned()).collect();
+        let mut path_array = Vec::new();
 
         fn prefix_path(array: &mut Vec<String>, path: &Path) {
             array.insert(0, format!("{}/?.lua", path.display()));
@@ -376,9 +375,7 @@ end
         // those values since wezterm was started
         get_or_create_module(&lua, "os")?.set("getenv", lua.create_function(getenv)?)?;
 
-        package
-            .set("path", path_array.join(";"))
-            .context("assign package.path")?;
+        prepend_module_paths(&lua, &package, &path_array).context("assign package.path")?;
     }
 
     for func in SETUP_FUNCS.lock().unwrap().iter() {
@@ -386,6 +383,16 @@ end
     }
 
     Ok(lua)
+}
+
+fn prepend_module_paths(lua: &Lua, package: &Table, paths: &[String]) -> mlua::Result<()> {
+    let original: mlua::String = package.get("path")?;
+    let mut combined = paths.join(";").into_bytes();
+    if !paths.is_empty() {
+        combined.push(b';');
+    }
+    combined.extend_from_slice(original.as_bytes());
+    package.set("path", lua.create_string(&combined)?)
 }
 
 /// Resolve an environment variable.
@@ -866,6 +873,31 @@ pub fn add_to_config_reload_watch_list<'lua>(
 mod test {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn module_paths_preserve_original_bytes_and_prefix_order() -> anyhow::Result<()> {
+        let lua = Lua::new();
+        let package = lua.create_table()?;
+        for original in [
+            b"./?.lua;./?/init.lua".as_slice(),
+            b"C:/\xcf\xee/?.lua;;./?.lua;".as_slice(),
+            b"".as_slice(),
+        ] {
+            package.set("path", lua.create_string(original)?)?;
+            let paths = vec!["config/?.lua".to_owned(), "config/?/init.lua".to_owned()];
+            prepend_module_paths(&lua, &package, &paths)?;
+            let actual: mlua::String = package.get("path")?;
+            let mut expected = b"config/?.lua;config/?/init.lua;".to_vec();
+            expected.extend_from_slice(original);
+            assert_eq!(actual.as_bytes(), expected.as_slice());
+
+            package.set("path", lua.create_string(original)?)?;
+            prepend_module_paths(&lua, &package, &[])?;
+            let actual: mlua::String = package.get("path")?;
+            assert_eq!(actual.as_bytes(), original);
+        }
+        Ok(())
+    }
 
     #[test]
     fn can_register_and_emit_multiple_events() -> anyhow::Result<()> {

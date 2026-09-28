@@ -205,6 +205,22 @@ class RegisteredEntryProbes(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "")
 
+    def test_codex_adapter_propagates_engine_argument_errors(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(CODEX_ADAPTER), "--invalid-option"],
+            input="{}", capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("unrecognized arguments", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_codex_adapter_is_not_git_ignored(self) -> None:
+        result = subprocess.run(
+            ["git", "check-ignore", "--no-index", ".codex/hooks/pre_tool_use_policy.py"],
+            cwd=REPO_ROOT, capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
 
 def _registered_commands() -> list[tuple[str, str]]:
     """收集三份工具配置里登记的全部 hook 命令（已把 $(git rev-parse...) 归一到仓库根）。"""

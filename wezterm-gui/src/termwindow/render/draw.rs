@@ -2,12 +2,11 @@ use crate::colorease::ColorEaseUniform;
 use crate::termwindow::webgpu::ShaderUniform;
 use crate::termwindow::RenderFrame;
 use crate::uniforms::UniformBuilder;
-use ::window::glium;
 use ::window::glium::uniforms::{
     MagnifySamplerFilter, MinifySamplerFilter, Sampler, SamplerWrapFunction,
 };
 use ::window::glium::{BlendingFunction, LinearBlendingFactor, Surface};
-use ::window::WindowOps;
+use ::window::{glium, WindowOps};
 use config::FreeTypeLoadTarget;
 
 impl crate::TermWindow {

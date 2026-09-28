@@ -1,0 +1,207 @@
+name: gx-ci
+
+on:
+  push:
+    branches: [feature/gx_wezterm]
+  pull_request:
+    branches: [feature/gx_wezterm]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gx-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+  TZ: UTC
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      rust: ${{ steps.versions.outputs.rust }}
+      nextest: ${{ steps.versions.outputs.nextest }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Read pinned tool versions
+        id: versions
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, 'scripts')
+          from gx_package import RUST_VERSION
+
+          source = Path('scripts/setup_env.sh').read_text(encoding='utf-8')
+          versions = re.findall(r'^NEXTEST_VERSION="([0-9]+\.[0-9]+\.[0-9]+)"$', source, re.M)
+          if len(versions) != 1 or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', RUST_VERSION):
+              raise SystemExit('Expected one pinned Rust and nextest version')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              print(f'rust={RUST_VERSION}', file=output)
+              print(f'nextest={versions[0]}', file=output)
+          PY
+      - name: Validate rules, framework and version
+        run: |
+          python3 scripts/resolve_agent_rules.py --check
+          python3 scripts/dev_framework.py ready
+          python3 scripts/version.py --check
+      - name: Test framework and GX contracts
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - name: Check Rust formatting
+        run: |
+          cargo +nightly fmt --all --check
+          rustfmt +nightly --edition 2021 --check scripts/gx-launcher/main.rs
+
+  linux:
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ needs.checks.outputs.rust }}
+      - name: Restore Linux build cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .local/tools/nextest
+          key: gx-ci-linux-${{ runner.arch }}-${{ needs.checks.outputs.rust }}-${{ needs.checks.outputs.nextest }}-${{ hashFiles('**/Cargo.lock', 'get-deps') }}-${{ github.sha }}
+          restore-keys: |
+            gx-ci-linux-${{ runner.arch }}-${{ needs.checks.outputs.rust }}-${{ needs.checks.outputs.nextest }}-${{ hashFiles('**/Cargo.lock', 'get-deps') }}-
+      - name: Install build and SSH test dependencies
+        run: |
+          sudo apt-get update
+          env CI=yes ./get-deps --testing
+          sudo apt-get install -y openssh-client lua5.4
+          test -x /usr/sbin/sshd
+          command -v ssh-agent
+          command -v ssh-keygen
+          sudo mkdir -p /run/sshd
+      - name: Install pinned nextest
+        env:
+          NEXTEST_VERSION: ${{ needs.checks.outputs.nextest }}
+        run: |
+          cargo install cargo-nextest --version "=$NEXTEST_VERSION" --locked --root .local/tools/nextest
+          echo "$PWD/.local/tools/nextest/bin" >> "$GITHUB_PATH"
+      - name: Check crate feature boundaries
+        run: make check
+      - name: Build all four binaries
+        run: make build BUILD_OPTS=--locked
+      - name: Test full workspace
+        run: cargo nextest run --locked --all --no-fail-fast --test-threads 2
+      - name: Test escape parser without std feature unification
+        run: cargo nextest run --locked -p wezterm-escape-parser --no-fail-fast --test-threads 2
+      - name: Test GX launcher and Lua session restore
+        run: |
+          mkdir -p .local/gx-tests
+          rustc --edition=2021 --test scripts/gx-launcher/main.rs -o .local/gx-tests/launcher-tests
+          .local/gx-tests/launcher-tests
+          lua5.4 scripts/tests/gx_resurrect.lua
+
+  windows:
+    needs: checks
+    runs-on: windows-2025
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Preserve repository line endings
+        run: |
+          git config --global core.autocrlf false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ needs.checks.outputs.rust }}
+          target: x86_64-pc-windows-msvc
+      - name: Restore Windows build cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            .local/tools/nextest
+          key: gx-ci-windows-${{ runner.arch }}-${{ needs.checks.outputs.rust }}-${{ needs.checks.outputs.nextest }}-${{ hashFiles('**/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            gx-ci-windows-${{ runner.arch }}-${{ needs.checks.outputs.rust }}-${{ needs.checks.outputs.nextest }}-${{ hashFiles('**/Cargo.lock') }}-
+      - name: Configure Strawberry Perl and MSVC
+        run: |
+          $perl = 'C:\Strawberry\perl\bin'
+          if (-not (Test-Path "$perl\perl.exe")) { throw 'Strawberry Perl is missing' }
+          $perl >> $env:GITHUB_PATH
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Test Windows resources with Unicode paths
+        run: |
+          python -c "import sys; sys.path.insert(0, 'scripts'); from test_windows_resources import find_windows_sdk; find_windows_sdk()"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s scripts -p test_windows_resources.py -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install pinned nextest
+        env:
+          NEXTEST_VERSION: ${{ needs.checks.outputs.nextest }}
+        run: |
+          cargo install cargo-nextest --version "=$env:NEXTEST_VERSION" --locked --root .local/tools/nextest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          (Join-Path $env:GITHUB_WORKSPACE '.local/tools/nextest/bin') >> $env:GITHUB_PATH
+      - name: Check crate feature boundaries
+        run: |
+          cargo check --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($crate in @('wezterm-escape-parser', 'wezterm-cell', 'wezterm-surface', 'wezterm-ssh')) {
+            cargo check --locked -p $crate
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Build all four binaries
+        run: |
+          foreach ($crate in @('wezterm', 'wezterm-gui', 'wezterm-mux-server', 'strip-ansi-escapes')) {
+            cargo build --locked -p $crate
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Test full workspace
+        run: |
+          cargo nextest run --locked --all --no-fail-fast --test-threads 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test escape parser without std feature unification
+        run: |
+          cargo nextest run --locked -p wezterm-escape-parser --no-fail-fast --test-threads 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test GX launcher
+        run: |
+          New-Item -ItemType Directory -Force .local/gx-tests | Out-Null
+          rustc --edition=2021 --test scripts/gx-launcher/main.rs -o .local/gx-tests/launcher-tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .local/gx-tests/launcher-tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
