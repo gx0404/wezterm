@@ -38,8 +38,10 @@ python3 scripts/resolve_agent_rules.py --check                   # 闭集/体积
   改动只在随上游同步时产生，不主动重排/重注释上游正文（见 code-comments.md）。
 - 上游 issue/PR 由人类操作；agent 不代为提交。发布链（ci/tag.sh、
   ci/create-release.sh、ci/deploy.sh）只在上游仓库运行，本 fork 不复建。
-- GX 自有安装包走 `scripts/gx_package.py`；`gx-release` 由人类在本 fork 的
-  GitHub Actions 手动触发，只发布到 `gx0404/wezterm`，不调用上游发布链。
+- GX 自有安装包走 `scripts/gx_package.py`，不调用上游发布链。本目录已并入
+  `gx0404/gx_shell` 单仓（`wezterm/`）：本目录 `.github/workflows/`（`gx-ci`、
+  `gx-release`）在单仓中不执行，不再单独发版；单仓根 `.github/workflows/release.yml`
+  以 `gx_package.py --stage-dir` 取 WezTerm 载荷，生成 GX Shell 合并安装包。
 - fork 层面的可观察变更记录在根 `CHANGELOG.md`；上游产品变更在
   `docs/changelog.md`（随上游同步产生，不手写）。
 

@@ -439,6 +439,10 @@ pub struct TermWindow {
     current_modifier_and_leds: (Modifiers, KeyboardLedStatus),
     current_mouse_buttons: Vec<MousePress>,
     current_mouse_capture: Option<MouseCapture>,
+    /// fork: the button of the press most recently consumed by the modal
+    /// layer; its release is swallowed even if the press closed the modal
+    /// (see `mouseevent.rs::modal_mouse_route`)
+    modal_click: Option<MousePress>,
 
     opengl_info: Option<String>,
 
@@ -571,6 +575,7 @@ impl TermWindow {
             self.last_mouse_click = None;
             self.current_mouse_buttons.clear();
             self.current_mouse_capture = None;
+            self.modal_click = None;
             self.is_click_to_focus_window = false;
 
             for state in self.pane_state.borrow_mut().values_mut() {
@@ -767,6 +772,7 @@ impl TermWindow {
             pane_state: RefCell::new(HashMap::new()),
             current_mouse_buttons: vec![],
             current_mouse_capture: None,
+            modal_click: None,
             last_mouse_click: None,
             tab_press: None,
             tab_drag: None,
@@ -962,6 +968,9 @@ impl TermWindow {
             }
             WindowEvent::AppearanceChanged(appearance) => {
                 log::debug!("Appearance is now {:?}", appearance);
+                // fork: config evaluations off the GUI thread (the config
+                // file watcher) report this appearance from now on
+                window_funcs::set_last_known_appearance(appearance);
                 // This is a bit fugly; we get per-window notifications
                 // for appearance changes which successfully updates the
                 // per-window config, but we need to explicitly tell the
@@ -1800,6 +1809,17 @@ fn bell_throttle(
     }
 }
 
+/// fork: whether a window carries per-window config overrides. Both `nil`
+/// (never set, or cleared) and `{}` from `window:set_config_overrides`
+/// mean there are none.
+fn has_config_overrides(overrides: &Value) -> bool {
+    match overrides {
+        Value::Null => false,
+        Value::Object(obj) => !obj.is_empty(),
+        _ => true,
+    }
+}
+
 impl TermWindow {
     fn palette(&mut self) -> &ColorPalette {
         if self.palette.is_none() {
@@ -1861,15 +1881,25 @@ impl TermWindow {
         );
         self.key_table_state.clear_stack();
         self.connection_name = Connection::get().unwrap().name();
-        let config = match config::overridden_config(&self.config_overrides) {
-            Ok(config) => config,
-            Err(err) => {
-                log::error!(
-                    "Failed to apply config overrides to window: {:#}: {:?}",
-                    err,
-                    self.config_overrides
-                );
-                configuration()
+        // fork: without overrides the window runs on the global config as
+        // is instead of evaluating the whole Lua config again on the GUI
+        // thread. The global config may come from the config file watcher's
+        // thread, where there is no Connection; wezterm.gui.get_appearance()
+        // and wezterm.gui.screens() answer from what the GUI thread last saw
+        // there (window-funcs), so the result matches a GUI-thread evaluation.
+        let config = if !has_config_overrides(&self.config_overrides) {
+            configuration()
+        } else {
+            match config::overridden_config(&self.config_overrides) {
+                Ok(config) => config,
+                Err(err) => {
+                    log::error!(
+                        "Failed to apply config overrides to window: {:#}: {:?}",
+                        err,
+                        self.config_overrides
+                    );
+                    configuration()
+                }
             }
         };
         self.config = config.clone();
@@ -2282,11 +2312,17 @@ impl TermWindow {
             };
 
             // If the number of tabs changed and caused the tab bar to
-            // hide/show, then we'll need to resize things.  It is simplest
-            // to piggy back on the config reloading code for that, so that
-            // is what we're doing.
+            // hide/show, then we'll need to resize things.
+            // fork: only the terminal area changes, so resize it directly;
+            // piggy backing on config_was_reloaded rebuilt the fonts, the
+            // shape caches and the glyph atlas on every 1 <-> 2 tab switch.
             if show_tab_bar != self.show_tab_bar {
-                self.config_was_reloaded();
+                self.show_tab_bar = show_tab_bar;
+                let window = window.clone();
+                let dimensions = self.dimensions;
+                self.apply_dimensions(&dimensions, None, &window);
+                self.invalidate_modal();
+                window.invalidate();
             }
         }
         self.schedule_next_status_update();
@@ -3374,6 +3410,9 @@ impl TermWindow {
             OpenSettings => {
                 crate::termwindow::settings::open_settings(self);
             }
+            ShowDefaultShellSettings => {
+                crate::termwindow::settings::open_shell_settings(self);
+            }
             ShowMainMenu => {
                 // Anchor below the tab bar's left edge, mirroring the
                 // ☰ button dropdown placement
@@ -4008,6 +4047,27 @@ mod bell_suppression_tests {
                 "case {handling:?} focused={window_focused} in_tab={in_tab} in_pane={in_pane}"
             );
         }
+    }
+}
+
+// fork: covers the config_was_reloaded fast path for windows without
+// overrides
+#[cfg(test)]
+mod config_overrides_tests {
+    use super::has_config_overrides;
+    use wezterm_dynamic::Value;
+
+    #[test]
+    fn nil_and_empty_overrides_take_the_global_config() {
+        assert!(!has_config_overrides(&Value::Null));
+        assert!(!has_config_overrides(&Value::Object(Default::default())));
+        let obj = vec![(
+            Value::String("enable_tab_bar".to_string()),
+            Value::Bool(false),
+        )]
+        .into_iter()
+        .collect();
+        assert!(has_config_overrides(&Value::Object(obj)));
     }
 }
 

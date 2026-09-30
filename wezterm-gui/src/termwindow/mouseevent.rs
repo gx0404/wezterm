@@ -87,6 +87,66 @@ pub(crate) fn drop_index(
     }
 }
 
+/// fork: what the modal layer does with a mouse event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModalMouseRoute {
+    /// Continue with the regular UI item / terminal routing
+    Route,
+    /// Close the open modal and swallow the event
+    Dismiss,
+    /// Drop the event
+    Swallow,
+}
+
+/// fork: modal mouse routing as a pure function so the table is unit
+/// testable. `modal_click` is the button of the press the modal layer
+/// consumed; it is only passed in for the release of that button.
+pub(crate) fn modal_mouse_route(
+    kind: &WMEK,
+    modal_open: bool,
+    on_modal: bool,
+    modal_click: Option<MousePress>,
+) -> ModalMouseRoute {
+    match kind {
+        // Pressing outside of an open modal (command palette, context
+        // menu) dismisses it and swallows the press, mirroring herdr/tmux
+        // menu semantics.
+        WMEK::Press(_) if modal_open && !on_modal => ModalMouseRoute::Dismiss,
+        WMEK::Release(_) if modal_open && on_modal => ModalMouseRoute::Route,
+        // fork (WZ-22): a release outside the modal is swallowed too.
+        // The press that opened the menu (eg: ShowPaneContextMenu on
+        // a mouse binding) was consumed by the GUI; letting the paired
+        // release fall through hands the application an orphan release
+        // it never saw the press for.
+        WMEK::Release(_) if modal_open => ModalMouseRoute::Swallow,
+        // The press closed the modal (a menu row ran its action, or the
+        // click dismissed it), so its release must not reach whatever is
+        // under the pointer now, eg: the close confirmation a menu row
+        // just opened, which would read it as a click on "No".
+        WMEK::Release(press) if modal_click == Some(*press) => ModalMouseRoute::Swallow,
+        _ => ModalMouseRoute::Route,
+    }
+}
+
+/// fork: bookkeeping for `modal_mouse_route`. Every press while a modal is
+/// open belongs to the modal layer; any other press clears the slot, so a
+/// release that never arrived cannot leave a stale entry behind. Returns
+/// the consumed press for the release of the same button.
+pub(crate) fn track_modal_click(
+    slot: &mut Option<MousePress>,
+    kind: &WMEK,
+    modal_open: bool,
+) -> Option<MousePress> {
+    match kind {
+        WMEK::Press(press) => {
+            *slot = modal_open.then_some(*press);
+            None
+        }
+        WMEK::Release(press) if *slot == Some(*press) => slot.take(),
+        _ => None,
+    }
+}
+
 /// Normalize wheel deltas and streaks to 1 so that mouse assignments
 /// are easier to wrangle; callers only need to bind WheelUp(1)/WheelDown(1).
 fn normalize_wheel_trigger(trigger: &mut MouseEventTrigger) {
@@ -408,26 +468,34 @@ impl super::TermWindow {
             None
         };
 
-        // While a modal overlay (command palette, context menu) is open,
-        // pressing outside of it dismisses it and swallows the press,
-        // mirroring herdr/tmux menu semantics.
-        if self.get_modal().is_some() {
-            let on_modal = matches!(
+        // fork: a press that isn't on a UI item starts a fresh click, so a UI
+        // capture left over from an earlier click is stale. A right or middle
+        // button released outside the window never reports its release, and
+        // the leftover capture would keep this press from reaching the pane.
+        if matches!(event.kind, WMEK::Press(_))
+            && ui_item.is_none()
+            && self.current_mouse_capture == Some(MouseCapture::UI)
+        {
+            self.current_mouse_capture = None;
+        }
+
+        let modal_open = self.get_modal().is_some();
+        let on_modal = modal_open
+            && matches!(
                 ui_item.as_ref().map(|item| &item.item_type),
                 Some(UIItemType::Modal(_))
             );
-            if !on_modal && matches!(event.kind, WMEK::Press(_)) {
+        let modal_click = track_modal_click(&mut self.modal_click, &event.kind, modal_open);
+        match modal_mouse_route(&event.kind, modal_open, on_modal, modal_click) {
+            ModalMouseRoute::Route => {}
+            ModalMouseRoute::Dismiss => {
                 self.cancel_modal();
+                // fork: keep the rest of the dismissing click (drag and
+                // release) away from the pane under the pointer
+                self.current_mouse_capture = Some(MouseCapture::UI);
                 return;
             }
-            // fork (WZ-22): a release outside the modal is swallowed too.
-            // The press that opened the menu (eg: ShowPaneContextMenu on
-            // a mouse binding) was consumed by the GUI; letting the paired
-            // release fall through hands the application an orphan release
-            // it never saw the press for.
-            if !on_modal && matches!(event.kind, WMEK::Release(_)) {
-                return;
-            }
+            ModalMouseRoute::Swallow => return,
         }
 
         if let Some(item) = ui_item.clone() {
@@ -826,14 +894,22 @@ impl super::TermWindow {
                     if self.config.mouse_right_click_menu {
                         // herdr/tmux style: right click opens a context
                         // menu anchored at the pointer
-                        crate::termwindow::context_menu::open_context_menu(
-                            self,
-                            crate::termwindow::context_menu::ContextMenu::tab_menu(
-                                tab_idx,
-                                event.coords.x as f32,
-                                event.coords.y as f32,
-                            ),
-                        );
+                        let tab_id = Mux::get()
+                            .get_window(self.mux_window_id)
+                            .and_then(|window| {
+                                window.get_tab_at_idx(tab_idx).map(|tab| tab.tab_id())
+                            });
+                        if let Some(tab_id) = tab_id {
+                            crate::termwindow::context_menu::open_context_menu(
+                                self,
+                                crate::termwindow::context_menu::ContextMenu::tab_menu(
+                                    tab_idx,
+                                    tab_id,
+                                    event.coords.x as f32,
+                                    event.coords.y as f32,
+                                ),
+                            );
+                        }
                     } else {
                         self.show_tab_navigator();
                     }
@@ -1419,5 +1495,119 @@ mod tests {
         // Outside the modal entirely: nothing is hit, so the press is
         // free to dismiss it
         assert!(hit_ui_item(&items, 400, 10).is_none());
+    }
+
+    const LEFT_PRESS: WMEK = WMEK::Press(MousePress::Left);
+    const LEFT_RELEASE: WMEK = WMEK::Release(MousePress::Left);
+
+    #[test]
+    fn modal_route_swallows_release_of_click_that_closed_the_modal() {
+        // A menu row ran on the press and closed the menu; the paired
+        // release must not reach the confirmation that opened under the
+        // pointer, wherever the pointer is now
+        for on_modal in [false, true] {
+            assert_eq!(
+                modal_mouse_route(&LEFT_RELEASE, false, on_modal, Some(MousePress::Left)),
+                ModalMouseRoute::Swallow
+            );
+        }
+        assert_eq!(
+            modal_mouse_route(
+                &WMEK::Release(MousePress::Right),
+                false,
+                false,
+                Some(MousePress::Right)
+            ),
+            ModalMouseRoute::Swallow
+        );
+    }
+
+    #[test]
+    fn modal_route_keeps_wz22_semantics_while_open() {
+        assert_eq!(
+            modal_mouse_route(&LEFT_PRESS, true, false, None),
+            ModalMouseRoute::Dismiss
+        );
+        assert_eq!(
+            modal_mouse_route(&LEFT_RELEASE, true, false, None),
+            ModalMouseRoute::Swallow
+        );
+        assert_eq!(
+            modal_mouse_route(&LEFT_RELEASE, true, false, Some(MousePress::Left)),
+            ModalMouseRoute::Swallow
+        );
+        assert_eq!(
+            modal_mouse_route(&LEFT_PRESS, true, true, None),
+            ModalMouseRoute::Route
+        );
+        assert_eq!(
+            modal_mouse_route(&LEFT_RELEASE, true, true, Some(MousePress::Left)),
+            ModalMouseRoute::Route
+        );
+        assert_eq!(
+            modal_mouse_route(&WMEK::Move, true, false, None),
+            ModalMouseRoute::Route
+        );
+    }
+
+    #[test]
+    fn modal_route_leaves_unrelated_clicks_alone() {
+        // No modal and no consumed press: plain terminal clicks
+        assert_eq!(
+            modal_mouse_route(&LEFT_PRESS, false, false, None),
+            ModalMouseRoute::Route
+        );
+        assert_eq!(
+            modal_mouse_route(&LEFT_RELEASE, false, false, None),
+            ModalMouseRoute::Route
+        );
+        // Only the button whose press the modal consumed is swallowed
+        assert_eq!(
+            modal_mouse_route(
+                &WMEK::Release(MousePress::Right),
+                false,
+                false,
+                Some(MousePress::Left)
+            ),
+            ModalMouseRoute::Route
+        );
+        for kind in [WMEK::Move, WMEK::VertWheel(1), WMEK::HorzWheel(-1)] {
+            assert_eq!(
+                modal_mouse_route(&kind, false, false, Some(MousePress::Left)),
+                ModalMouseRoute::Route
+            );
+        }
+    }
+
+    #[test]
+    fn modal_click_is_owned_until_its_release() {
+        let mut slot = None;
+        // The press lands while the menu is open; the menu closes before
+        // the release arrives
+        assert_eq!(track_modal_click(&mut slot, &LEFT_PRESS, true), None);
+        assert_eq!(slot, Some(MousePress::Left));
+        assert_eq!(track_modal_click(&mut slot, &WMEK::Move, false), None);
+        assert_eq!(
+            track_modal_click(&mut slot, &WMEK::Release(MousePress::Right), false),
+            None
+        );
+        assert_eq!(slot, Some(MousePress::Left));
+        assert_eq!(
+            track_modal_click(&mut slot, &LEFT_RELEASE, false),
+            Some(MousePress::Left)
+        );
+        assert_eq!(slot, None);
+        // Only once: the next release is an ordinary one
+        assert_eq!(track_modal_click(&mut slot, &LEFT_RELEASE, false), None);
+    }
+
+    #[test]
+    fn modal_click_is_reset_by_the_next_press() {
+        // The release was lost (eg: released outside the window); the next
+        // press without a modal must not inherit the stale entry
+        let mut slot = Some(MousePress::Left);
+        assert_eq!(track_modal_click(&mut slot, &LEFT_PRESS, false), None);
+        assert_eq!(slot, None);
+        assert_eq!(track_modal_click(&mut slot, &LEFT_RELEASE, false), None);
     }
 }

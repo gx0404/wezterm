@@ -3,7 +3,7 @@
 #
 # Deploys the gx fork build plus the machine snapshot stored in dotfiles/:
 # binaries -> ~/.local/opt/wezterm-gx/<version>-<binhash>/ + wrapper ~/.local/bin/wezterm
-# config   -> ~/.config/wezterm/                   (existing copy is backed up)
+# config   -> ~/.config/wezterm/                   (existing copy is backed up, gui-settings.json kept)
 # plugins  -> ~/.local/share/wezterm/plugins/<escaped>/
 # fonts    -> ~/.local/share/fonts/wezterm-gx/     + fc-cache
 # desktop  -> ~/.local/share/applications/org.wezfurlong.wezterm.desktop
@@ -214,8 +214,11 @@ fi
 
 step "config -> ~/.config/wezterm (from $DOTFILES/wezterm-config)"
 CFG="$HOME/.config/wezterm"
+# 设置页写的 gui-settings.json（壁纸、默认 Shell 等）是用户数据，换入新快照时保留
+SETTINGS="$CFG/gui-settings.json"
 if [ "$CHECK" = 1 ]; then
    if [ -e "$CFG" ]; then plan "backup $CFG -> $CFG.bak-gx-<ts> (rename 换入)"; fi
+   if [ -e "$SETTINGS" ]; then plan "keep $SETTINGS"; fi
 else
    # 先整树拷到暂存目录，再连续 rename 换入：若先 rm 旧目录再直接 cp，
    # 空窗期内启动的 wezterm 会报 wezterm.lua 缺失（19MB 快照拷贝需秒级）。
@@ -226,6 +229,10 @@ else
    mkdir -p "$HOME/.config"
    rm -rf "$STAGED"
    cp -a "$DOTFILES/wezterm-config" "$STAGED"
+   if [ -e "$SETTINGS" ]; then
+      plan "keep $SETTINGS"
+      cp -a "$SETTINGS" "$STAGED/gui-settings.json"
+   fi
    if [ -n "$BK" ]; then mv "$CFG" "$BK"; fi
    mv "$STAGED" "$CFG"
    STAGED=""

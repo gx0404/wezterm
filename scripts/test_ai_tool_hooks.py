@@ -10,6 +10,7 @@ codex/zcode 配置形状锁——防止 shell 冒充 .py、Claude 风格单表 h
 from __future__ import annotations
 
 import ast
+import functools
 import importlib.util
 import json
 import re
@@ -221,9 +222,37 @@ class RegisteredEntryProbes(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
 
+    def test_registered_commands_gate_as_configured(self) -> None:
+        # 按配置原样经 bash -c 执行（含 $(git rev-parse ...) 求值）：单仓内命令必须落到
+        # 本组件脚本，否则 bash 找不到脚本（exit 127），PreToolUse 不产出决策、门静默失效。
+        deny_command = "git pu" + "sh --force origin main"
+        probes = [
+            ("Bash", {"command": deny_command}, "deny"),
+            ("Edit", {"file_path": str(REPO_ROOT / "docs" / "changelog.md")}, "deny"),
+            ("Edit", {"file_path": str(REPO_ROOT / "term" / "src" / "lib.rs")}, None),
+        ]
+        commands = _registered_commands()
+        self.assertEqual({"claude", "zcode", "codex"}, {tool for tool, _ in commands})
+        for tool, command in commands:
+            for tool_name, tool_input, expected in probes:
+                with self.subTest(tool=tool, probe=tool_name, expected=expected):
+                    result = subprocess.run(
+                        ["bash", "-c", command],
+                        input=json.dumps({"tool_name": tool_name, "tool_input": tool_input}),
+                        cwd=REPO_ROOT, capture_output=True, text=True, timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    if expected is None:
+                        self.assertEqual(result.stdout.strip(), "")
+                        continue
+                    decision = json.loads(result.stdout)
+                    # claude/zcode 协议包在 hookSpecificOutput 里；codex 协议是扁平决策。
+                    decision = decision.get("hookSpecificOutput", decision)
+                    self.assertEqual(decision["permissionDecision"], expected)
+
 
 def _registered_commands() -> list[tuple[str, str]]:
-    """收集三份工具配置里登记的全部 hook 命令（已把 $(git rev-parse...) 归一到仓库根）。"""
+    """收集三份工具配置里登记的 PreToolUse hook 命令（原样字符串）。"""
     commands: list[tuple[str, str]] = []
     claude = json.loads((REPO_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
     for block in claude.get("hooks", {}).get("PreToolUse", []):
@@ -240,9 +269,19 @@ def _registered_commands() -> list[tuple[str, str]]:
     return commands
 
 
+@functools.lru_cache(maxsize=None)
+def _shell_toplevel() -> str:
+    """让 bash 按原样求值 ROOT_TOKEN：单仓内得到单仓根而非本组件目录，不能用 REPO_ROOT 代替。"""
+    result = subprocess.run(
+        ["bash", "-c", f'printf %s "{ROOT_TOKEN}"'],
+        cwd=REPO_ROOT, capture_output=True, encoding="utf-8", timeout=30, check=True,
+    )
+    return result.stdout
+
+
 def _script_path(command: str) -> tuple[str, Path]:
     """从命令串提取解释器与仓内脚本路径（支持 $ 根占位与引号形态）。"""
-    normalized = command.replace(ROOT_TOKEN, str(REPO_ROOT))
+    normalized = command.replace(ROOT_TOKEN, _shell_toplevel())
     match = re.search(r"(bash|python3?)\s+[\"']?([^\"'\s]+)[\"']?", normalized)
     if match is None:
         raise AssertionError(f"无法解析 hook 命令：{command}")

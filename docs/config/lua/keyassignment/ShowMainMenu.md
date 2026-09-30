@@ -4,7 +4,8 @@
 
 Opens the main menu overlay (a fork addition), anchored at the tab bar's
 ☰ button position: command palette, keybinding cheat sheet, settings,
-reload configuration, hide/minimize window and quit.
+Default Shell… (the settings Shell section), wallpapers, reload
+configuration, hide/minimize window and quit.
 
 ```lua
 config.keys = {
@@ -12,5 +13,6 @@ config.keys = {
 }
 ```
 
-See also [ShowKeybinds](ShowKeybinds.md), [OpenSettings](OpenSettings.md)
+See also [ShowKeybinds](ShowKeybinds.md), [OpenSettings](OpenSettings.md),
+[ShowDefaultShellSettings](ShowDefaultShellSettings.md)
 and [show_menu_button_in_tab_bar](../config/show_menu_button_in_tab_bar.md).

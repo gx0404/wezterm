@@ -7,6 +7,8 @@ use config::keyassignment::{
     SpawnTabDomain, SplitPane, SplitSize,
 };
 use config::Dimension;
+use mux::tab::TabId;
+use mux::Mux;
 use std::cell::RefCell;
 use std::rc::Rc;
 use termwiz::cell::unicode_column_width;
@@ -14,8 +16,30 @@ use wezterm_term::{KeyCode, KeyModifiers};
 use window::color::LinearRgba;
 use window::WindowOps;
 
+/// What activating a menu row does
+#[derive(Debug, Clone, PartialEq)]
+pub enum MenuAction {
+    Assign(KeyAssignment),
+    /// 作用于菜单所属的那个标签页：按 id 记下，执行时才换算成当前索引——
+    /// 菜单开着期间标签页可能被移动或关闭
+    OnTab(TabId, KeyAssignment),
+}
+
 /// A menu item; a `None` action renders a separator row
-pub type MenuItem = (Option<String>, Option<KeyAssignment>);
+pub type MenuItem = (Option<String>, Option<MenuAction>);
+
+fn assign(action: KeyAssignment) -> Option<MenuAction> {
+    Some(MenuAction::Assign(action))
+}
+
+/// 标签页菜单项真正执行的动作：先激活那个标签页（它此刻的索引），再作用
+/// 于它。标签页已经不在（`None`）时什么也不做，而不是落到活动标签页上。
+fn on_tab(tab_idx: Option<usize>, action: KeyAssignment) -> Option<KeyAssignment> {
+    Some(KeyAssignment::Multiple(vec![
+        KeyAssignment::ActivateTab(tab_idx? as isize),
+        action,
+    ]))
+}
 
 /// 菜单几何的唯一真源：下面的 `Element` 构造与外框尺寸推导共用这些常量，
 /// 于是宽高估算不会和实际 box model 漂移（WZ-04 的 `+ 16.` 魔数由此消失）。
@@ -97,6 +121,21 @@ impl ContextMenu {
             _ => return,
         };
         term_window.cancel_modal();
+        let action = match action {
+            MenuAction::Assign(action) => action,
+            MenuAction::OnTab(tab_id, action) => {
+                let tab_idx = Mux::get()
+                    .get_window(term_window.mux_window_id)
+                    .and_then(|window| window.get_tab_idx_for_id(tab_id));
+                match on_tab(tab_idx, action) {
+                    Some(action) => action,
+                    None => {
+                        log::warn!("tab {tab_id} went away while its context menu was open");
+                        return;
+                    }
+                }
+            }
+        };
         if let Some(pane) = term_window.get_active_pane_or_overlay() {
             if let Err(err) = term_window.perform_key_assignment(&pane, &action) {
                 log::error!("while performing context menu action: {err:#}");
@@ -130,7 +169,7 @@ impl ContextMenu {
             vec![
                 (
                     Some(tr("Split Pane Right").into_owned()),
-                    Some(KeyAssignment::SplitPane(SplitPane {
+                    assign(KeyAssignment::SplitPane(SplitPane {
                         direction: PaneDirection::Right,
                         size: SplitSize::Percent(50),
                         command: SpawnCommand::default(),
@@ -139,7 +178,7 @@ impl ContextMenu {
                 ),
                 (
                     Some(tr("Split Pane Down").into_owned()),
-                    Some(KeyAssignment::SplitPane(SplitPane {
+                    assign(KeyAssignment::SplitPane(SplitPane {
                         direction: PaneDirection::Down,
                         size: SplitSize::Percent(50),
                         command: SpawnCommand::default(),
@@ -148,30 +187,30 @@ impl ContextMenu {
                 ),
                 (
                     Some(tr("Toggle Pane Zoom").into_owned()),
-                    Some(KeyAssignment::TogglePaneZoomState),
+                    assign(KeyAssignment::TogglePaneZoomState),
                 ),
                 (None, None),
                 (
                     Some(tr("Copy").into_owned()),
-                    Some(KeyAssignment::CopyTo(ClipboardCopyDestination::Clipboard)),
+                    assign(KeyAssignment::CopyTo(ClipboardCopyDestination::Clipboard)),
                 ),
                 (
                     Some(tr("Paste").into_owned()),
-                    Some(KeyAssignment::PasteFrom(ClipboardPasteSource::Clipboard)),
+                    assign(KeyAssignment::PasteFrom(ClipboardPasteSource::Clipboard)),
                 ),
                 (None, None),
                 (
                     Some(tr("Scroll to Top").into_owned()),
-                    Some(KeyAssignment::ScrollToTop),
+                    assign(KeyAssignment::ScrollToTop),
                 ),
                 (
                     Some(tr("Scroll to Bottom").into_owned()),
-                    Some(KeyAssignment::ScrollToBottom),
+                    assign(KeyAssignment::ScrollToBottom),
                 ),
                 (None, None),
                 (
                     Some(tr("Close Pane").into_owned()),
-                    Some(KeyAssignment::CloseCurrentPane { confirm: true }),
+                    assign(KeyAssignment::CloseCurrentPane { confirm: true }),
                 ),
             ],
             x,
@@ -180,30 +219,37 @@ impl ContextMenu {
     }
 
     /// The context menu for a specific tab (right click on a tab)
-    pub fn tab_menu(tab_idx: usize, x: f32, y: f32) -> Self {
+    /// `tab_idx`/`tab_id` identify the right-clicked tab; right clicking
+    /// doesn't activate it, so its rows carry the id (see `MenuAction::OnTab`)
+    pub fn tab_menu(tab_idx: usize, tab_id: TabId, x: f32, y: f32) -> Self {
+        let on_tab = |action| Some(MenuAction::OnTab(tab_id, action));
         Self::new(
             vec![
                 (
                     Some(tr("New Tab").into_owned()),
-                    Some(KeyAssignment::SpawnTab(SpawnTabDomain::CurrentPaneDomain)),
+                    assign(KeyAssignment::SpawnTab(SpawnTabDomain::CurrentPaneDomain)),
                 ),
                 (
                     Some(tr("Show Tab Navigator").into_owned()),
-                    Some(KeyAssignment::ShowTabNavigator),
+                    assign(KeyAssignment::ShowTabNavigator),
                 ),
                 (None, None),
                 (
                     Some(tr("Move Tab Left").into_owned()),
-                    Some(KeyAssignment::MoveTabRelative(-1)),
+                    on_tab(KeyAssignment::MoveTabRelative(-1)),
                 ),
                 (
                     Some(tr("Move Tab Right").into_owned()),
-                    Some(KeyAssignment::MoveTabRelative(1)),
+                    on_tab(KeyAssignment::MoveTabRelative(1)),
                 ),
                 (None, None),
                 (
-                    Some(fill(&tr("Close Tab {n}"), &[("n", &tab_idx.to_string())])),
-                    Some(KeyAssignment::CloseCurrentTab { confirm: true }),
+                    // 与窗口标题、标签栏一致用 1 起的序号
+                    Some(fill(
+                        &tr("Close Tab {n}"),
+                        &[("n", &(tab_idx + 1).to_string())],
+                    )),
+                    on_tab(KeyAssignment::CloseCurrentTab { confirm: true }),
                 ),
             ],
             x,
@@ -217,11 +263,15 @@ impl ContextMenu {
             vec![
                 (
                     Some(tr("New Tab").into_owned()),
-                    Some(KeyAssignment::SpawnTab(SpawnTabDomain::CurrentPaneDomain)),
+                    assign(KeyAssignment::SpawnTab(SpawnTabDomain::CurrentPaneDomain)),
                 ),
                 (
                     Some(tr("Show Launcher").into_owned()),
-                    Some(KeyAssignment::ShowLauncher),
+                    assign(KeyAssignment::ShowLauncher),
+                ),
+                (
+                    Some(tr("Default Shell…").into_owned()),
+                    assign(KeyAssignment::ShowDefaultShellSettings),
                 ),
             ],
             x,
@@ -237,32 +287,36 @@ impl ContextMenu {
             vec![
                 (
                     Some(tr("Activate Command Palette").into_owned()),
-                    Some(KeyAssignment::ActivateCommandPalette),
+                    assign(KeyAssignment::ActivateCommandPalette),
                 ),
                 (
                     Some(tr("Show Keybindings").into_owned()),
-                    Some(KeyAssignment::ShowKeybinds),
+                    assign(KeyAssignment::ShowKeybinds),
                 ),
                 (
                     Some(tr("Open Settings").into_owned()),
-                    Some(KeyAssignment::OpenSettings),
+                    assign(KeyAssignment::OpenSettings),
+                ),
+                (
+                    Some(tr("Default Shell…").into_owned()),
+                    assign(KeyAssignment::ShowDefaultShellSettings),
                 ),
                 (
                     Some(tr("Manage Wallpapers").into_owned()),
-                    Some(KeyAssignment::ShowWallpaperOverlay),
+                    assign(KeyAssignment::ShowWallpaperOverlay),
                 ),
                 (
                     Some(tr("Reload configuration").into_owned()),
-                    Some(KeyAssignment::ReloadConfiguration),
+                    assign(KeyAssignment::ReloadConfiguration),
                 ),
                 (None, None),
                 (
                     Some(tr("Hide/Minimize Window").into_owned()),
-                    Some(KeyAssignment::Hide),
+                    assign(KeyAssignment::Hide),
                 ),
                 (
                     Some(tr("Quit WezTerm").into_owned()),
-                    Some(KeyAssignment::QuitApplication),
+                    assign(KeyAssignment::QuitApplication),
                 ),
             ],
             x,
@@ -479,7 +533,14 @@ mod tests {
     use super::*;
 
     fn item(label: &str) -> MenuItem {
-        (Some(label.to_string()), Some(KeyAssignment::ScrollToTop))
+        (Some(label.to_string()), assign(KeyAssignment::ScrollToTop))
+    }
+
+    fn action_labelled<'a>(menu: &'a ContextMenu, label: &str) -> Option<&'a MenuAction> {
+        menu.items
+            .iter()
+            .find(|(l, _)| l.as_deref() == Some(label))
+            .and_then(|(_, action)| action.as_ref())
     }
 
     #[test]
@@ -539,7 +600,7 @@ mod tests {
         let menu2 = ContextMenu::new(
             vec![
                 (None, None),
-                (Some("x".to_string()), Some(KeyAssignment::Nop)),
+                (Some("x".to_string()), assign(KeyAssignment::Nop)),
                 (None, None),
             ],
             0.,
@@ -547,5 +608,62 @@ mod tests {
         );
         menu2.move_selection(1);
         assert_eq!(*menu2.selected.borrow(), 1);
+    }
+
+    #[test]
+    fn tab_menu_actions_target_the_clicked_tab() {
+        // 右键点的是第 3 个标签（索引 2、id 7），活动标签可能是别的
+        let menu = ContextMenu::tab_menu(2, 7, 0., 0.);
+        let on_clicked_tab = |action| MenuAction::OnTab(7, action);
+        assert_eq!(
+            action_labelled(&menu, &tr("Move Tab Left")),
+            Some(&on_clicked_tab(KeyAssignment::MoveTabRelative(-1)))
+        );
+        assert_eq!(
+            action_labelled(&menu, &tr("Move Tab Right")),
+            Some(&on_clicked_tab(KeyAssignment::MoveTabRelative(1)))
+        );
+        // 标签序号与窗口标题一致，从 1 数起
+        assert_eq!(
+            action_labelled(&menu, &fill(&tr("Close Tab {n}"), &[("n", "3")])),
+            Some(&on_clicked_tab(KeyAssignment::CloseCurrentTab {
+                confirm: true
+            }))
+        );
+        // 与具体标签无关的条目保持原样
+        assert_eq!(
+            action_labelled(&menu, &tr("Show Tab Navigator")),
+            Some(&MenuAction::Assign(KeyAssignment::ShowTabNavigator))
+        );
+    }
+
+    #[test]
+    fn tab_rows_run_on_the_tab_where_it_is_now_or_not_at_all() {
+        // 执行时按 id 换算出的当前索引先激活它，再执行动作
+        assert_eq!(
+            on_tab(Some(4), KeyAssignment::MoveTabRelative(1)),
+            Some(KeyAssignment::Multiple(vec![
+                KeyAssignment::ActivateTab(4),
+                KeyAssignment::MoveTabRelative(1),
+            ]))
+        );
+        // 菜单开着时那个标签页没了：不能退回去作用在活动标签页上
+        assert_eq!(
+            on_tab(None, KeyAssignment::CloseCurrentTab { confirm: true }),
+            None
+        );
+    }
+
+    #[test]
+    fn main_and_tab_bar_menus_offer_the_default_shell_settings() {
+        for menu in [
+            ContextMenu::main_menu(0., 0.),
+            ContextMenu::tab_bar_menu(0., 0.),
+        ] {
+            assert_eq!(
+                action_labelled(&menu, &tr("Default Shell…")),
+                Some(&MenuAction::Assign(KeyAssignment::ShowDefaultShellSettings))
+            );
+        }
     }
 }

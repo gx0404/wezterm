@@ -3,7 +3,7 @@
 # Deploys the branch-built Windows binaries plus the dotfiles/ snapshot:
 #   binaries -> $env:LOCALAPPDATA\Programs\wezterm-gx\<version>\
 #   shortcut -> Start Menu "WezTerm (gx)"
-#   config   -> $env:USERPROFILE\.config\wezterm\
+#   config   -> $env:USERPROFILE\.config\wezterm\  (old copy backed up, gui-settings.json kept)
 #   plugins  -> $env:APPDATA\wezterm\plugins\<escaped>\
 #   fonts    -> per-user fonts ($env:LOCALAPPDATA\Microsoft\Windows\Fonts + HKCU registry)
 #
@@ -67,6 +67,7 @@ $sc.Save()
 
 # ------------------------------------------------------------------ config --
 $cfg = Join-Path $env:USERPROFILE ".config\wezterm"
+$bk = $null
 if (Test-Path $cfg) {
     $bk = "$cfg.bak-gx-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
     Info "backup config -> $bk"
@@ -76,6 +77,11 @@ if (Test-Path $cfg) {
 Info "config -> $cfg"
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $cfg) | Out-Null
 Copy-Item -Path (Join-Path $PSScriptRoot "wezterm-config") -Destination $cfg -Recurse
+# gui-settings.json holds the Settings page choices (wallpaper, default shell, ...): user data.
+if ($bk -and (Test-Path -LiteralPath (Join-Path $bk "gui-settings.json"))) {
+    Info "keep GUI settings -> $cfg\gui-settings.json"
+    Copy-Item -LiteralPath (Join-Path $bk "gui-settings.json") -Destination $cfg -Force
+}
 if (Test-Path (Join-Path $env:USERPROFILE ".wezterm.lua")) {
     Warn "$env:USERPROFILE\.wezterm.lua exists and takes precedence over .config\wezterm"
 }

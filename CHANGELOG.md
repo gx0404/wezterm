@@ -8,6 +8,131 @@
 `make version` 只读查询）。WezTerm 产品自身的版本号由 `wezterm-version/build.rs`
 按 git 提交时间与哈希生成，两套体系互不干扰（见 docs/RELEASE.md）。
 
+## 0.4.0(TBD)
+
+### Added
+- 本仓并入 `gx0404/gx_shell` 单仓（`wezterm/` 目录），由单仓根目录的发版流程
+  统一产出 GX Shell 安装包。`gx_package.py --stage-dir DIR` 只构建、核验并输出
+  载荷目录与 `stage-manifest.json`（deb 另含 `dpkg-shlibdeps` 计算出的依赖），
+  不调用 Inno Setup / dpkg-deb，供单仓合并打包；`--container` 构建同样支持。
+- 配置快照在 GX Shell 安装包内运行时默认进入包内 GX Zsh，启动菜单最前面新增
+  「GX Zsh」「herdr」；按 `wezterm.executable_dir` 探测同装入口，独立安装的
+  WezTerm 仍按原逻辑选择 PowerShell / zsh。已有用户配置不会被覆盖（下条迁移除外）。
+- 启动器按文件迁移已有配置（GX Shell 0.1.0 只升级未改动的 0.3.0 `config/launch.lua`）：
+  与 WezTerm GX 0.3.0 或 GX Shell 0.1.0 发布内容相同的文件（文本 CRLF 视同 LF，图片等
+  二进制逐字节比较）先备份到 wezterm-gx 数据目录的 `backups/<时间戳>/wezterm-config/`
+  再换成新版，未改动的旧配置升级后同样默认进入 GX Zsh；新增文件补上（`wezterm.lua` 不是
+  GX 发布的版本时只补新代码 require 的模块），用户删掉的已发布文件（如在壁纸浮层删除的
+  壁纸）只在新代码 require 时补回；改过的、只读的文件与符号链接保留，原因和载荷里的对应
+  路径写进 `wezterm-gx/config-migration.log`；`gui-settings.json` 永不改动。
+- 迁移保持配置一致：文件与它 `require` 的配置模块一起换。各发布版都没变过的文件（如
+  `wezterm.lua`、`colors/custom.lua`）改了不挡升级；改了本次也更新的文件（如
+  `config/bindings.lua`）时，它 require 的已更新模块及依赖这些模块的文件一起留在旧版，
+  日志写明根因文件。一起换的一组文件全有或全无：先写临时文件并校验、再备份、再替换，
+  中途失败放回已换的文件；Unix 上保留原文件的权限位。每个载荷版本、已发布指纹表与配置
+  目录只迁移一次（记在 `wezterm-gx/config-version`），失败最多尝试 3 次（每次启动一次）
+  并复用同一个备份目录，根因文件改动后下次启动重跑；日志与标记写入失败不影响启动。
+- 默认 Shell 可选：`utils/shells.lua` 只检查文件是否存在、不启动子进程，找出 PowerShell 7
+  （含应用商店版）、Windows PowerShell 5.1、cmd、Git Bash、MSYS2 UCRT64、Nushell 与各 WSL
+  发行版（Linux 为 Zsh、Bash；macOS 为固定列表，Fish 排在最前），与安装包内的 GX Zsh 一起
+  列进启动菜单，每项固定自己的 domain（在 WSL 标签里开 PowerShell 仍是本机 PowerShell）。
+  设置浮层新增「Shell」分区，选择写入 `gui-settings.json` 的 `default_shell`（选 GX Zsh 时
+  删除该键），选 WSL 发行版时新标签默认进入该发行版；未选或所选 Shell 已不存在时依次回退
+  GX Zsh → PowerShell 7 → PowerShell 5.1（Linux 为 GX Zsh → Zsh）。
+- 新增键位动作 `ShowDefaultShellSettings`（命令面板「默认 Shell…」），直接打开设置浮层的
+  Shell 分区；主菜单与标签栏空白处右键菜单的「默认 Shell…」、`+` 按钮右键列表末项「设为
+  默认 Shell…」都用它。`+` 按钮右键列表按各项自己的 domain 启动，并用「（默认）」标出当前
+  默认 Shell。Shell 分区只列 `launch_menu` 里带 `GX_SHELL_ID` 环境变量的条目，自写的
+  `launch.lua` 没有标记时显示提示。
+- 设置浮层保存默认 Shell 并重载成功后发出 `gx-default-shell-changed` 事件；在 GX Shell
+  安装包内，配置据此调用 `herdr --gx-set-default-shell`，herdr 的新窗格跟随同一个 Shell
+  （已开的窗格不变），结果用 toast 提示。herdr 只接受一个可执行文件，toast 如实说明差别：
+  选 WSL 发行版时 herdr 进入 WSL 默认发行版，选 MSYS2 UCRT64 时得到 MSYS 环境的 bash，
+  Linux 上选系统 zsh 时 herdr 用 GX Zsh；herdr 用的是自定义配置时不修改并提示。
+- 开发：`scripts/gx_config_fingerprints.py` 只从 git 发布提交生成启动器的已发布文件指纹表
+  `scripts/gx-launcher/released.rs`（`--check` 只读校验）；单测在有完整历史时复算指纹，并
+  要求单仓根 `CHANGELOG.md` 最新标题以外带日期的 GX Shell 版本都已登记、与
+  `gx-shell-vX.Y.Z` 标签提交一致。新增纯 Lua 5.4 单测 `scripts/tests/gx_shells.lua`（Shell
+  探测、默认 Shell 解析、herdr 同步提示）；`tests/pure_fn_test.lua` 增加键位断言与
+  `config/launch.lua` 不启动子进程的断言。
+
+### Changed
+- 不兼容：Windows 键位改为与 Linux 相同的 `Ctrl+Shift` 方案，不再占用裸 `Alt`（`SUPER`
+  由 `Alt` 改为 `Ctrl+Shift`，`SUPER_REV` 由 `Ctrl+Alt` 改为 `Ctrl+Alt+Shift`）。例如搜索
+  `Alt+F` → `Ctrl+Shift+F`，关闭窗格 `Alt+W` → `Ctrl+Shift+W`，缩放窗格 `Alt+Enter` →
+  `Ctrl+Shift+Enter`，分屏 `Alt+\` / `Ctrl+Alt+\` → `Ctrl+Shift+\` / `Ctrl+Alt+Shift+\`，
+  切换标签 `Alt+[` / `]` → `Ctrl+Shift+[` / `]`，切换窗格 `Ctrl+Alt+H/J/K/L` →
+  `Ctrl+Alt+Shift+H/J/K/L`，其余 `Alt` / `Ctrl+Alt` 组合依此类推。翻页改为
+  `Shift+PageUp` / `Shift+PageDown`，裸 `PageUp` / `PageDown` 交给程序；`Alt+←/→/Backspace`
+  不再改写成行首 / 行尾 / 清行，原样交给 shell；`Alt+Shift+S` / `Alt+Shift+V`（截图、AI 图片
+  粘贴）只在 Linux 上绑定。Windows 新增 `Ctrl+PageUp` / `Ctrl+PageDown` 切换标签、`Ctrl+=` /
+  `Ctrl++` / `Ctrl+-` / `Ctrl+0` 调字号与 `Leader 1..9` 跳到第 N 个标签。
+- 不兼容：窗口缩小 / 放大在所有平台改为 `Leader -` / `Leader =`（原 Linux
+  `Ctrl+Shift+-` / `=`、Windows `Alt+-` / `=`、macOS `Cmd+-` / `=`）。Linux 上
+  `Ctrl+Shift+-`（即 `Ctrl+_`，readline / zsh 的撤销）因此交还给 shell，`Ctrl+Shift+=`（即
+  `Ctrl++`）在 Linux 与 Windows 上放大字号。Linux 关闭窗格由 `Alt+W` 改为 `Ctrl+Shift+W`，
+  `Alt+W` 交还给 shell。
+- 关闭标签（`Ctrl+Alt+Shift+W`，macOS `Cmd+Ctrl+W`）改为先确认。Windows 上窗格里只剩空闲
+  Shell 时（补上 `zsh.exe`、`bash.exe` 等带 `.exe` 的进程名、MSYS2 的 `env.exe` 与 GX Zsh
+  常驻的 gitstatusd），关闭窗格或标签不再弹确认；herdr 等程序在运行时仍先确认。
+- 配置求值更快：`config/launch.lua` 不再在 require 里运行 `where.exe`，Shell 探测只检查文件
+  是否存在；WSL 发行版列表每个 GUI 进程只取一次（为空或失败时 5 分钟后再试）；插件目录缺失
+  时不再在求值中同步 `git clone`（没有超时，离线时每次求值都要重来），相关键位不起作用；
+  resurrect 在第一次按保存 / 恢复键时才加载。Windows 实测首次求值 269 → 84 ms，重载
+  256 → 7 ms。
+- 没有窗口级配置覆盖的窗口在配置重载时直接使用全局配置，不再在 GUI 线程上把整份 Lua 配置
+  再执行一遍（各窗口共用同一次求值结果；文件监视线程里的 `wezterm.gui.get_appearance()` /
+  `screens()` 返回 GUI 最近一次看到的值，跟随系统深浅色的配置结果不变）。标签栏随标签数
+  显隐时只重排终端区域，不再整窗重载、重建字体与字形缓存，也不再触发
+  `window-config-reloaded`。
+- 状态栏的前台进程探测只在单标签且开启 herdr 应用模式时进行，每窗口至多每 2 秒一次，电池
+  信息缓存 60 秒；光标闪烁缓动改为 `Constant`、`animation_fps` 由 30 降到 10，空闲窗口不再
+  持续重绘。
+- 配置关闭上游更新检查（`check_for_updates = false`）：GX 版本随安装包升级，不再联网查询
+  上游 WezTerm 的新版本。
+- Windows 字体回退加入系统自带的 Microsoft YaHei 与 Segoe UI Emoji（字体文件存在时）。
+- 内置 16 张壁纸等比缩到不超过 1920×1080（文件名和格式不变）并去掉元数据，总大小
+  19.4 MB → 6.3 MB；包括默认壁纸在内都放得进 2048² 的 GPU 纹理 atlas（原来要 4096²，5K
+  壁纸要 8192²），解码更快、首帧更早出现。窗口大于 1920×1080 时壁纸按比例放大，在 0.92 不透明度
+  的遮罩下几乎看不出。已有安装里未改动的壁纸随配置迁移换成新版，原图进备份。
+- 开发：规则路由把 `scripts/gx-launcher/**`、`scripts/gx_package.py`、
+  `scripts/gx_config_fingerprints.py` 同时归入 dotfiles 领域（一个文件命中多个领域时取并集）。
+
+### Fixed
+- 修复右键菜单「关闭窗格」「关闭标签页」的确认框一闪就消失、窗格关不掉：菜单在按下鼠标时
+  就执行，同一次点击的松开落进了刚弹出的确认框，确认框又把这次松开当成点在按钮外（等于
+  「否」）。现在菜单层接住的那次按下，其松开一律吞掉（菜单已关闭也一样）；终端内浮层
+  （确认框、启动器、选择器）收到的松开不再带按键。
+- 标签页右键菜单的左移、右移、关闭作用于右键点中的那个标签页（此前作用于当前活动标签页）；
+  菜单打开期间该标签页已关闭时什么也不做；「关闭标签页 N」的序号改为与标题一致、从 1 开始。
+- 点击浮层外关闭菜单时，这次点击的拖动与松开不再传给下面的窗格；在窗口外松开右键或中键
+  留下的鼠标捕获，会在下一次按下时清除，不再吞掉这次点击。
+- 修复 Linux（X11）与 Windows 上 `Ctrl+Shift+[` / `]` / `\` / `0` / `9` 这类键位按不到：
+  WezTerm 把它们报成 `{` `}` `|` `)` `(`，而用户键位不合成 Shift 变体，现在同时绑定这些字符。
+- 配置是 `~/.wezterm.lua` 时，Lua 此前到 `~/gui-settings.json` 读设置页保存的壁纸，而设置页
+  写在 `$XDG_CONFIG_HOME/wezterm`（默认 `~/.config/wezterm`）；现在新增的
+  `utils/gui-settings.lua` 与 WezTerm 按同一规则定位，壁纸与默认 Shell 选择在这种布局下也生效。
+- `gui-settings.json` 存在却读不出来（不是不存在）时，设置浮层保存改为报错，不再用只含一个
+  键的新文件把它覆盖；读取方记日志后照常加载。
+- 设置浮层写入 `gui-settings.json` 或随后的配置重载失败时，在浮层里显示原因，Shell 分区此时
+  也不发 `gx-default-shell-changed`；浮层刚打开 500 ms 内的点击与双击的第二下不应用任何行，
+  双击菜单里的「默认 Shell…」不会顺手改掉设置。
+- GX 配置关闭了默认键位（`disable_default_key_bindings`），命令面板与快捷键速查此前因此不
+  显示用户为复制、粘贴等内置命令绑定的键，现在照常显示。
+- 启动器：配置目录里只有设置页写的 `gui-settings.json`（例如先在独立 WezTerm 里改过设置）
+  时，此前被当成已有配置而不初始化，现在按首次使用装入 GX 配置并保留该文件。
+- Windows 启动器启动 WezTerm 前清除从父进程继承的「忽略 Ctrl+C」标志，终端里的程序不会因此
+  收不到 Ctrl+C；命令行启动器 `wezterm-gx-cli` 遇到 Ctrl+C / Ctrl+Break 时不再先于子进程
+  退出，而是把事件留给子进程、等它结束并返回它的退出码。
+- 源码安装脚本 `dotfiles/install.ps1`、`install.sh` 整体换入配置时保留原 `gui-settings.json`
+  （此前随旧配置一起移进备份，设置页的选择丢失）；原生安装包的配置快照、`make gx-sync` 与
+  `.gitignore` 都跳过 `wezterm-config/gui-settings.json`，用仓库配置调试时写下的设置不会进
+  安装包，也不会被收回仓库。
+- 脏检查只统计 `wezterm/` 目录内的改动；容器构建挂载整个工作树，避免单仓中
+  未挂载的兄弟目录被 `git status` 视为删除、产物被误标为脏构建。
+- AI 工具安全门按本组件根相对化绝对路径，注册命令指向 `wezterm/` 下的脚本，修复
+  并入单仓后文件保护规则对绝对路径失效；钩子测试改为按配置原样执行注册命令。
+
 ## 0.3.0(TBD)
 
 ### Added

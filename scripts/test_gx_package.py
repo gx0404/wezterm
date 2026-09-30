@@ -44,7 +44,8 @@ class PackageTests(unittest.TestCase):
                 source = root / relative
                 source.parent.mkdir(parents=True, exist_ok=True)
                 source.write_text("fixture\n")
-            args = SimpleNamespace(check=False, bin_dir=None, output_dir=root / "dist", cache_dir=root / "cache")
+            args = SimpleNamespace(check=False, bin_dir=None, output_dir=root / "dist", cache_dir=root / "cache",
+                                   stage_dir=None)
             calls = []
 
             def docker_run(command):
@@ -55,7 +56,7 @@ class PackageTests(unittest.TestCase):
             with patch.object(package, "ROOT", root), patch.object(package.sys, "platform", "linux"), \
                     patch.object(package.platform, "machine", return_value="x86_64"), \
                     patch.object(package, "tool", return_value="docker"), \
-                    patch.object(package, "output", side_effect=["linux", ".git"]), \
+                    patch.object(package, "output", side_effect=["linux", str(root), ".git"]), \
                     patch.object(package.os, "getuid", return_value=1001, create=True), \
                     patch.object(package.os, "getgid", return_value=1001, create=True), \
                     patch.object(package, "run", side_effect=docker_run):
@@ -66,6 +67,108 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(handoff[handoff.index("1001:1001") + 1:],
                              ["/gx-owned-cache-0", "/gx-owned-cache-1", "/gx-owned-cache-2"])
             self.assertNotIn(str(root), handoff)
+
+    def test_monorepo_container_mounts_whole_tree_and_returns_stage_ownership(self):
+        with tempfile.TemporaryDirectory() as directory:
+            top = Path(directory).resolve() / "gx_shell"
+            root = top / "wezterm"
+            for relative in ("get-deps", "ci/check-rust-version.sh", "scripts/packaging/ubuntu2004.Dockerfile"):
+                source = root / relative
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("fixture\n")
+            (top / ".git").mkdir()
+            stage = Path(directory).resolve() / "stages" / "wezterm"
+            args = SimpleNamespace(check=False, bin_dir=None, output_dir=top / "dist", cache_dir=None,
+                                   stage_dir=stage)
+            calls = []
+
+            def docker_run(command):
+                calls.append(list(map(str, command)))
+                if "python3" in command:
+                    stage.mkdir()
+
+            with patch.object(package, "ROOT", root), patch.object(package.sys, "platform", "linux"), \
+                    patch.object(package.platform, "machine", return_value="x86_64"), \
+                    patch.object(package, "tool", return_value="docker"), \
+                    patch.object(package, "output", side_effect=["linux", str(top), "../.git"]), \
+                    patch.object(package.os, "getuid", return_value=1001, create=True), \
+                    patch.object(package.os, "getgid", return_value=1001, create=True), \
+                    patch.object(package, "run", side_effect=docker_run):
+                package.container_deb(args, "1.2.3")
+            build = next(call for call in calls if "python3" in call)
+            volumes = [build[i + 1] for i, arg in enumerate(build) if arg == "--volume"]
+            self.assertIn(f"{top}:{top}", volumes)
+            self.assertIn(f"{stage.parent}:{stage.parent}", volumes)
+            self.assertFalse(any(volume.startswith(f"{top / '.git'}:") for volume in volumes))
+            self.assertEqual(build[build.index("--stage-dir") + 1], str(stage))
+            handoff = calls[-1]
+            self.assertIn(f"{stage}:/gx-owned-stage", handoff)
+            self.assertEqual(handoff[-1], "/gx-owned-stage")
+
+    def test_dirty_check_is_scoped_to_the_wezterm_tree(self):
+        with patch.object(package, "output", side_effect=["a" * 40, ""]) as git:
+            self.assertEqual(package.source_info(Path("wezterm")), ("a" * 40, False))
+        self.assertEqual(git.call_args_list[1].args[0][-2:], ["--", "."])
+
+    def test_stage_dir_must_be_new_before_anything_builds(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(package.sys, "argv", ["gx_package.py", "windows", "--stage-dir", directory]), \
+                patch.object(package, "preflight") as preflight, \
+                patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            self.assertEqual(package.main(), 1)
+        preflight.assert_not_called()
+        self.assertIn("--stage-dir must not exist", stderr.getvalue())
+
+    def test_stage_only_windows_preflight_does_not_need_inno(self):
+        seen = []
+
+        def fake_tool(name):
+            seen.append(name)
+            return name
+
+        bin_dir = Path("prebuilt")
+        with patch.object(package.os, "name", "nt"), \
+                patch.object(package.platform, "machine", return_value="AMD64"), \
+                patch.object(package, "tool", side_effect=fake_tool), \
+                patch.object(package, "verify_inno") as inno, \
+                patch.object(package, "output", return_value="rustc 1.96.1 (fixture 2026-01-01)"), \
+                patch("sys.stdout", new_callable=io.StringIO):
+            package.preflight("windows", bin_dir, stage_only=True)
+        self.assertNotIn("iscc", seen)
+        inno.assert_not_called()
+
+    def test_windows_stage_holds_the_app_payload_and_fonts_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "wezterm"
+            files = ["LICENSE.md", "dotfiles/PROVENANCE.md", "dotfiles/README.md",
+                     "dotfiles/wezterm-config/wezterm.lua", "dotfiles/plugins/p/gitdir/HEAD",
+                     "dotfiles/fonts/A.ttf", "dotfiles/fonts/B.ttc", "dotfiles/fonts/notes.txt",
+                     *[f"assets/windows/{source}" for source in package.WINDOWS_RUNTIME]]
+            for relative in files:
+                (root / relative).parent.mkdir(parents=True, exist_ok=True)
+                (root / relative).write_bytes(b"fixture")
+            bin_dir = Path(directory) / "bin"
+            bin_dir.mkdir()
+            for name in package.BINARIES:
+                (bin_dir / f"{name}.exe").write_bytes(b"MZ")
+            stage = Path(directory) / "stage"
+            stage.mkdir()
+
+            def launchers(dest, kind):
+                for name in ("wezterm-gx.exe", "wezterm-gx-cli.exe"):
+                    (dest / name).write_bytes(b"MZ")
+
+            with patch.object(package, "compile_launchers", side_effect=launchers):
+                fonts = package.stage_windows(stage, bin_dir, root)
+            staged = {path.relative_to(stage).as_posix() for path in stage.rglob("*") if path.is_file()}
+            expected = {f"app/{name}.exe" for name in package.BINARIES}
+            expected |= {f"app/{target}" for target in package.WINDOWS_RUNTIME.values()}
+            expected |= {"app/LICENSE.md", "app/wezterm-gx.exe", "app/wezterm-gx-cli.exe",
+                         "app/resources/resource-version", "app/resources/dotfiles/PROVENANCE.md",
+                         "app/resources/dotfiles/README.md", "app/resources/dotfiles/wezterm-config/wezterm.lua",
+                         "app/resources/dotfiles/plugins/p/gitdir/HEAD", "fonts/A.ttf", "fonts/B.ttc"}
+            self.assertEqual(staged, expected)
+            self.assertEqual([path.name for path in fonts], ["A.ttf", "B.ttc"])
 
     def test_resource_paths_have_the_same_case_sensitive_order_on_each_host(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -99,7 +202,7 @@ class PackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in ("plugins/p/gitdir/HEAD", "plugins/p/state/session", "plugins/p/.git/config",
-                         "wezterm-config/wezterm.lua", "fonts/example.ttf"):
+                         "wezterm-config/wezterm.lua", "wezterm-config/gui-settings.json", "fonts/example.ttf"):
                 path = root / "dotfiles" / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"example")

@@ -74,6 +74,9 @@ scripts/__pycache__/
 # dotfiles 安装链产物与容器构建目录（make gx-bundle / gx-install）
 /dist/
 /target-gx-*/
+# 用仓库配置调试时设置页写在 wezterm.lua 旁的用户数据，不入快照
+/dotfiles/wezterm-config/gui-settings.json
+/dotfiles/wezterm-config/gui-settings.json.tmp
 # UI 截图证据（分配：make evidence）
 /.ui-evidence/
 # graphify：跟踪当前快照，运行态与记忆层本机保留

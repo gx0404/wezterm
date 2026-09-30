@@ -1,12 +1,18 @@
 //! fork 新增：herdr 式设置浮层（Modal）。
 //!
-//! 四个分区：语言（中文/English）、外观（内置配色方案，移动即预览、
+//! 五个分区：语言（中文/English）、外观（内置配色方案，移动即预览、
 //! Esc 还原、Enter 应用）、交互（右键菜单/滚动条/响铃/关闭确认）、
-//! 字体（字号步进与重置）。
+//! 字体（字号步进与重置）、Shell（默认 Shell：列出 launch_menu 里带
+//! `GX_SHELL_ID` 标记的条目，选中后写 gui-settings.json 的 `default_shell`，
+//! 选 GX Zsh 则删键；重载成功后才发出 `gx-default-shell-changed` 窗口事件，
+//! 由 Lua 侧让 herdr 跟随）。入口：`OpenSettings`，以及直达 Shell 分区的
+//! `ShowDefaultShellSettings`（主菜单/标签栏菜单的「默认 Shell…」）。
 //! 生效链路：预览走 `TermWindow::set_preview_palette`（窗口级临时调色板，
 //! 只丢渲染缓存 + 重绘，不重跑 Lua、不重建字体、不改窗口尺寸）；应用则
 //! 写入 `config::gui_settings::store_key`（gui-settings.json，原子写）后
-//! `config::reload()`——全局生效且跨重启持久化，不触碰用户 Lua。
+//! `config::reload()`——全局生效且跨重启持久化，不触碰用户 Lua。写文件或
+//! 重载失败时在页脚上方显示错误行。浮层刚打开时与多击的后几下不应用数据
+//! 行（`press_applies`），双击打开它的菜单项不会顺手改掉设置。
 //! 浮层关闭（Esc / 点外 / 被另一浮层顶掉）统一经 `Modal::on_dismissed`
 //! 还原预览，配色不会钉死在随手划过的那套（WZ-02 / WZ-03）。
 //! 不变量：本浮层**不写** `TermWindow::config_overrides`——那是每窗口、
@@ -21,12 +27,15 @@
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW, MODAL_SECTION_BASE, MODAL_SECTION_MAX};
 use crate::termwindow::{DimensionContext, TermWindow, UIItemType};
+use anyhow::Context;
+use config::gui_settings::DEFAULT_SHELL_KEY;
 use config::i18n::{tr, UiLanguage};
-use config::keyassignment::KeyAssignment;
+use config::keyassignment::{KeyAssignment, SpawnCommand};
 use config::{AudibleBell, Config, ConfigHandle, Dimension, Palette, WindowCloseConfirmation};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 use wezterm_dynamic::{ToDynamic, Value};
 use wezterm_term::color::ColorPalette;
 use wezterm_term::{KeyCode, KeyModifiers};
@@ -40,9 +49,21 @@ const DEFAULT_FONT_SIZE: f64 = 12.0;
 const MIN_VISIBLE_ROWS: usize = 4;
 /// 浮层占窗口高度的比例（千分之）
 const VISIBLE_ROWS_HEIGHT_PERMILLE: usize = 600;
-/// 固定 chrome 行：标题、分区 tab、页脚。过滤框与「(no matches)」按需另算，
+/// 固定 chrome 行：标题、分区 tab、页脚。过滤框与空列表提示按需另算，
 /// 见 `SettingsOverlay::chrome_rows`
 const FIXED_CHROME_ROWS: usize = 3;
+
+/// launch_menu 条目上标记「可选默认 Shell」的环境变量，值是 Shell id
+/// （由 GX 的 Lua launch 配置写入；herdr 这类非 Shell 条目不带它）
+const SHELL_ID_VAR: &str = "GX_SHELL_ID";
+/// `default_shell` 缺省即 GX Zsh：选它时删键而不是写入
+const GX_ZSH_SHELL_ID: &str = "gx-zsh";
+/// 默认 Shell 落地并重载后发出的窗口事件，Lua 侧据此让 herdr 跟随
+const DEFAULT_SHELL_CHANGED_EVENT: &str = "gx-default-shell-changed";
+/// 浮层刚打开的这段时间里数据行不响应按下：双击打开浮层的菜单项时，
+/// 第二下会落在某一行上。取多击间隔（`wezterm_term::LastMouseClick`
+/// 的 500ms）
+const OPEN_CLICK_GUARD: Duration = Duration::from_millis(500);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Section {
@@ -50,14 +71,16 @@ enum Section {
     Appearance,
     Interaction,
     Font,
+    Shell,
 }
 
 impl Section {
-    const ALL: [Section; 4] = [
+    const ALL: [Section; 5] = [
         Section::Language,
         Section::Appearance,
         Section::Interaction,
         Section::Font,
+        Section::Shell,
     ];
 
     fn title(self) -> &'static str {
@@ -66,12 +89,13 @@ impl Section {
             Section::Appearance => "Appearance",
             Section::Interaction => "Interaction",
             Section::Font => "Font",
+            Section::Shell => "Shell",
         }
     }
 }
 
 // WZ-09: the clickable tab band must be wide enough for every section;
-// adding a fifth section without widening MODAL_SECTION_MAX fails here.
+// outgrowing MODAL_SECTION_MAX without widening it fails here.
 const _: () = assert!(Section::ALL.len() <= MODAL_SECTION_MAX);
 
 /// One selectable row in the current section
@@ -94,6 +118,13 @@ enum Item {
     },
     /// font size step / reset actions
     FontOp(FontOp),
+    /// launch_menu entry tagged with a shell id; `current` marks the
+    /// effective default shell
+    ShellChoice {
+        id: String,
+        label: String,
+        current: bool,
+    },
 }
 
 #[derive(Copy, Clone)]
@@ -121,22 +152,50 @@ pub struct SettingsOverlay {
     /// 同一个数，否则选中行会滑出可视区（WZ-08）——`compute()` 用命令
     /// 面板字体的度量，早先的 `move_selection` 却用终端字体重算一遍。
     visible_rows: RefCell<usize>,
+    /// 浮层打开的时刻，见 `OPEN_CLICK_GUARD`
+    opened_at: Instant,
+    /// 上一次应用失败的原因（写文件失败或重载失败），在页脚上方显示；
+    /// 下一次成功应用或换分区时清掉
+    error: RefCell<Option<String>>,
     element: RefCell<Option<Vec<ComputedElement>>>,
 }
 
-/// 可见行列表的缓存条目：分区 + 过滤文本一致即可复用（WZ-19）
+/// 可见行列表的缓存条目：分区 + 过滤文本（Shell 分区再加配置代数）一致
+/// 即可复用（WZ-19）。Shell 分区的行来自 launch_menu 与已存的选择，重载后
+/// 必须重建；其它分区的行与配置无关
 struct ItemsCache {
     section: Section,
     filter: String,
+    generation: usize,
     items: Rc<Vec<Item>>,
+}
+
+/// Reload the configuration after a settings write. An error when the
+/// reloaded configuration failed to load: the old one stays in effect (and
+/// the configuration error window reports why).
+fn reload_config() -> anyhow::Result<()> {
+    let before = config::configuration().generation();
+    config::reload();
+    anyhow::ensure!(
+        config::configuration().generation() != before,
+        "{}",
+        tr("Saved, but the configuration failed to reload")
+    );
+    Ok(())
 }
 
 /// Persist one settings key and reload the configuration so the change
 /// applies globally (all windows) and survives restarts.
 fn persist_and_reload(key: &str, value: &Value) -> anyhow::Result<()> {
-    config::gui_settings::store_key(key, value)?;
-    config::reload();
-    Ok(())
+    config::gui_settings::store_key(key, value).context(tr("failed to write settings"))?;
+    reload_config()
+}
+
+/// 数据行上的一次左键按下是否应用该行：双击的第二下（多击 streak > 1）
+/// 与浮层刚打开时的按下都不算——双击打开浮层的菜单项会让第二下落在某一
+/// 行上，静默改掉设置
+fn press_applies(streak: usize, since_open: Duration) -> bool {
+    streak <= 1 && since_open >= OPEN_CLICK_GUARD
 }
 
 /// 设置页读「当前值」的唯一来源：刚落地的全局配置。
@@ -161,6 +220,8 @@ impl SettingsOverlay {
             previewed_scheme: RefCell::new(None),
             items_cache: RefCell::new(None),
             visible_rows: RefCell::new(MIN_VISIBLE_ROWS),
+            opened_at: Instant::now(),
+            error: RefCell::new(None),
             element: RefCell::new(None),
         }
     }
@@ -208,20 +269,32 @@ impl SettingsOverlay {
                 Item::FontOp(FontOp::Increase),
                 Item::FontOp(FontOp::Reset),
             ],
+            Section::Shell => shell_items(
+                &current_config().launch_menu,
+                config::gui_settings::default_shell().as_deref(),
+            ),
         }
     }
 
     /// The rows visible under the current filter (all sections except
     /// Appearance are unfiltered)。
     ///
-    /// 结果按「分区 + 过滤文本」缓存：这个函数在一次按键里会被调用多次，
-    /// 而外观分区每次都要排序 1001 个名字再跑一遍模糊匹配（WZ-19）。
+    /// 结果按「分区 + 过滤文本」（Shell 分区再加配置代数）缓存：这个函数在
+    /// 一次按键里会被调用多次，而外观分区每次都要排序 1001 个名字再跑一遍
+    /// 模糊匹配（WZ-19）。
     fn visible_items(&self) -> Rc<Vec<Item>> {
         let section = *self.section.borrow();
+        let generation = match section {
+            Section::Shell => current_config().generation(),
+            _ => 0,
+        };
         {
             let cache = self.items_cache.borrow();
             if let Some(cache) = cache.as_ref() {
-                if cache.section == section && cache.filter.as_str() == *self.filter.borrow() {
+                if cache.section == section
+                    && cache.filter.as_str() == *self.filter.borrow()
+                    && cache.generation == generation
+                {
                     return Rc::clone(&cache.items);
                 }
             }
@@ -230,16 +303,20 @@ impl SettingsOverlay {
         self.items_cache.replace(Some(ItemsCache {
             section,
             filter: self.filter.borrow().clone(),
+            generation,
             items: Rc::clone(&items),
         }));
         items
     }
 
     /// `compute()` 实际 push 的 chrome 行数：标题 + 分区 tab + 页脚固定三行，
-    /// 外观分区多一行过滤框，列表为空时再多一行「(no matches)」。与
-    /// `compute()` 共用同一判据，两处口径不会分叉。
+    /// 外观分区多一行过滤框，列表为空时再多一行提示（`empty_hint`），应用
+    /// 失败时再多一行错误。与 `compute()` 共用同一判据，两处口径不会分叉。
     fn chrome_rows(&self, items_len: usize) -> usize {
-        FIXED_CHROME_ROWS + usize::from(self.filter_is_active()) + usize::from(items_len == 0)
+        FIXED_CHROME_ROWS
+            + usize::from(self.filter_is_active())
+            + usize::from(items_len == 0)
+            + usize::from(self.error.borrow().is_some())
     }
 
     /// 数据行可视区的行数，按传入度量（渲染实际使用的那份）计算
@@ -349,6 +426,7 @@ impl SettingsOverlay {
         self.top_row.replace(0);
         // the filter only applies to Appearance
         self.filter.borrow_mut().clear();
+        self.error.replace(None);
         had_preview
     }
 
@@ -444,6 +522,11 @@ impl SettingsOverlay {
         };
         // 预览是窗口级临时状态，落地前一律丢掉，让持久化后的配置成为唯一真源
         self.clear_preview(term_window);
+        if let Item::ShellChoice { id, .. } = &item {
+            self.apply_default_shell(id, term_window);
+            term_window.invalidate_modal();
+            return;
+        }
         let (key, value) = pending_write(&item, &current_config());
         // WZ-21 守卫：未知枚举 key 的 Null 哨兵不落盘（正常写入路径
         // 永远不会写 Null）
@@ -451,12 +534,46 @@ impl SettingsOverlay {
             log::warn!("settings: skip persist for unknown enum key {key:?}");
             return;
         }
-        if let Err(err) = persist_and_reload(key, &value) {
-            log::error!("settings: failed to apply: {err:#}");
-        }
+        self.report(persist_and_reload(key, &value));
         // 确认后立刻重算浮层：行标签同样读全局配置，勾选标记与「字号: 12.5」
         // 因此不必等异步 `config_was_reloaded` 回推才刷新
         term_window.invalidate_modal();
+    }
+
+    /// 落地默认 Shell：写/删 `default_shell` 后重载（Lua launch 配置据此重算
+    /// default_prog，新标签页即用新 Shell），再像 `EmitEvent` 那样发出
+    /// `gx-default-shell-changed`，由 Lua 侧让 herdr 跟随。写失败或重载失败
+    /// 时不发事件——Lua 侧还跑着旧配置，只会照旧选择去同步 herdr。重载失败时
+    /// 文件已经写下，丢掉行缓存让 ✓ 按文件里的选择重画，错误行说明它尚未生效。
+    fn apply_default_shell(&self, id: &str, term_window: &mut TermWindow) {
+        let saved = match shell_setting(id) {
+            Some(value) => config::gui_settings::store_key(DEFAULT_SHELL_KEY, &value),
+            None => config::gui_settings::delete_key(DEFAULT_SHELL_KEY),
+        };
+        let applied = saved
+            .context(tr("failed to write settings"))
+            .and_then(|()| reload_config());
+        if applied.is_err() {
+            self.items_cache.replace(None);
+        }
+        if self.report(applied) {
+            term_window.emit_window_event(DEFAULT_SHELL_CHANGED_EVENT, None);
+        }
+    }
+
+    /// 应用结果落到错误行（成功时清掉），返回是否成功
+    fn report(&self, result: anyhow::Result<()>) -> bool {
+        match result {
+            Ok(()) => {
+                self.error.replace(None);
+                true
+            }
+            Err(err) => {
+                log::error!("settings: failed to apply: {err:#}");
+                self.error.replace(Some(format!("{err:#}")));
+                false
+            }
+        }
     }
 
     /// 行标签里的当前值与 `activate` 推导下一个值读同一份配置
@@ -494,6 +611,10 @@ impl SettingsOverlay {
                 };
                 let size = config.font_size;
                 format!("  {}（{}: {size:.1}）", tr(label), tr("Font size"))
+            }
+            Item::ShellChoice { label, current, .. } => {
+                let marker = if *current { "✓ " } else { "  " };
+                format!("{marker}{label}")
             }
         }
     }
@@ -634,8 +755,9 @@ impl SettingsOverlay {
         }
 
         if items.is_empty() {
+            let hint = tr(empty_hint(section)).into_owned();
             rows.push(
-                Element::new(&font, ElementContent::Text(tr("(no matches)").into_owned()))
+                Element::new(&font, ElementContent::Text(hint))
                     .colors(ElementColors {
                         border: BorderColor::default(),
                         bg: LinearRgba::TRANSPARENT.into(),
@@ -677,6 +799,27 @@ impl SettingsOverlay {
                     .min_width(Some(Dimension::Percent(1.)))
                     .display(DisplayType::Block)
                     .item_type(UIItemType::Modal(display_idx)),
+            );
+        }
+
+        // 应用失败的原因，与壁纸浮层的行内错误同一形态（不关浮层）
+        if let Some(err) = self.error.borrow().as_ref() {
+            rows.push(
+                Element::new(&font, ElementContent::Text(format!("! {err}")))
+                    .colors(ElementColors {
+                        border: BorderColor::default(),
+                        bg: LinearRgba::TRANSPARENT.into(),
+                        text: fg.clone(),
+                    })
+                    .padding(BoxDimension {
+                        left: Dimension::Cells(0.5),
+                        right: Dimension::Cells(0.5),
+                        top: Dimension::Cells(0.),
+                        bottom: Dimension::Cells(0.),
+                    })
+                    .min_width(Some(Dimension::Percent(1.)))
+                    .display(DisplayType::Block)
+                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
             );
         }
 
@@ -801,6 +944,7 @@ fn locate_current_in(items: &[Item], config: &Config) -> usize {
         let is_current = match item {
             Item::LanguageChoice(lang, _) => *lang == config.language,
             Item::Scheme(name) => config.color_scheme.as_deref() == Some(name.as_str()),
+            Item::ShellChoice { current, .. } => *current,
             _ => false,
         };
         if is_current {
@@ -826,6 +970,53 @@ fn pending_write(item: &Item, config: &Config) -> (&'static str, Value) {
                 *op,
             ))),
         ),
+        // Shell 行不走这里：`activate` 交给 `apply_default_shell`（选 GX Zsh
+        // 时删键而不是写入）
+        Item::ShellChoice { id, .. } => (DEFAULT_SHELL_KEY, Value::String(id.clone())),
+    }
+}
+
+/// Shell 分区的行：launch_menu 里带 `GX_SHELL_ID` 的条目，按菜单顺序、同一
+/// id 只取第一条。✓（`current`）落在仍然可选的已存选择上，否则落在
+/// GX Zsh 上，再否则落在第一行。纯函数：已存选择由调用方读好传入。
+fn shell_items(launch_menu: &[SpawnCommand], saved: Option<&str>) -> Vec<Item> {
+    let mut shells: Vec<(&str, &SpawnCommand)> = vec![];
+    for entry in launch_menu {
+        match entry.set_environment_variables.get(SHELL_ID_VAR) {
+            Some(id) if !id.is_empty() && !shells.iter().any(|(seen, _)| seen == id) => {
+                shells.push((id.as_str(), entry));
+            }
+            _ => {}
+        }
+    }
+    let offered = |id: &str| shells.iter().any(|(seen, _)| *seen == id);
+    let current = match saved {
+        Some(id) if offered(id) => Some(id),
+        _ if offered(GX_ZSH_SHELL_ID) => Some(GX_ZSH_SHELL_ID),
+        _ => shells.first().map(|(id, _)| *id),
+    };
+    shells
+        .into_iter()
+        .map(|(id, entry)| Item::ShellChoice {
+            id: id.to_string(),
+            label: entry.label.clone().unwrap_or_else(|| id.to_string()),
+            current: current == Some(id),
+        })
+        .collect()
+}
+
+/// 选中某个 Shell 要写进 gui-settings.json 的值；`None` 表示删键——
+/// `default_shell` 缺省就是 GX Zsh
+fn shell_setting(id: &str) -> Option<Value> {
+    (id != GX_ZSH_SHELL_ID).then(|| Value::String(id.to_string()))
+}
+
+/// 列表为空时那一行提示：Shell 分区为空说明 launch_menu 没有任何条目带
+/// `GX_SHELL_ID`（例如用户自己的 launch.lua），而不是过滤没有命中
+fn empty_hint(section: Section) -> &'static str {
+    match section {
+        Section::Shell => "No shells to choose: no launch_menu entry is tagged with GX_SHELL_ID",
+        _ => "(no matches)",
     }
 }
 
@@ -1012,8 +1203,14 @@ impl Modal for SettingsOverlay {
                 }
             }
             WMEK::Press(::window::MousePress::Left) => {
-                self.selected.replace(row);
-                self.activate(row, term_window);
+                let streak = term_window
+                    .last_mouse_click
+                    .as_ref()
+                    .map_or(1, |click| click.streak);
+                if press_applies(streak, self.opened_at.elapsed()) {
+                    self.selected.replace(row);
+                    self.activate(row, term_window);
+                }
             }
             _ => {}
         }
@@ -1092,7 +1289,17 @@ impl Modal for SettingsOverlay {
 
 /// Convenience: open the settings overlay modally
 pub fn open_settings(term_window: &mut TermWindow) {
+    open_settings_on(term_window, Section::Language);
+}
+
+/// 「默认 Shell…」菜单项：打开设置浮层并直接落在 Shell 分区
+pub fn open_shell_settings(term_window: &mut TermWindow) {
+    open_settings_on(term_window, Section::Shell);
+}
+
+fn open_settings_on(term_window: &mut TermWindow, section: Section) {
     let modal = Rc::new(SettingsOverlay::new());
+    modal.section.replace(section);
     // WZ-18: open with the selection on the row holding the effective value
     modal.locate_current();
     term_window.set_modal(modal);
@@ -1487,5 +1694,150 @@ mod tests {
         // 运行时再守一遍鼠标路由使用的区间上界
         assert!(Section::ALL.len() <= MODAL_SECTION_MAX);
         assert!(MODAL_SECTION_BASE + Section::ALL.len() <= MODAL_CHROME_ROW);
+    }
+
+    fn shell_entry(label: Option<&str>, id: Option<&str>) -> SpawnCommand {
+        let mut entry = SpawnCommand {
+            label: label.map(str::to_string),
+            ..Default::default()
+        };
+        if let Some(id) = id {
+            entry
+                .set_environment_variables
+                .insert(SHELL_ID_VAR.to_string(), id.to_string());
+        }
+        entry
+    }
+
+    /// (id, label, current) of every row; the rows must all be shells
+    fn shell_rows(items: &[Item]) -> Vec<(String, String, bool)> {
+        items
+            .iter()
+            .map(|item| match item {
+                Item::ShellChoice { id, label, current } => (id.clone(), label.clone(), *current),
+                _ => panic!("not a shell row"),
+            })
+            .collect()
+    }
+
+    fn current_shells(items: &[Item]) -> Vec<String> {
+        shell_rows(items)
+            .into_iter()
+            .filter(|(_, _, current)| *current)
+            .map(|(id, _, _)| id)
+            .collect()
+    }
+
+    #[test]
+    fn shell_rows_come_from_tagged_launch_menu_entries() {
+        // herdr 不是 Shell（不带标记）；重复 id 只取第一条；没有 label 用 id
+        let menu = vec![
+            shell_entry(Some("GX Zsh"), Some("gx-zsh")),
+            shell_entry(Some("herdr"), None),
+            shell_entry(Some("PowerShell 7"), Some("pwsh")),
+            shell_entry(Some("PowerShell 7 again"), Some("pwsh")),
+            shell_entry(None, Some("cmd")),
+            shell_entry(Some("empty tag"), Some("")),
+        ];
+        assert_eq!(
+            shell_rows(&shell_items(&menu, None)),
+            vec![
+                ("gx-zsh".to_string(), "GX Zsh".to_string(), true),
+                ("pwsh".to_string(), "PowerShell 7".to_string(), false),
+                ("cmd".to_string(), "cmd".to_string(), false),
+            ]
+        );
+        assert!(shell_items(&[shell_entry(Some("herdr"), None)], None).is_empty());
+    }
+
+    #[test]
+    fn current_shell_is_the_saved_choice_then_gx_zsh_then_the_first_row() {
+        let menu = vec![
+            shell_entry(Some("GX Zsh"), Some("gx-zsh")),
+            shell_entry(Some("PowerShell 7"), Some("pwsh")),
+            shell_entry(Some("Ubuntu"), Some("wsl:Ubuntu")),
+        ];
+        assert_eq!(
+            current_shells(&shell_items(&menu, Some("wsl:Ubuntu"))),
+            vec!["wsl:Ubuntu"]
+        );
+        assert_eq!(current_shells(&shell_items(&menu, None)), vec!["gx-zsh"]);
+        // 已存的选择不再可选（卸载了、换了 launch.lua）时退回 GX Zsh
+        assert_eq!(
+            current_shells(&shell_items(&menu, Some("nu"))),
+            vec!["gx-zsh"]
+        );
+        // 没有 GX Zsh（未检测到 GX 包）时第一行就是默认
+        assert_eq!(
+            current_shells(&shell_items(&menu[1..], Some("nu"))),
+            vec!["pwsh"]
+        );
+    }
+
+    #[test]
+    fn choosing_gx_zsh_removes_the_saved_choice() {
+        assert_eq!(shell_setting(GX_ZSH_SHELL_ID), None);
+        assert_eq!(
+            shell_setting("pwsh"),
+            Some(Value::String("pwsh".to_string()))
+        );
+        assert_eq!(
+            shell_setting("wsl:Ubuntu"),
+            Some(Value::String("wsl:Ubuntu".to_string()))
+        );
+    }
+
+    #[test]
+    fn shell_section_marks_and_locates_the_current_shell() {
+        let menu = vec![
+            shell_entry(Some("GX Zsh"), Some("gx-zsh")),
+            shell_entry(Some("PowerShell 7"), Some("pwsh")),
+        ];
+        let items = shell_items(&menu, Some("pwsh"));
+        let config = Config::default_config();
+        assert_eq!(locate_current_in(&items, &config), 1);
+        let overlay = SettingsOverlay::new();
+        assert_eq!(overlay.row_label(&items[0], &config), "  GX Zsh");
+        assert_eq!(overlay.row_label(&items[1], &config), "✓ PowerShell 7");
+    }
+
+    #[test]
+    fn double_clicking_the_opening_menu_entry_changes_nothing() {
+        // 双击「默认 Shell…」：第二下既是多击（streak 2），又在打开后的
+        // 保护期内，落在哪一行都不应用
+        assert!(!press_applies(2, Duration::from_millis(120)));
+        assert!(!press_applies(1, Duration::from_millis(120)));
+        assert!(!press_applies(2, Duration::from_secs(3)));
+        // 打开一会儿之后的普通单击照常应用
+        assert!(press_applies(1, OPEN_CLICK_GUARD));
+        assert!(press_applies(1, Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn failed_apply_shows_an_error_row_until_the_next_success() {
+        let overlay = SettingsOverlay::new();
+        assert!(!overlay.report(Err(anyhow::anyhow!("disk full"))));
+        assert_eq!(overlay.error.borrow().as_deref(), Some("disk full"));
+        // 错误行和其它 chrome 行一样占用行预算
+        assert_eq!(overlay.chrome_rows(2), FIXED_CHROME_ROWS + 1);
+        assert!(overlay.report(Ok(())));
+        assert!(overlay.error.borrow().is_none());
+        assert_eq!(overlay.chrome_rows(2), FIXED_CHROME_ROWS);
+        // 换分区也清掉
+        overlay.report(Err(anyhow::anyhow!("again")));
+        overlay.select_section(1);
+        assert!(overlay.error.borrow().is_none());
+    }
+
+    #[test]
+    fn empty_shell_section_explains_the_missing_tags() {
+        // 自定义 launch.lua 没打标记时要说明原因，而不是显示「无匹配项」
+        assert!(empty_hint(Section::Shell).contains(SHELL_ID_VAR));
+        assert_eq!(empty_hint(Section::Appearance), "(no matches)");
+        let overlay = SettingsOverlay::new();
+        overlay.select_section_index(Section::ALL.len() - 1);
+        assert_eq!(*overlay.section.borrow(), Section::Shell);
+        // 提示与「(no matches)」一样占一行 chrome
+        assert_eq!(overlay.chrome_rows(0), FIXED_CHROME_ROWS + 1);
     }
 }

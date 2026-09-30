@@ -337,11 +337,7 @@ impl CommandDef {
         // And sweep to pick up stuff from their key assignments
         let inputmap = InputMap::new(config);
         for ((keycode, mods), entry) in inputmap.keys.default.iter() {
-            if result
-                .iter()
-                .position(|cmd| cmd.action == entry.action)
-                .is_some()
-            {
+            if add_key_to_command(&mut result, &entry.action, *mods, keycode) {
                 continue;
             }
             if let Some(cmd) = derive_command_from_key_assignment(&entry.action) {
@@ -619,6 +615,28 @@ fn localized_ordinal(n: isize) -> String {
 // `brief: fillc(..)` and `brief: fillc(..).into()` spellings compile
 fn fillc(template: &str, args: &[(&str, &str)]) -> Cow<'static, str> {
     Cow::Owned(fill(template, args))
+}
+
+/// fork: list a bound key on the existing command for `action`, if there
+/// is one, and report whether there was. With disable_default_key_bindings
+/// the built-in commands carry no keys, so dropping the user's own bindings
+/// for them left the palette and the keybinds overlay without any.
+fn add_key_to_command(
+    commands: &mut [ExpandedCommand],
+    action: &KeyAssignment,
+    mods: Modifiers,
+    keycode: &KeyCode,
+) -> bool {
+    match commands.iter_mut().find(|cmd| cmd.action == *action) {
+        Some(cmd) => {
+            let key = (mods, keycode.clone());
+            if !cmd.keys.contains(&key) {
+                cmd.keys.push(key);
+            }
+            true
+        }
+        None => false,
+    }
 }
 
 /// fork: format the keycap label shown beside a command (shared by the
@@ -2274,6 +2292,14 @@ pub fn derive_command_from_key_assignment(action: &KeyAssignment) -> Option<Comm
             menubar: &["WezTerm"],
             icon: Some("md_cog"),
         },
+        ShowDefaultShellSettings => CommandDef {
+            brief: "Default Shell…".into(),
+            doc: "Shows the settings overlay on its Shell section".into(),
+            keys: vec![],
+            args: &[ArgType::ActiveWindow],
+            menubar: &["WezTerm"],
+            icon: Some("md_console"),
+        },
         ShowMainMenu => CommandDef {
             brief: "Show Main Menu".into(),
             doc: "Shows the main menu overlay".into(),
@@ -2350,6 +2376,7 @@ fn compute_default_actions() -> Vec<KeyAssignment> {
         ClearKeyTableStack,
         ActivateCommandPalette,
         OpenSettings,
+        ShowDefaultShellSettings,
         ShowMainMenu,
         ShowKeybinds,
         ShowPaneContextMenu,
@@ -2494,6 +2521,48 @@ mod tests {
         let def = derive_command_from_key_assignment(&KeyAssignment::SendString("ls -la".into()))
             .expect("SendString maps to a command");
         assert!(def.brief.contains("ls -la"), "{}", def.brief);
+    }
+
+    #[test]
+    fn user_keys_show_on_built_in_commands_without_default_bindings() {
+        // fork: GX sets disable_default_key_bindings and binds its own
+        // keys; the palette and the keybinds overlay must still show them.
+        // With default bindings disabled the built-in command has no keys.
+        let copy = CopyTo(ClipboardCopyDestination::Clipboard);
+        let def = derive_command_from_key_assignment(&copy).expect("CopyTo is a command");
+        let mut commands = vec![ExpandedCommand {
+            brief: def.brief,
+            doc: def.doc,
+            action: copy.clone(),
+            keys: vec![],
+            menubar: def.menubar,
+            icon: None,
+        }];
+        let user_key = (Modifiers::CTRL, KeyCode::Char('C'));
+
+        assert!(add_key_to_command(
+            &mut commands,
+            &copy,
+            user_key.0,
+            &user_key.1
+        ));
+        // The same key bound twice is listed once, on the one command
+        assert!(add_key_to_command(
+            &mut commands,
+            &copy,
+            user_key.0,
+            &user_key.1
+        ));
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].keys, vec![user_key.clone()]);
+        // An action without a command is left to the caller
+        assert!(!add_key_to_command(
+            &mut commands,
+            &Nop,
+            user_key.0,
+            &user_key.1
+        ));
+        assert_eq!(commands.len(), 1);
     }
 
     #[test]

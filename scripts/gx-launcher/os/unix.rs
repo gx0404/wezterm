@@ -1,5 +1,5 @@
 use super::{invalid, Layout};
-use std::fs::Permissions;
+use std::fs::{self, Metadata, Permissions};
 use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
@@ -29,6 +29,10 @@ pub fn layout(bin: &Path) -> io::Result<Layout> {
 
 pub fn make_writable(permissions: &mut Permissions) {
     permissions.set_mode(permissions.mode() | 0o600);
+}
+
+pub fn keep_mode(original: &Metadata, path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, original.permissions())
 }
 
 pub fn launch(mut command: Command) -> io::Result<()> {
