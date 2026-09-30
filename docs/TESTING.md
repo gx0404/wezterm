@@ -79,10 +79,12 @@ cargo nextest run --locked -p wezterm-escape-parser
 
 ## CI（GX）
 
-`.github/workflows/gx-ci.yml` 在 `feature/gx_wezterm` 的 push、目标为该分支的
+`.github/workflows/gx-ci.yml` 在 `gx` 的 push、目标为该分支的
 PR 时自动运行，也支持手动运行；不按文件类型过滤，避免漏掉 Lua、脚本或规则变更。
 
-- 快速检查：resolver 闭集、框架配置、版本、Python 框架测试与 nightly rustfmt。
+- 快速检查：resolver 闭集、框架配置、版本、冻结配置指纹、Python 框架测试与 nightly rustfmt。
+  `gx_config_fingerprints.py --check` 不依赖发布 Git 对象；单测覆盖无 Git 归档、
+  任意父目录、历史指纹金标及显式发布对象审计。
 - Ubuntu 24.04 / Windows 2025：类型检查、四个产品二进制构建、nextest 全量测试，
   以及 escape-parser 独立 no_std 测试轮。Rust 与 nextest 版本分别读取现有打包
   脚本与环境安装脚本的钉版声明。

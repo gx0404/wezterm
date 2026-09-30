@@ -1,0 +1,822 @@
+{
+  "schema": 1,
+  "algorithm": "fnv1a64-crlf-v1",
+  "releases": [
+    {
+      "name": "WezTerm GX 0.3.0 (gx0404/wezterm tag gx-v0.3.0)",
+      "repository": "https://github.com/gx0404/wezterm",
+      "tag": "gx-v0.3.0",
+      "commit": "97d2768b288a16a854f733bfb45ed8f8bf18173a",
+      "prefix": "dotfiles/wezterm-config",
+      "tree": "23d3dc9642c1b125c1a575dc07e2b09fb8b8e659",
+      "files": [
+        {
+          "path": ".luacheckrc",
+          "blob": "a7c547e7911de67770faad546d37dbf2c4fa87e5",
+          "length": 162,
+          "fnv1a64": "edf5fe3ce95ee9a1"
+        },
+        {
+          "path": ".luarc.json",
+          "blob": "3185c5eb261b88a20ebeda20635547d9ce95fb2a",
+          "length": 98,
+          "fnv1a64": "3e11f68a3f1846c3"
+        },
+        {
+          "path": ".stylua.toml",
+          "blob": "6f9b3803bcf785aca347c9d16748c26bebca0807",
+          "length": 160,
+          "fnv1a64": "e7edf6c2507f8c0e"
+        },
+        {
+          "path": "LICENSE",
+          "blob": "7b7df01d9f8f7f40cf102251bcb308e34eee5969",
+          "length": 1072,
+          "fnv1a64": "d362530db926071e"
+        },
+        {
+          "path": "README.md",
+          "blob": "f6dabfc4a7756a65175ce2b89547e3e8f9cf5901",
+          "length": 13126,
+          "fnv1a64": "9d38fa3beea41b24"
+        },
+        {
+          "path": "backdrops/5-cm.jpg",
+          "blob": "6824e948ac931daee08e9eb84809630dbf42327b",
+          "length": 1589150,
+          "fnv1a64": "47815fafdb6d3c66"
+        },
+        {
+          "path": "backdrops/angry-samurai.jpg",
+          "blob": "91fe1c750c8a4006c476d78b43c947cff841075c",
+          "length": 2039381,
+          "fnv1a64": "8d6114b41f0bb1a5"
+        },
+        {
+          "path": "backdrops/appa.jpg",
+          "blob": "7268ca622b26088ce5aad67a154bbe9fb6a4fbbe",
+          "length": 573689,
+          "fnv1a64": "5c095de0b113a11c"
+        },
+        {
+          "path": "backdrops/astro-jelly.jpg",
+          "blob": "2b71e53363958fc476e1b4e047d944f1c86d76e4",
+          "length": 1305454,
+          "fnv1a64": "27c2d7e7d4428fc5"
+        },
+        {
+          "path": "backdrops/cherry-lava.jpg",
+          "blob": "893e5c85d35e7e9fea556a6fc4ed355d8c150176",
+          "length": 307028,
+          "fnv1a64": "555e55eecaa67c8b"
+        },
+        {
+          "path": "backdrops/cloudy-quasar.png",
+          "blob": "466211e096a3fa9c7e58d28a84d6c6f7a5cd3f17",
+          "length": 2307373,
+          "fnv1a64": "0f4bbc38556af7ae"
+        },
+        {
+          "path": "backdrops/final-showdown.jpg",
+          "blob": "71e6fec6c5319fc219446041c229b250049690e8",
+          "length": 1026342,
+          "fnv1a64": "d5a32cd8cdfd314d"
+        },
+        {
+          "path": "backdrops/frieren.jpeg",
+          "blob": "f355dfc11803df824b442e178d659e9e29aa7c14",
+          "length": 1438718,
+          "fnv1a64": "d12213c39d1ba701"
+        },
+        {
+          "path": "backdrops/house.jpg",
+          "blob": "be35dc7bf8b3879c68c19bee121576ced1cf73a1",
+          "length": 812328,
+          "fnv1a64": "c5ae651d924b5d2a"
+        },
+        {
+          "path": "backdrops/nord-space.png",
+          "blob": "17e4973de9417e4893954c4c83cc2f0df1bb7829",
+          "length": 1775458,
+          "fnv1a64": "072c86ac83caf9fe"
+        },
+        {
+          "path": "backdrops/pastel-samurai.jpg",
+          "blob": "267b6a650785b643b0b07ed0e762f76ce2bfd3a3",
+          "length": 1984856,
+          "fnv1a64": "ec2478dc75303dea"
+        },
+        {
+          "path": "backdrops/space.jpg",
+          "blob": "fde2328cc6bbf07d40836d38547fcd15c6e88a94",
+          "length": 832007,
+          "fnv1a64": "f9501644e30a39b6"
+        },
+        {
+          "path": "backdrops/sunset.jpg",
+          "blob": "c696666b0b393825cb99557b364978d4b8579091",
+          "length": 802391,
+          "fnv1a64": "16e1e7f4324afd7a"
+        },
+        {
+          "path": "backdrops/sword.jpg",
+          "blob": "01074ab992321f8ed5d1e68329aacb8da4b7a9f3",
+          "length": 1265164,
+          "fnv1a64": "fdf4e0f00d0c7aac"
+        },
+        {
+          "path": "backdrops/totoro.jpeg",
+          "blob": "f8b1283427dbc7b380852f56b980071550ce4ace",
+          "length": 206038,
+          "fnv1a64": "3191a6aedeb5fd00"
+        },
+        {
+          "path": "backdrops/voyage.jpg",
+          "blob": "4befee02dcf309727a625e1253626f0bb81fe0ec",
+          "length": 1125282,
+          "fnv1a64": "5ef1eb01e27bd64d"
+        },
+        {
+          "path": "colors/custom.lua",
+          "blob": "cd7c87f982d45f4e2d059e586ef894cd89b6e604",
+          "length": 2280,
+          "fnv1a64": "0844430600c260a9"
+        },
+        {
+          "path": "config/appearance.lua",
+          "blob": "167637ae5a9595e4dd3c3599c86565fd9788b610",
+          "length": 1820,
+          "fnv1a64": "e6360d5884af5b58"
+        },
+        {
+          "path": "config/bindings.lua",
+          "blob": "b14ea4fae7a8e111a721344c57776febbc8876da",
+          "length": 15397,
+          "fnv1a64": "8be51bddd3937bc0"
+        },
+        {
+          "path": "config/domains.lua",
+          "blob": "cb8c362db8c03e3dc1c99cf3a728627ccfcd3d22",
+          "length": 411,
+          "fnv1a64": "867228ccbd690ac6"
+        },
+        {
+          "path": "config/fonts.lua",
+          "blob": "9ddb2c8d289d349b6d09e985a14542d7ecfb8385",
+          "length": 1890,
+          "fnv1a64": "a37a39116999ce90"
+        },
+        {
+          "path": "config/general.lua",
+          "blob": "9225c239b75874b22b986718ec5b372264ce6b83",
+          "length": 2314,
+          "fnv1a64": "41615a3d8c2e0076"
+        },
+        {
+          "path": "config/init.lua",
+          "blob": "88ef5acc59900c6798782e175b8849399e100472",
+          "length": 734,
+          "fnv1a64": "51061c9fe31dd376"
+        },
+        {
+          "path": "config/launch.lua",
+          "blob": "25883f5ce7e28cb51b4ce08383f8fdd1f515c6b9",
+          "length": 1935,
+          "fnv1a64": "3a570763d22be724"
+        },
+        {
+          "path": "config/plugins.lua",
+          "blob": "b541741fbde59d83a153ea01b8cebcdc196b3b77",
+          "length": 1053,
+          "fnv1a64": "0d6926ef9d3b2c19"
+        },
+        {
+          "path": "events/gui-startup.lua",
+          "blob": "c1e23ad2b31c9ff5830fa5dbc2dbf6903171fa21",
+          "length": 255,
+          "fnv1a64": "742dd40974098aed"
+        },
+        {
+          "path": "events/new-tab-button.lua",
+          "blob": "481aa0d8a4d819f17dc43f0dd2be2cbc9bb5ca0d",
+          "length": 3862,
+          "fnv1a64": "a3edbae9631db4e4"
+        },
+        {
+          "path": "events/right-status.lua",
+          "blob": "91742938abcda9748fcf88d438583ba7e9644741",
+          "length": 4202,
+          "fnv1a64": "e1802eeec324d187"
+        },
+        {
+          "path": "events/status.lua",
+          "blob": "1f60730efdb93ee3b47fcf4714ef641252f6beba",
+          "length": 8225,
+          "fnv1a64": "c3d566a8a993def1"
+        },
+        {
+          "path": "events/tab-title.lua",
+          "blob": "111627f6003603c9cad34beb3603a4ae24da8b3a",
+          "length": 14120,
+          "fnv1a64": "5c27912db06f8be6"
+        },
+        {
+          "path": "tests/pure_fn_test.lua",
+          "blob": "28cdfbc86b65aae00e2cfb6ce6fe222b83601907",
+          "length": 11835,
+          "fnv1a64": "fbd5ed26045a336a"
+        },
+        {
+          "path": "utils/backdrops.lua",
+          "blob": "2e618b3b495e96bacab7f5ba381c78111e458996",
+          "length": 8845,
+          "fnv1a64": "08e07fc298655652"
+        },
+        {
+          "path": "utils/cells.lua",
+          "blob": "a8034047ed1415b5042695b4c8e830a61110da0f",
+          "length": 6590,
+          "fnv1a64": "17489153bbc411c2"
+        },
+        {
+          "path": "utils/math.lua",
+          "blob": "4fcc51bcb304ab94a615af20eb6a6c10208eeb23",
+          "length": 289,
+          "fnv1a64": "7d53b7a8a439011b"
+        },
+        {
+          "path": "utils/opts-validator.lua",
+          "blob": "ddf9c089be57a65f9a431283b007a87d4dc89f48",
+          "length": 4882,
+          "fnv1a64": "67dbd2c11f3472b1"
+        },
+        {
+          "path": "utils/platform.lua",
+          "blob": "b06d639b810d9ed7ca05f6946dcaa9122cea3d81",
+          "length": 803,
+          "fnv1a64": "d67efc2c53239479"
+        },
+        {
+          "path": "wezterm.lua",
+          "blob": "ac814d7a2941e4198b7084c1812d64eabbec7ecc",
+          "length": 1395,
+          "fnv1a64": "77cb9dbcfc9c278d"
+        }
+      ]
+    },
+    {
+      "name": "GX Shell 0.1.0 (tag gx-shell-v0.1.0)",
+      "repository": "https://github.com/gx0404/gx_shell",
+      "tag": "gx-shell-v0.1.0",
+      "commit": "b0f5d696e5a8b9ce8efa03cb0269525056499c08",
+      "prefix": "wezterm/dotfiles/wezterm-config",
+      "tree": "d030c7aa4aa6fa30dfdd7a573fd86ea3e9151b85",
+      "files": [
+        {
+          "path": ".luacheckrc",
+          "blob": "a7c547e7911de67770faad546d37dbf2c4fa87e5",
+          "length": 162,
+          "fnv1a64": "edf5fe3ce95ee9a1"
+        },
+        {
+          "path": ".luarc.json",
+          "blob": "3185c5eb261b88a20ebeda20635547d9ce95fb2a",
+          "length": 98,
+          "fnv1a64": "3e11f68a3f1846c3"
+        },
+        {
+          "path": ".stylua.toml",
+          "blob": "6f9b3803bcf785aca347c9d16748c26bebca0807",
+          "length": 160,
+          "fnv1a64": "e7edf6c2507f8c0e"
+        },
+        {
+          "path": "LICENSE",
+          "blob": "7b7df01d9f8f7f40cf102251bcb308e34eee5969",
+          "length": 1072,
+          "fnv1a64": "d362530db926071e"
+        },
+        {
+          "path": "README.md",
+          "blob": "f6dabfc4a7756a65175ce2b89547e3e8f9cf5901",
+          "length": 13126,
+          "fnv1a64": "9d38fa3beea41b24"
+        },
+        {
+          "path": "backdrops/5-cm.jpg",
+          "blob": "6824e948ac931daee08e9eb84809630dbf42327b",
+          "length": 1589150,
+          "fnv1a64": "47815fafdb6d3c66"
+        },
+        {
+          "path": "backdrops/angry-samurai.jpg",
+          "blob": "91fe1c750c8a4006c476d78b43c947cff841075c",
+          "length": 2039381,
+          "fnv1a64": "8d6114b41f0bb1a5"
+        },
+        {
+          "path": "backdrops/appa.jpg",
+          "blob": "7268ca622b26088ce5aad67a154bbe9fb6a4fbbe",
+          "length": 573689,
+          "fnv1a64": "5c095de0b113a11c"
+        },
+        {
+          "path": "backdrops/astro-jelly.jpg",
+          "blob": "2b71e53363958fc476e1b4e047d944f1c86d76e4",
+          "length": 1305454,
+          "fnv1a64": "27c2d7e7d4428fc5"
+        },
+        {
+          "path": "backdrops/cherry-lava.jpg",
+          "blob": "893e5c85d35e7e9fea556a6fc4ed355d8c150176",
+          "length": 307028,
+          "fnv1a64": "555e55eecaa67c8b"
+        },
+        {
+          "path": "backdrops/cloudy-quasar.png",
+          "blob": "466211e096a3fa9c7e58d28a84d6c6f7a5cd3f17",
+          "length": 2307373,
+          "fnv1a64": "0f4bbc38556af7ae"
+        },
+        {
+          "path": "backdrops/final-showdown.jpg",
+          "blob": "71e6fec6c5319fc219446041c229b250049690e8",
+          "length": 1026342,
+          "fnv1a64": "d5a32cd8cdfd314d"
+        },
+        {
+          "path": "backdrops/frieren.jpeg",
+          "blob": "f355dfc11803df824b442e178d659e9e29aa7c14",
+          "length": 1438718,
+          "fnv1a64": "d12213c39d1ba701"
+        },
+        {
+          "path": "backdrops/house.jpg",
+          "blob": "be35dc7bf8b3879c68c19bee121576ced1cf73a1",
+          "length": 812328,
+          "fnv1a64": "c5ae651d924b5d2a"
+        },
+        {
+          "path": "backdrops/nord-space.png",
+          "blob": "17e4973de9417e4893954c4c83cc2f0df1bb7829",
+          "length": 1775458,
+          "fnv1a64": "072c86ac83caf9fe"
+        },
+        {
+          "path": "backdrops/pastel-samurai.jpg",
+          "blob": "267b6a650785b643b0b07ed0e762f76ce2bfd3a3",
+          "length": 1984856,
+          "fnv1a64": "ec2478dc75303dea"
+        },
+        {
+          "path": "backdrops/space.jpg",
+          "blob": "fde2328cc6bbf07d40836d38547fcd15c6e88a94",
+          "length": 832007,
+          "fnv1a64": "f9501644e30a39b6"
+        },
+        {
+          "path": "backdrops/sunset.jpg",
+          "blob": "c696666b0b393825cb99557b364978d4b8579091",
+          "length": 802391,
+          "fnv1a64": "16e1e7f4324afd7a"
+        },
+        {
+          "path": "backdrops/sword.jpg",
+          "blob": "01074ab992321f8ed5d1e68329aacb8da4b7a9f3",
+          "length": 1265164,
+          "fnv1a64": "fdf4e0f00d0c7aac"
+        },
+        {
+          "path": "backdrops/totoro.jpeg",
+          "blob": "f8b1283427dbc7b380852f56b980071550ce4ace",
+          "length": 206038,
+          "fnv1a64": "3191a6aedeb5fd00"
+        },
+        {
+          "path": "backdrops/voyage.jpg",
+          "blob": "4befee02dcf309727a625e1253626f0bb81fe0ec",
+          "length": 1125282,
+          "fnv1a64": "5ef1eb01e27bd64d"
+        },
+        {
+          "path": "colors/custom.lua",
+          "blob": "cd7c87f982d45f4e2d059e586ef894cd89b6e604",
+          "length": 2280,
+          "fnv1a64": "0844430600c260a9"
+        },
+        {
+          "path": "config/appearance.lua",
+          "blob": "167637ae5a9595e4dd3c3599c86565fd9788b610",
+          "length": 1820,
+          "fnv1a64": "e6360d5884af5b58"
+        },
+        {
+          "path": "config/bindings.lua",
+          "blob": "b14ea4fae7a8e111a721344c57776febbc8876da",
+          "length": 15397,
+          "fnv1a64": "8be51bddd3937bc0"
+        },
+        {
+          "path": "config/domains.lua",
+          "blob": "cb8c362db8c03e3dc1c99cf3a728627ccfcd3d22",
+          "length": 411,
+          "fnv1a64": "867228ccbd690ac6"
+        },
+        {
+          "path": "config/fonts.lua",
+          "blob": "9ddb2c8d289d349b6d09e985a14542d7ecfb8385",
+          "length": 1890,
+          "fnv1a64": "a37a39116999ce90"
+        },
+        {
+          "path": "config/general.lua",
+          "blob": "9225c239b75874b22b986718ec5b372264ce6b83",
+          "length": 2314,
+          "fnv1a64": "41615a3d8c2e0076"
+        },
+        {
+          "path": "config/init.lua",
+          "blob": "88ef5acc59900c6798782e175b8849399e100472",
+          "length": 734,
+          "fnv1a64": "51061c9fe31dd376"
+        },
+        {
+          "path": "config/launch.lua",
+          "blob": "4bcd2bedec0cf845fd25856e5d0f7c7587b63f3a",
+          "length": 2339,
+          "fnv1a64": "7586010e9f4ed8dc"
+        },
+        {
+          "path": "config/plugins.lua",
+          "blob": "b541741fbde59d83a153ea01b8cebcdc196b3b77",
+          "length": 1053,
+          "fnv1a64": "0d6926ef9d3b2c19"
+        },
+        {
+          "path": "events/gui-startup.lua",
+          "blob": "c1e23ad2b31c9ff5830fa5dbc2dbf6903171fa21",
+          "length": 255,
+          "fnv1a64": "742dd40974098aed"
+        },
+        {
+          "path": "events/new-tab-button.lua",
+          "blob": "481aa0d8a4d819f17dc43f0dd2be2cbc9bb5ca0d",
+          "length": 3862,
+          "fnv1a64": "a3edbae9631db4e4"
+        },
+        {
+          "path": "events/right-status.lua",
+          "blob": "91742938abcda9748fcf88d438583ba7e9644741",
+          "length": 4202,
+          "fnv1a64": "e1802eeec324d187"
+        },
+        {
+          "path": "events/status.lua",
+          "blob": "1f60730efdb93ee3b47fcf4714ef641252f6beba",
+          "length": 8225,
+          "fnv1a64": "c3d566a8a993def1"
+        },
+        {
+          "path": "events/tab-title.lua",
+          "blob": "111627f6003603c9cad34beb3603a4ae24da8b3a",
+          "length": 14120,
+          "fnv1a64": "5c27912db06f8be6"
+        },
+        {
+          "path": "tests/pure_fn_test.lua",
+          "blob": "8682da60b7b999df1001fdc517047ff1c49f8266",
+          "length": 13546,
+          "fnv1a64": "31da1810ef3ca72a"
+        },
+        {
+          "path": "utils/backdrops.lua",
+          "blob": "2e618b3b495e96bacab7f5ba381c78111e458996",
+          "length": 8845,
+          "fnv1a64": "08e07fc298655652"
+        },
+        {
+          "path": "utils/cells.lua",
+          "blob": "a8034047ed1415b5042695b4c8e830a61110da0f",
+          "length": 6590,
+          "fnv1a64": "17489153bbc411c2"
+        },
+        {
+          "path": "utils/gx-shell.lua",
+          "blob": "4c302aa251c340266a2adf556c3600267c41e4e0",
+          "length": 1665,
+          "fnv1a64": "d67a15a42c09f5f8"
+        },
+        {
+          "path": "utils/math.lua",
+          "blob": "4fcc51bcb304ab94a615af20eb6a6c10208eeb23",
+          "length": 289,
+          "fnv1a64": "7d53b7a8a439011b"
+        },
+        {
+          "path": "utils/opts-validator.lua",
+          "blob": "ddf9c089be57a65f9a431283b007a87d4dc89f48",
+          "length": 4882,
+          "fnv1a64": "67dbd2c11f3472b1"
+        },
+        {
+          "path": "utils/platform.lua",
+          "blob": "b06d639b810d9ed7ca05f6946dcaa9122cea3d81",
+          "length": 803,
+          "fnv1a64": "d67efc2c53239479"
+        },
+        {
+          "path": "wezterm.lua",
+          "blob": "ac814d7a2941e4198b7084c1812d64eabbec7ecc",
+          "length": 1395,
+          "fnv1a64": "77cb9dbcfc9c278d"
+        }
+      ]
+    },
+    {
+      "name": "GX Shell 0.2.0 (tag gx-shell-v0.2.0)",
+      "repository": "https://github.com/gx0404/gx_shell",
+      "tag": "gx-shell-v0.2.0",
+      "commit": "ee1905f121c6671f86aa7f3b3761ebb18053cf1a",
+      "prefix": "wezterm/dotfiles/wezterm-config",
+      "tree": "89cc6cd81181d3cfc2bd0095101ae055df5ba715",
+      "files": [
+        {
+          "path": ".luacheckrc",
+          "blob": "a7c547e7911de67770faad546d37dbf2c4fa87e5",
+          "length": 162,
+          "fnv1a64": "edf5fe3ce95ee9a1"
+        },
+        {
+          "path": ".luarc.json",
+          "blob": "3185c5eb261b88a20ebeda20635547d9ce95fb2a",
+          "length": 98,
+          "fnv1a64": "3e11f68a3f1846c3"
+        },
+        {
+          "path": ".stylua.toml",
+          "blob": "6f9b3803bcf785aca347c9d16748c26bebca0807",
+          "length": 160,
+          "fnv1a64": "e7edf6c2507f8c0e"
+        },
+        {
+          "path": "LICENSE",
+          "blob": "7b7df01d9f8f7f40cf102251bcb308e34eee5969",
+          "length": 1072,
+          "fnv1a64": "d362530db926071e"
+        },
+        {
+          "path": "README.md",
+          "blob": "486b568c5fc436b5d2e1e48100b4104e8dda802d",
+          "length": 21621,
+          "fnv1a64": "cd4e5efdd62964ca"
+        },
+        {
+          "path": "backdrops/5-cm.jpg",
+          "blob": "3ff6b625bb73e70ef0be0be165ba97662939933c",
+          "length": 348600,
+          "fnv1a64": "9f673d7af23b8dd9"
+        },
+        {
+          "path": "backdrops/angry-samurai.jpg",
+          "blob": "9d9ffdfd218f1476e8de7673499fcd58cd6adc67",
+          "length": 347970,
+          "fnv1a64": "efbf946cbfb72859"
+        },
+        {
+          "path": "backdrops/appa.jpg",
+          "blob": "e9e340d2c7b5686a141833b1b2f6aed2884c96c5",
+          "length": 157151,
+          "fnv1a64": "ef0d3e1576d105cf"
+        },
+        {
+          "path": "backdrops/astro-jelly.jpg",
+          "blob": "291964efdc95a6cd4ad4b27ef7cef80b5c389e8f",
+          "length": 225945,
+          "fnv1a64": "83e723e5af346363"
+        },
+        {
+          "path": "backdrops/cherry-lava.jpg",
+          "blob": "a733ad5e10922e7acdb5f64a2e6d20b016e9c488",
+          "length": 168481,
+          "fnv1a64": "15a99dc2edd06770"
+        },
+        {
+          "path": "backdrops/cloudy-quasar.png",
+          "blob": "5b123ef837e154fec6ee283c1b30736124be42e0",
+          "length": 879351,
+          "fnv1a64": "7cdf1efa8293ccd6"
+        },
+        {
+          "path": "backdrops/final-showdown.jpg",
+          "blob": "1ea7f269c0357cc27716d0fb0689a6264d64e11d",
+          "length": 448061,
+          "fnv1a64": "e90c221b68c66782"
+        },
+        {
+          "path": "backdrops/frieren.jpeg",
+          "blob": "ef4a91dfb931e5178d01bbe083e580293f869c8d",
+          "length": 326992,
+          "fnv1a64": "3caae5da7ca9d081"
+        },
+        {
+          "path": "backdrops/house.jpg",
+          "blob": "73aa6cacaa095abb6bf9f1364753fa5a6286da6d",
+          "length": 276287,
+          "fnv1a64": "c222b773919f7e03"
+        },
+        {
+          "path": "backdrops/nord-space.png",
+          "blob": "69368421e7d91f43a9acc88955050490f5b6e202",
+          "length": 736705,
+          "fnv1a64": "cb6c36ead400ce98"
+        },
+        {
+          "path": "backdrops/pastel-samurai.jpg",
+          "blob": "a742441ba938db6f9c55c795233bcc566ecb9c31",
+          "length": 856432,
+          "fnv1a64": "9be342915476ed4d"
+        },
+        {
+          "path": "backdrops/space.jpg",
+          "blob": "1e20a8847c1217ca45a5511ba3457434d7c20037",
+          "length": 370234,
+          "fnv1a64": "256cc356322bc7e9"
+        },
+        {
+          "path": "backdrops/sunset.jpg",
+          "blob": "fb95f61a85c687493719602716864ee7a8b81e8e",
+          "length": 279826,
+          "fnv1a64": "00ec163cfb4ed098"
+        },
+        {
+          "path": "backdrops/sword.jpg",
+          "blob": "c5e616e28a0a0eee3dfe606549f48237abe92bd7",
+          "length": 276557,
+          "fnv1a64": "a3f7275e3de122f5"
+        },
+        {
+          "path": "backdrops/totoro.jpeg",
+          "blob": "fcf4e10affb046b82fcf15c778e1a02492827ff7",
+          "length": 102307,
+          "fnv1a64": "140cc1c64eba19ad"
+        },
+        {
+          "path": "backdrops/voyage.jpg",
+          "blob": "f6f75046d9355534a7abe488a812544cb03d0667",
+          "length": 455216,
+          "fnv1a64": "047b410f4057748e"
+        },
+        {
+          "path": "colors/custom.lua",
+          "blob": "cd7c87f982d45f4e2d059e586ef894cd89b6e604",
+          "length": 2280,
+          "fnv1a64": "0844430600c260a9"
+        },
+        {
+          "path": "config/appearance.lua",
+          "blob": "9aed06908374d5da1cdd2717b8bce0770cc3aa3e",
+          "length": 2223,
+          "fnv1a64": "8af0bb4cc9bf1009"
+        },
+        {
+          "path": "config/bindings.lua",
+          "blob": "3e5bf0313792844d1f883eb7b2fae10f09501efe",
+          "length": 17086,
+          "fnv1a64": "a9908a86f0c52818"
+        },
+        {
+          "path": "config/domains.lua",
+          "blob": "93192cf7a2f27012cd61a6e5d15680c204761281",
+          "length": 443,
+          "fnv1a64": "b2207f12b146ffc1"
+        },
+        {
+          "path": "config/fonts.lua",
+          "blob": "d4502aa5dbc4fb14cc6d9e9cae2af1f7feb1d0b8",
+          "length": 2481,
+          "fnv1a64": "e91ece418126a5f1"
+        },
+        {
+          "path": "config/general.lua",
+          "blob": "016df02f18a1aba1dc4c1af6708fc49912209166",
+          "length": 3337,
+          "fnv1a64": "e3ec0c747d5210fd"
+        },
+        {
+          "path": "config/init.lua",
+          "blob": "88ef5acc59900c6798782e175b8849399e100472",
+          "length": 734,
+          "fnv1a64": "51061c9fe31dd376"
+        },
+        {
+          "path": "config/launch.lua",
+          "blob": "8903421bc81f09b7cafd6aed284cc85b0d68161f",
+          "length": 2902,
+          "fnv1a64": "acbb32fcadb415af"
+        },
+        {
+          "path": "config/plugins.lua",
+          "blob": "82912e8f6adc024d9336e5b5783792a59243d682",
+          "length": 3188,
+          "fnv1a64": "a801f27f7049e2a3"
+        },
+        {
+          "path": "events/gui-startup.lua",
+          "blob": "c1e23ad2b31c9ff5830fa5dbc2dbf6903171fa21",
+          "length": 255,
+          "fnv1a64": "742dd40974098aed"
+        },
+        {
+          "path": "events/new-tab-button.lua",
+          "blob": "8c99914037fec6941a9bbbe33123b311a6f16b6c",
+          "length": 4364,
+          "fnv1a64": "a8dbc230cb084661"
+        },
+        {
+          "path": "events/right-status.lua",
+          "blob": "91742938abcda9748fcf88d438583ba7e9644741",
+          "length": 4202,
+          "fnv1a64": "e1802eeec324d187"
+        },
+        {
+          "path": "events/status.lua",
+          "blob": "8f009ebe857fe8bc143fbf07f69f6a9f9b8d69c0",
+          "length": 9940,
+          "fnv1a64": "4cde7b4b798be894"
+        },
+        {
+          "path": "events/tab-title.lua",
+          "blob": "111627f6003603c9cad34beb3603a4ae24da8b3a",
+          "length": 14120,
+          "fnv1a64": "5c27912db06f8be6"
+        },
+        {
+          "path": "tests/pure_fn_test.lua",
+          "blob": "a2242e501acfbb15e213bd3b574cdcdc8c3d72ab",
+          "length": 27485,
+          "fnv1a64": "92f52ab23f77c36f"
+        },
+        {
+          "path": "utils/backdrops.lua",
+          "blob": "d9517d047d5ea215efa51f6177a109f4e4051cf9",
+          "length": 8920,
+          "fnv1a64": "a4c536c92c658080"
+        },
+        {
+          "path": "utils/cells.lua",
+          "blob": "a8034047ed1415b5042695b4c8e830a61110da0f",
+          "length": 6590,
+          "fnv1a64": "17489153bbc411c2"
+        },
+        {
+          "path": "utils/gui-settings.lua",
+          "blob": "616eb1525658a2f26c0fa0c27e880fbf96ccf109",
+          "length": 1876,
+          "fnv1a64": "412283681ca89512"
+        },
+        {
+          "path": "utils/gx-shell.lua",
+          "blob": "4c302aa251c340266a2adf556c3600267c41e4e0",
+          "length": 1665,
+          "fnv1a64": "d67a15a42c09f5f8"
+        },
+        {
+          "path": "utils/math.lua",
+          "blob": "4fcc51bcb304ab94a615af20eb6a6c10208eeb23",
+          "length": 289,
+          "fnv1a64": "7d53b7a8a439011b"
+        },
+        {
+          "path": "utils/opts-validator.lua",
+          "blob": "ddf9c089be57a65f9a431283b007a87d4dc89f48",
+          "length": 4882,
+          "fnv1a64": "67dbd2c11f3472b1"
+        },
+        {
+          "path": "utils/platform.lua",
+          "blob": "b06d639b810d9ed7ca05f6946dcaa9122cea3d81",
+          "length": 803,
+          "fnv1a64": "d67efc2c53239479"
+        },
+        {
+          "path": "utils/shells.lua",
+          "blob": "7f47e1c0c344b81ef1a267f0be066300a9c6311a",
+          "length": 15857,
+          "fnv1a64": "f99a439fa644c926"
+        },
+        {
+          "path": "utils/wsl.lua",
+          "blob": "ef5380dcd1376c4fa25922fba2169e948e99df57",
+          "length": 1418,
+          "fnv1a64": "bc4ab3ec247c6e6b"
+        },
+        {
+          "path": "wezterm.lua",
+          "blob": "ac814d7a2941e4198b7084c1812d64eabbec7ecc",
+          "length": 1395,
+          "fnv1a64": "77cb9dbcfc9c278d"
+        }
+      ]
+    }
+  ]
+}

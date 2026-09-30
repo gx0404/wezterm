@@ -109,9 +109,11 @@ id = "dotfiles"
 doc = "docs/AGENT_RULES/dotfiles.md"
 paths = [
   "dotfiles/**",
+  "scripts/gx-config-releases.json",
   "scripts/gx-launcher/**",
   "scripts/gx_config_fingerprints.py",
   "scripts/gx_package.py",
+  "scripts/test_gx_config_fingerprints.py",
 ]
 tasks = []
 

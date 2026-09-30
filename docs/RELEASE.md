@@ -43,8 +43,20 @@ python3 scripts/gx_package.py deb --container
 `make gx-package-windows` / `make gx-package-deb` / `make package` 是相应封装。
 `--stage-dir <新目录>` 只构建、核验并输出载荷（Windows：`app/`、`fonts/`；deb：
 `root/`）与 `stage-manifest.json`（deb 另含 `deb_depends`），不调用 Inno Setup /
-dpkg-deb，可与 `--container` 组合；gx_shell 单仓的合并安装包由此取得 WezTerm 载荷。
-脏检查只统计本目录（`git status -- .`），容器构建挂载整个 Git 工作树。
+dpkg-deb，可与 `--container` 组合。`gx0404/gx_shell` 只保存组件 manifest 和集成
+打包代码，不再保存 WezTerm 源码；从本仓 `gx` 分支选择完整 SHA，在仓外独立
+checkout 并递归初始化子模块，再调用此入口。脏检查只统计组件工作树，容器构建
+挂载该 Git 工作树。stage 构建仍需要 Git checkout；源码归档只保证指纹生成/校验
+无需 Git，不将缺少子模块和提交身份的归档伪装成可发布构建。
+
+集成 manifest 至少应锁定 `repository`（`https://github.com/gx0404/wezterm.git`）、
+`branch`（`gx`，仅供维护导航）、`revision`（完整 40 位 SHA，实际 checkout 真源）、
+`submodules`（递归）、`package_version`（本仓 CHANGELOG）、`license`（`LICENSE.md`）
+以及指纹登记表路径 `scripts/gx-config-releases.json`。`stage-manifest.json` 的
+`source_commit` 必须等于组件 `revision`，而非集成仓提交；`package_version` 也
+不可用 GX Shell 的版本替代。集成侧分别记录两仓身份，并校验 `source_dirty=false`、
+`platform`、`architecture`、`product_version`、`resource_version`、`binaries`；
+deb 另外消费 `deb_depends` 与 `linux_compatibility`。原有 stage 布局保持不变。
 Windows 需要 MSVC、Perl、Rust >= 1.89、Inno Setup >= 7.1（长插件路径支持）；可用
 `winget install --id JRSoftware.InnoSetup.7 --exact --version 7.1.0 --scope user`
 安装编译器，非标准位置通过 `ISCC` 指定。Linux 原生构建基线固定 Ubuntu 20.04
@@ -96,20 +108,41 @@ Windows 默认用户安装到 `%LOCALAPPDATA%\Programs\WezTerm GX`，可在向�
 各发布版都没变过的文件（如 `wezterm.lua`）改了也不挡升级；改了本次也更新的文件时，它
 require 的已更新模块及依赖者留在旧版，日志写明根因文件，该文件换回载荷版后下次启动补做。
 相互 require 的一组文件全有或全无，失败整组回滚，最多尝试 3 次并复用同一备份目录。
-已发布文件指纹表 `scripts/gx-launcher/released.rs` 由 `scripts/gx_config_fingerprints.py`
-只从 git 发布提交生成（`--check` 只读校验）；每次 GX Shell 发版后把该版本及其提交追加进
-脚本的 `RELEASES` 并重新生成——单仓根 `CHANGELOG.md` 最新标题以外带日期的版本没登记时，
-脚本与单测都会失败。
+已发布文件指纹表 `scripts/gx-launcher/released.rs` 从仓内不可变登记表
+`scripts/gx-config-releases.json` 生成；`python scripts/gx_config_fingerprints.py --check`
+只读校验，在没有 Git 的源码归档、浅克隆和任意父目录中都必须通过。登记表记录各版
+repository/tag/commit、config tree 与每个文件的 blob/长度/FNV-1a，旧条目及顺序
+不可修改（顺序决定 bitmask）。已冻结 WezTerm GX 0.3.0、GX Shell 0.1.0/0.2.0，
+76 条合并指纹与迁出前逐项相同；启动器代码不变。当前 `u8` 最多容纳 8 个版本，
+超过时拒绝登记，须先设计启动器位宽迁移。
+
+发布后，在本仓执行以下显式登记（参数取真实发布信息，不使用工作区文件）：
+
+```console
+python scripts/gx_config_fingerprints.py --record --source-repo <release-checkout> --name "GX Shell X.Y.Z (tag gx-shell-vX.Y.Z)" --repository https://github.com/gx0404/gx_shell --tag gx-shell-vX.Y.Z --commit <full-commit-sha> --prefix <config-tree-path>
+python scripts/gx_config_fingerprints.py --check --verify-git --source-repo <history-checkout>
+```
+
+`--record` 要求 tag 指向给定完整提交，并只追加登记。`--verify-git` 严格复算每个
+已登记发布：指定 checkout 必须包含相应历史对象，否则失败，不把缺失当作通过。
+拆仓后发布的新 GX Shell 若仅锁定组件，指纹应从该 manifest 钉定的 WezTerm
+发布 checkout 登记（`--repository`/`--tag`/`--commit` 指向组件，`--name` 仍标注
+GX Shell 版本，`--prefix dotfiles/wezterm-config`），不能再引用集成仓的源码路径。
+该组件 SHA 应先获得对应不可变 tag，再执行登记。
+
+集成仓的发布门应显式运行 `--check --gx-shell-changelog <integration-CHANGELOG>`：
+最大标题以外的带日期版本必须已登记。组件默认检查不隐式访问这个文件，未来漏登
+仍由集成侧门和发布流程负责拦截，而不是靠邻接目录猜测。
 升级前应保存会话并关闭旧版窗口及后台 mux；Windows 中旧进程可能锁住插件目录，
 启动器会保留原插件并给出重试提示，不强制结束用户 shell。启动器预建 resurrect
 会话目录；直接加载插件时，缺失目录的异步创建会避开 Lua require 的 C 调用边界。
 
 GitHub 操作流程：
 
-1. 本 fork 的默认分支设为 `feature/gx_wezterm`，`main` 专门同步上游。
+1. 本 fork 的默认分支设为 `gx`，`main` 专门同步上游。
    `gx-release` 必须存在于默认分支，目标构建分支也须含同版打包脚本；
    GitHub 的手动入口要求的是默认分支，不限定分支名为 `main`。
-2. Actions → gx-release → Run workflow，Branch 选择 `feature/gx_wezterm`，
+2. Actions → gx-release → Run workflow，Branch 选择 `gx`，
    ref 保持默认即可，**version 留空自动取目标提交的 CHANGELOG 版本**。
    若手填 X.Y.Z，必须与 CHANGELOG 一致；错误会同时显示输入值、期望值和修正方式。
    publish 默认为 true；关掉仍完整构建和验证，但不创建标签或 Release。
@@ -147,7 +180,7 @@ Windows 安装/升级/卸载日志和字体加载记录上传到 `evidence-windo
 
 GX 分支的 `.github/workflows/` 保留两个独立入口：
 
-- `gx-ci.yml`：`feature/gx_wezterm` 的 push、目标为该分支的 PR 自动触发，
+- `gx-ci.yml`：`gx` 的 push、目标为该分支的 PR 自动触发，
   也可手动运行。检查格式、框架规则及 Windows/Linux 构建与测试，不生成安装包
   或发布 Release；同一 PR/分支的新运行取消旧 CI，不影响发布流程。
 - `gx-release.yml`：仅手动触发，构建并验证双平台安装包，按 `publish` 选项发布。

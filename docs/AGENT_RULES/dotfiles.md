@@ -29,9 +29,9 @@
   记下载荷版本、指纹表摘要、配置目录，以及挡住其他文件或写入失败的文件的指纹；任何一项
   变了才重跑，失败的连续重试 3 次启动、备份写进同一个时间戳目录。结果记在同目录
   `config-migration.log`，日志与 `config-version` 写失败不影响启动。已发布文件指纹表
-  `scripts/gx-launcher/released.rs` 由 `scripts/gx_config_fingerprints.py` 只从 git
-  发布提交生成，不读工作区。插件升级备份在独立 wezterm-gx 数据目录，保留 state/，
-  还原 gitdir → .git。
+  `scripts/gx-launcher/released.rs` 由 `scripts/gx_config_fingerprints.py` 从仓内
+  `scripts/gx-config-releases.json` 生成；登记数据只从显式发布提交提取，不从工作区
+  配置推断。插件升级备份在独立 wezterm-gx 数据目录，保留 state/，还原 gitdir → .git。
 - apt 构建依赖唯一真源：根 `get-deps`（docker 构建镜像与 gx-install 都
   调用它，不在 dotfiles/ 另立清单）。
 
@@ -80,11 +80,15 @@
   locally`，根文件改动（例如手动合并）后下次启动重跑。一起移动的一组文件全有或全无：
   先全部写临时文件并校验、再备份、再逐个 rename，中途失败把已换的文件放回。非字面量的
   动态 `require` 不参与判断，受管模块仍应保持接口向后兼容。
-- 发布新版本后把（名称、提交、wezterm-config 路径）追加进
-  `scripts/gx_config_fingerprints.py::RELEASES` 并重新生成 `released.rs`（`--check`
-  只读校验，只需本地有各发布提交）；单测读单仓根 `CHANGELOG.md`，最新标题以外带日期的
-  GX Shell 版本缺席即失败，有 `gx-shell-vX.Y.Z` 标签时核对提交。漏登的版本里未改动的
-  配置在下一版不会迁移。
+- 发布后用 `gx_config_fingerprints.py --record` 从显式 `--source-repo` 的发布
+  tag/完整提交追加到 `scripts/gx-config-releases.json`，同时生成 `released.rs`。
+  登记表冻结 repository/tag/commit/config tree/blob 与归一化指纹；旧条目及顺序
+  不可改写（顺序决定 Rust bitmask），最多 8 个版本，扩容须同步调整启动器类型。
+  `--check` 在浅克隆/源码归档中仅校验登记表，不读取父目录或旧 gx_shell 对象；
+  `--verify-git --source-repo <历史checkout>` 才严格复算所有发布对象，缺失即失败。
+  GX Shell 集成端显式传 `--gx-shell-changelog <path>` 保留已发布版本覆盖门。
+  漏登会导致未修改的配置无法升级；历史 WezTerm GX 0.3.0 / GX Shell 0.1.0、0.2.0
+  的 76 条合并指纹和 bitmask 由单测金标保护，不因拆仓改变升级语义。
 
 ## 禁止项
 
@@ -99,8 +103,9 @@
   `python3 -m py_compile scripts/gx_bundle.py`。
 - 启动器与指纹表：`rustc --edition=2021 --test scripts/gx-launcher/main.rs -o
   .local/gx-tests/launcher-tests && .local/gx-tests/launcher-tests`；
-  `python3 -m unittest discover -s scripts -p 'test_gx_*.py'`（有完整历史时从 git
-  复算各发布版指纹）。
+  `python3 -m unittest discover -s scripts -p 'test_gx_*.py'` 与
+  `python3 scripts/gx_config_fingerprints.py --check`（不需要历史对象）；需要来源审计时
+  再显式加 `--verify-git --source-repo <历史checkout>`，缺少任一发布对象即失败。
 - 沙箱安装：`HOME=$(mktemp -d) dotfiles/install.sh --check` 干跑 → 全量安装
   → 沙箱 HOME 下 `wezterm --version` / `wezterm ls-fonts` 冒烟（配置可解析、
   字体/插件就位）。

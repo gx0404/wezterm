@@ -28,9 +28,9 @@ class WorkflowTests(unittest.TestCase):
         events = self.workflow.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
         self.assertEqual(textwrap.dedent(events).strip(), textwrap.dedent("""\
             push:
-              branches: [feature/gx_wezterm]
+              branches: [gx]
             pull_request:
-              branches: [feature/gx_wezterm]
+              branches: [gx]
             workflow_dispatch:
         """).strip())
 

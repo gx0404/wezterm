@@ -71,7 +71,7 @@ tar xf wezterm-gx-*-linux-amd64.tar.xz && cd wezterm-gx-*
 **2. 源码构建（目标机有网 + sudo）**
 
 ```bash
-git clone -b feature/gx_wezterm https://github.com/gx0404/wezterm.git
+git clone --recurse-submodules -b gx https://github.com/gx0404/wezterm.git
 cd wezterm && make gx-install       # get-deps(需 sudo) → release 构建 → 部署
 ```
 

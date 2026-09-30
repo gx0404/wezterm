@@ -38,10 +38,14 @@ python3 scripts/resolve_agent_rules.py --check                   # 闭集/体积
   改动只在随上游同步时产生，不主动重排/重注释上游正文（见 code-comments.md）。
 - 上游 issue/PR 由人类操作；agent 不代为提交。发布链（ci/tag.sh、
   ci/create-release.sh、ci/deploy.sh）只在上游仓库运行，本 fork 不复建。
-- GX 自有安装包走 `scripts/gx_package.py`，不调用上游发布链。本目录已并入
-  `gx0404/gx_shell` 单仓（`wezterm/`）：本目录 `.github/workflows/`（`gx-ci`、
-  `gx-release`）在单仓中不执行，不再单独发版；单仓根 `.github/workflows/release.yml`
-  以 `gx_package.py --stage-dir` 取 WezTerm 载荷，生成 GX Shell 合并安装包。
+- GX 定制源码在 `gx0404/wezterm` 的 `gx` 分支维护，`main` 仅同步上游；
+  `.github/workflows/gx-ci.yml` 检查 `gx`，组件手动发布仍走 `gx-release`。
+  `gx0404/gx_shell` 只持有组件 manifest 与集成打包逻辑，不再包含组件源码：
+  按完整提交 SHA checkout 本仓，再用 `scripts/gx_package.py --stage-dir` 取得载荷。
+  组件与集成仓 SHA 分开登记，不能再要求二者相等；不调用上游发布链。
+- 已发布配置以仓内 `scripts/gx-config-releases.json` 为不可变登记真源；默认
+  指纹生成与检查不读取父目录或旧 gx_shell Git 对象。追加发布时显式从发布
+  checkout 的 tag/commit 登记并审计，流程与集成 manifest 契约见 `docs/RELEASE.md`。
 - fork 层面的可观察变更记录在根 `CHANGELOG.md`；上游产品变更在
   `docs/changelog.md`（随上游同步产生，不手写）。
 

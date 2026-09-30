@@ -11,10 +11,16 @@
 ## 0.4.0(TBD)
 
 ### Added
-- 本仓并入 `gx0404/gx_shell` 单仓（`wezterm/` 目录），由单仓根目录的发版流程
-  统一产出 GX Shell 安装包。`gx_package.py --stage-dir DIR` 只构建、核验并输出
-  载荷目录与 `stage-manifest.json`（deb 另含 `dpkg-shlibdeps` 计算出的依赖），
-  不调用 Inno Setup / dpkg-deb，供单仓合并打包；`--container` 构建同样支持。
+- 将原 GX Shell subtree 功能回迁到独立 `gx0404/wezterm` 的 `gx` 分支，保留
+  `feature/gx_wezterm` 的 Windows 本地构建改动；GX Shell 集成仓只锁定组件完整 SHA，
+  不再包含组件源码。`gx_package.py --stage-dir DIR` 的载荷布局和清单保持不变，
+  由外部独立 checkout 构建，组件 SHA/版本与集成仓 SHA/包版本分别校验。
+- 已发布配置冻结到 `scripts/gx-config-releases.json`，记录来源仓库、tag、提交、
+  config tree、blob 和归一化指纹；默认生成与 `--check` 不依赖旧 GX Shell Git
+  对象或父目录 CHANGELOG，浅克隆与源码归档均可运行。显式 `--record` 核对 tag/commit
+  并追加登记，`--verify-git` 严格复算来源，集成侧通过 `--gx-shell-changelog` 启用
+  发布覆盖门。WezTerm GX 0.3.0、GX Shell 0.1.0/0.2.0 的全部 76 条指纹及 bitmask
+  保持不变，启动器逐文件备份、用户修改保护和升级重试语义不变。
 - 配置快照在 GX Shell 安装包内运行时默认进入包内 GX Zsh，启动菜单最前面新增
   「GX Zsh」「herdr」；按 `wezterm.executable_dir` 探测同装入口，独立安装的
   WezTerm 仍按原逻辑选择 PowerShell / zsh。已有用户配置不会被覆盖（下条迁移除外）。
@@ -49,10 +55,9 @@
   （已开的窗格不变），结果用 toast 提示。herdr 只接受一个可执行文件，toast 如实说明差别：
   选 WSL 发行版时 herdr 进入 WSL 默认发行版，选 MSYS2 UCRT64 时得到 MSYS 环境的 bash，
   Linux 上选系统 zsh 时 herdr 用 GX Zsh；herdr 用的是自定义配置时不修改并提示。
-- 开发：`scripts/gx_config_fingerprints.py` 只从 git 发布提交生成启动器的已发布文件指纹表
-  `scripts/gx-launcher/released.rs`（`--check` 只读校验）；单测在有完整历史时复算指纹，并
-  要求单仓根 `CHANGELOG.md` 最新标题以外带日期的 GX Shell 版本都已登记、与
-  `gx-shell-vX.Y.Z` 标签提交一致。新增纯 Lua 5.4 单测 `scripts/tests/gx_shells.lua`（Shell
+- 开发：发布配置登记与独立校验见本节的冻结指纹变更；Claude、Codex、ZCode 的
+  hook 注册改回独立仓根路径，原样注册探针继续校验危险操作保护。
+  新增纯 Lua 5.4 单测 `scripts/tests/gx_shells.lua`（Shell
   探测、默认 Shell 解析、herdr 同步提示）；`tests/pure_fn_test.lua` 增加键位断言与
   `config/launch.lua` 不启动子进程的断言。
 

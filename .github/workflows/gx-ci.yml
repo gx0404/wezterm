@@ -2,9 +2,9 @@ name: gx-ci
 
 on:
   push:
-    branches: [feature/gx_wezterm]
+    branches: [gx]
   pull_request:
-    branches: [feature/gx_wezterm]
+    branches: [gx]
   workflow_dispatch:
 
 permissions:
@@ -58,6 +58,7 @@ jobs:
           python3 scripts/resolve_agent_rules.py --check
           python3 scripts/dev_framework.py ready
           python3 scripts/version.py --check
+          python3 scripts/gx_config_fingerprints.py --check
       - name: Test framework and GX contracts
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - uses: dtolnay/rust-toolchain@nightly
