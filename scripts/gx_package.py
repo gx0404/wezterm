@@ -34,6 +34,9 @@ RUNTIME_DEPS = (
 LINUX_BASELINE = "20.04"
 MAX_GLIBC = (2, 31)
 RUST_VERSION = "1.96.1"
+# Never shipped: VCS and plugin session state, bytecode, and GUI settings written next to wezterm.lua.
+SNAPSHOT_SKIPPED_PARTS = {".git", "state", "__pycache__"}
+CONFIG_USER_DATA = {"gui-settings.json", "gui-settings.json.tmp"}
 
 
 def audit_linux_binary(path: Path) -> dict:
@@ -129,7 +132,8 @@ def verify_inno():
 
 def source_info(root: Path = ROOT) -> tuple[str, bool]:
     sha = output(["git", "-C", root, "rev-parse", "HEAD"])
-    dirty = bool(output(["git", "-C", root, "status", "--porcelain", "--untracked-files=normal"]))
+    # In the gx_shell monorepo, sibling components are not WezTerm sources.
+    dirty = bool(output(["git", "-C", root, "status", "--porcelain", "--untracked-files=normal", "--", "."]))
     return sha, dirty
 
 
@@ -139,7 +143,9 @@ def snapshot_files(root: Path = ROOT):
         # Path ordering differs between Windows (case-insensitive) and POSIX.
         for path in sorted((base / part).rglob("*"), key=lambda p: p.relative_to(base).as_posix()):
             rel = path.relative_to(base)
-            if any(p in {".git", "state", "__pycache__"} for p in rel.parts):
+            if SNAPSHOT_SKIPPED_PARTS.intersection(rel.parts):
+                continue
+            if part == "wezterm-config" and rel.relative_to(part).as_posix() in CONFIG_USER_DATA:
                 continue
             if path.is_symlink():
                 raise ValueError(f"snapshot must not contain symlinks: {rel}")
@@ -236,21 +242,28 @@ def font_name(path: Path) -> str:
     raise ValueError(f"font full name missing: {path}")
 
 
-def package_windows(stage: Path, dest: Path, version: str, bin_dir: Path) -> Path:
+def stage_windows(stage: Path, bin_dir: Path, root: Path = ROOT) -> list[Path]:
     payload = stage / "app"
     payload.mkdir()
     for name in BINARIES:
         copy_file(bin_dir / f"{name}.exe", payload / f"{name}.exe", True)
-    copy_file(ROOT / "LICENSE.md", payload / "LICENSE.md")
+    copy_file(root / "LICENSE.md", payload / "LICENSE.md")
     for source, target in WINDOWS_RUNTIME.items():
-        copy_file(ROOT / "assets/windows" / source, payload / target)
+        copy_file(root / "assets/windows" / source, payload / target)
     compile_launchers(payload, "windows")
-    stage_resources(payload / "resources")
-    font_entries = []
-    for path in sorted((ROOT / "dotfiles/fonts").glob("*")):
+    stage_resources(payload / "resources", root)
+    fonts = []
+    for path in sorted((root / "dotfiles/fonts").glob("*")):
         if path.suffix.lower() not in {".ttf", ".ttc"}:
             continue
         copy_file(path, stage / "fonts" / path.name)
+        fonts.append(path)
+    return fonts
+
+
+def package_windows(stage: Path, dest: Path, version: str, bin_dir: Path) -> Path:
+    font_entries = []
+    for path in stage_windows(stage, bin_dir):
         name = font_name(path).replace('"', '""')
         font_entries.append(f'Source: "{stage / "fonts" / path.name}"; DestDir: "{{autofonts}}"; '
                             f'FontInstall: "{name}"; Flags: onlyifdoesntexist uninsneveruninstall')
@@ -275,32 +288,38 @@ def deb_dependencies(stage: Path, binaries: list[Path]) -> str:
     return ", ".join(sorted(generated | (set(RUNTIME_DEPS) - generated_names)))
 
 
-def package_deb(stage: Path, dest: Path, version: str, bin_dir: Path, abi: dict) -> Path:
+def stage_deb(stage: Path, bin_dir: Path, abi: dict, root: Path = ROOT) -> str:
     tree = stage / "root"
     binary_root = tree / "usr/lib/wezterm-gx"
     binary_root.mkdir(parents=True)
     for name in BINARIES:
         copy_file(bin_dir / name, binary_root / name, True)
     compile_launchers(binary_root, "deb")
-    stage_resources(tree / "usr/share/wezterm-gx")
+    stage_resources(tree / "usr/share/wezterm-gx", root)
     for name in ("wezterm-gx", "wezterm-gx-gui"):
         link = tree / "usr/bin" / name
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(f"../lib/wezterm-gx/{name}")
-    for path in (ROOT / "dotfiles/fonts").iterdir():
+    for path in (root / "dotfiles/fonts").iterdir():
         if path.suffix.lower() in {".ttf", ".ttc"}:
             copy_file(path, tree / "usr/share/fonts/truetype/wezterm-gx" / path.name)
-    copy_file(ROOT / "dotfiles/assets/org.wezfurlong.wezterm.png",
+    copy_file(root / "dotfiles/assets/org.wezfurlong.wezterm.png",
               tree / "usr/share/icons/hicolor/128x128/apps/wezterm-gx.png")
-    copy_file(ROOT / "scripts/packaging/wezterm-gx.desktop",
+    copy_file(root / "scripts/packaging/wezterm-gx.desktop",
               tree / "usr/share/applications/org.gx0404.wezterm.desktop")
-    copy_file(ROOT / "LICENSE.md", tree / "usr/share/doc/wezterm-gx/copyright")
-    control = tree / "DEBIAN"
-    control.mkdir()
+    copy_file(root / "LICENSE.md", tree / "usr/share/doc/wezterm-gx/copyright")
     binaries = [p for p in binary_root.iterdir() if p.is_file()]
     # Audit the launchers too: --bin-dir alone does not constrain their libc.
     abi.update({path.name: audit_linux_binary(path) for path in binaries})
-    dependencies = deb_dependencies(stage, binaries)
+    with tempfile.TemporaryDirectory(prefix="gx-shlibdeps-") as work:
+        return deb_dependencies(Path(work), binaries)
+
+
+def package_deb(stage: Path, dest: Path, version: str, bin_dir: Path, abi: dict) -> Path:
+    dependencies = stage_deb(stage, bin_dir, abi)
+    tree = stage / "root"
+    control = tree / "DEBIAN"
+    control.mkdir()
     installed_size = (sum(p.stat().st_size for p in tree.rglob("*") if p.is_file()) + 1023) // 1024
     (control / "control").write_text(
         f"Package: wezterm-gx\nVersion: {version}\nArchitecture: amd64\nSection: utils\nPriority: optional\n"
@@ -318,7 +337,7 @@ def package_deb(stage: Path, dest: Path, version: str, bin_dir: Path, abi: dict)
     return artifact
 
 
-def preflight(kind: str, bin_dir: Path | None):
+def preflight(kind: str, bin_dir: Path | None, stage_only: bool = False):
     if kind == "windows" and (os.name != "nt" or platform.machine().lower() not in {"amd64", "x86_64"}):
         raise ValueError("Windows packaging requires an x64 Windows build host")
     if kind == "deb":
@@ -328,11 +347,13 @@ def preflight(kind: str, bin_dir: Path | None):
         if not re.search(r'^ID=\"?ubuntu\"?$', release, re.M) or not re.search(r'^VERSION_ID="20\.04"$', release, re.M):
             raise ValueError("build deb on Ubuntu 20.04; use --container on newer Linux/WSL hosts")
     needed = ["rustc", "iscc"] if kind == "windows" else ["rustc", "dpkg-deb", "dpkg-shlibdeps", "objdump"]
+    if stage_only and kind == "windows":
+        needed.remove("iscc")
     if bin_dir is None:
         needed.append("cargo")
     for name in needed:
         print(f"FOUND {name}: {tool(name)}")
-    if kind == "windows":
+    if kind == "windows" and not stage_only:
         verify_inno()
     if bin_dir is None:
         output([tool("cargo"), "--version"])
@@ -353,6 +374,19 @@ def preflight(kind: str, bin_dir: Path | None):
         for name in WINDOWS_RUNTIME:
             if not (ROOT / "assets/windows" / name).is_file():
                 raise ValueError(f"missing Windows runtime: {name}")
+
+
+def build_manifest(version: str, sha: str, dirty: bool, product_version: str, kind: str,
+                   hashes: dict, abi: dict) -> dict:
+    manifest = {"schema": 1, "package_version": version, "source_commit": sha,
+                "source_dirty": dirty, "product_version": product_version,
+                "resource_version": resource_version(), "platform": kind, "architecture": "amd64",
+                "binaries": hashes}
+    if kind == "deb":
+        manifest["linux_compatibility"] = {"build_ubuntu": LINUX_BASELINE,
+                                           "supported_ubuntu": ["20.04", "24.04"],
+                                           "openssl": "static", "elf": abi}
+    return manifest
 
 
 def container_deb(args, version: str):
@@ -376,12 +410,19 @@ def container_deb(args, version: str):
         run([docker, "build", "--build-arg", f"RUST_TOOLCHAIN={RUST_VERSION}", "--tag", image, context])
     dest = args.output_dir.resolve()
     dest.mkdir(parents=True, exist_ok=True)
+    stage_dir = args.stage_dir.resolve() if args.stage_dir else None
+    # Mount the whole work tree: when WezTerm lives inside the gx_shell
+    # monorepo, unmounted siblings would look deleted to `git status`.
+    top = Path(output(["git", "-C", ROOT, "rev-parse", "--show-toplevel"])).resolve()
     common = (ROOT / output(["git", "-C", ROOT, "rev-parse", "--git-common-dir"])).resolve()
-    mounts = [ROOT, dest]
-    if common != ROOT and ROOT not in common.parents:
+    mounts = [top, dest]
+    if common != top and top not in common.parents:
         mounts.append(common)
     if args.bin_dir:
         mounts.append(args.bin_dir.resolve())
+    if stage_dir:
+        stage_dir.parent.mkdir(parents=True, exist_ok=True)
+        mounts.append(stage_dir.parent)
     cmd = [docker, "run", "--rm", "--workdir", ROOT]
     host_caches = []
     for path in dict.fromkeys(mounts):
@@ -405,6 +446,8 @@ def container_deb(args, version: str):
             "--output-dir", dest]
     if args.bin_dir:
         cmd += ["--bin-dir", args.bin_dir.resolve()]
+    if stage_dir:
+        cmd += ["--stage-dir", stage_dir]
     try:
         run(cmd)
     finally:
@@ -417,6 +460,9 @@ def container_deb(args, version: str):
         if (ROOT / ".tag").is_file():
             handoff += ["--volume", f"{ROOT / '.tag'}:/gx-build-tag"]
             owned.append("/gx-build-tag")
+        if stage_dir and stage_dir.is_dir() and not stage_dir.is_symlink():
+            handoff += ["--volume", f"{stage_dir}:/gx-owned-stage"]
+            owned.append("/gx-owned-stage")
         for index, directory in enumerate(host_caches):
             target = f"/gx-owned-cache-{index}"
             handoff += ["--volume", f"{directory}:{target}"]
@@ -437,19 +483,23 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="read-only preflight; never builds or installs")
     parser.add_argument("--container", action="store_true", help="build deb in Ubuntu 20.04 using Docker on Linux/WSL")
     parser.add_argument("--cache-dir", type=Path, help="host directory for reusable --container Cargo caches")
+    parser.add_argument("--stage-dir", type=Path,
+                        help="write the verified payload to this new directory instead of building an installer")
     args = parser.parse_args()
     try:
         kind = ("windows" if os.name == "nt" else "deb") if args.platform == "auto" else args.platform
         version = validate_version(args.version)
         if args.cache_dir and not args.container:
             raise ValueError("--cache-dir requires --container")
+        if args.stage_dir and (args.stage_dir.exists() or args.stage_dir.is_symlink()):
+            raise ValueError(f"--stage-dir must not exist yet: {args.stage_dir}")
         if args.container:
             if kind != "deb":
                 raise ValueError("--container is only supported for deb")
             container_deb(args, version)
             return 0
         bin_dir = args.bin_dir.resolve() if args.bin_dir else Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")).resolve() / "release"
-        preflight(kind, args.bin_dir)
+        preflight(kind, args.bin_dir, stage_only=bool(args.stage_dir))
         sha, dirty = source_info()
         if args.check:
             if args.bin_dir:
@@ -468,22 +518,30 @@ def main() -> int:
                 env["OPENSSL_CONFIG_DIR"] = "/etc/ssl"
             run(cmd, cwd=ROOT, env=env)
         product_version, hashes = verify_binaries(bin_dir, kind, sha)
+        abi = {}
+        if args.stage_dir:
+            stage = args.stage_dir.resolve()
+            stage.mkdir(parents=True)
+            if kind == "windows":
+                stage_windows(stage, bin_dir)
+            else:
+                depends = stage_deb(stage, bin_dir, abi)
+            manifest = build_manifest(version, sha, dirty, product_version, kind, hashes, abi)
+            if kind == "deb":
+                manifest["deb_depends"] = depends
+            (stage / "stage-manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            print(f"STAGED {stage}\nProduct: {product_version}; source_dirty={dirty}")
+            return 0
         dest = args.output_dir.resolve()
         dest.mkdir(parents=True, exist_ok=True)
         # deb metadata needs POSIX modes: a WSL /mnt/c or /mnt/e checkout may
         # report every directory as 0777 regardless of chmod.
-        abi = {}
         with tempfile.TemporaryDirectory(prefix="gx-package-", dir=dest if kind == "windows" else None) as temp:
             artifact = (package_windows(Path(temp), dest, version, bin_dir) if kind == "windows"
                         else package_deb(Path(temp), dest, version, bin_dir, abi))
-        manifest = {"schema": 1, "package_version": version, "source_commit": sha,
-                    "source_dirty": dirty, "product_version": product_version,
-                    "resource_version": resource_version(), "platform": kind, "architecture": "amd64",
-                    "binaries": hashes, "artifact": artifact.name, "sha256": digest(artifact)}
-        if kind == "deb":
-            manifest["linux_compatibility"] = {"build_ubuntu": LINUX_BASELINE,
-                                               "supported_ubuntu": ["20.04", "24.04"],
-                                               "openssl": "static", "elf": abi}
+        manifest = build_manifest(version, sha, dirty, product_version, kind, hashes, abi)
+        manifest.update({"artifact": artifact.name, "sha256": digest(artifact)})
         metadata = artifact.with_name(artifact.name + ".manifest.json")
         metadata.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         artifact.with_name(artifact.name + ".sha256").write_text(

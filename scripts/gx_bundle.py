@@ -209,7 +209,8 @@ def find_windows_zip() -> Path | None:
 
 def stage_common(stage: Path) -> None:
     """bundle 根目录公共部分：dotfiles 快照 + install 脚本。"""
-    shutil.copytree(DOTFILES, stage / "dotfiles")
+    shutil.copytree(DOTFILES, stage / "dotfiles",
+                    ignore=shutil.ignore_patterns(*SYNC_IGNORE_FILES))
     (stage / "install.sh").write_bytes((DOTFILES / "install.sh").read_bytes())
     os.chmod(stage / "install.sh", 0o755)
 
@@ -316,6 +317,7 @@ def cmd_bundle(args) -> None:
 # ------------------------------------------------------------------- sync ----
 
 SYNC_IGNORE_DIRS = {".git", "gitdir", "state"}  # gitdir=插件 .git 快照; state=resurrect 会话数据
+SYNC_IGNORE_FILES = {"gui-settings.json", "gui-settings.json.tmp"}  # 设置页写的用户数据
 PRINT_LIMIT = 50  # 每类最多打印条数
 
 
@@ -323,6 +325,8 @@ def walk_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SYNC_IGNORE_DIRS]
         for name in filenames:
+            if name in SYNC_IGNORE_FILES:
+                continue
             p = Path(dirpath) / name
             yield p.relative_to(root), p
 
@@ -371,7 +375,7 @@ def cmd_sync(args) -> None:
         added, changed, _ = diff_tree(live, snap, label)
         rels = added + changed
         if label == "config":
-            rels = [r for r in rels if r not in known]
+            rels = [r for r in rels if r.as_posix() not in known]
         total += len(rels)
         if write:
             for rel in rels:

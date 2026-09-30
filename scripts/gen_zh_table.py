@@ -115,6 +115,12 @@ PAIRS = [
      "显示窗格右键菜单（分屏/缩放/复制/粘贴/关闭）"),
     ("Keybindings", "快捷键"),
     ("↑↓ scroll  Esc close", "↑↓ 滚动  Esc 关闭"),
+    # ---- 默认 Shell（设置浮层 Shell 分区、ShowDefaultShellSettings）----
+    ("Default Shell…", "默认 Shell…"),
+    ("Shows the settings overlay on its Shell section", "在 Shell 分区打开设置浮层"),
+    ("No shells to choose: no launch_menu entry is tagged with GX_SHELL_ID",
+     "没有可选的 Shell：launch_menu 中没有带 GX_SHELL_ID 标记的条目"),
+    ("Saved, but the configuration failed to reload", "已保存，但配置重载失败"),
     # ---- CLI 帮助（clap 运行时本地化）----
     ("Wez's Terminal Emulator", "Wez 的终端模拟器"),
     ("Print help", "打印帮助"),

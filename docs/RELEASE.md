@@ -41,6 +41,10 @@ python3 scripts/gx_package.py deb --container
 `--bin-dir <dir>` 复用已构建的四个程序，仍检查其架构、版本与 HEAD；未指定时
 执行 `cargo build --locked --release`。`--output-dir <dir>` 更改输出目录；
 `make gx-package-windows` / `make gx-package-deb` / `make package` 是相应封装。
+`--stage-dir <新目录>` 只构建、核验并输出载荷（Windows：`app/`、`fonts/`；deb：
+`root/`）与 `stage-manifest.json`（deb 另含 `deb_depends`），不调用 Inno Setup /
+dpkg-deb，可与 `--container` 组合；gx_shell 单仓的合并安装包由此取得 WezTerm 载荷。
+脏检查只统计本目录（`git status -- .`），容器构建挂载整个 Git 工作树。
 Windows 需要 MSVC、Perl、Rust >= 1.89、Inno Setup >= 7.1（长插件路径支持）；可用
 `winget install --id JRSoftware.InnoSetup.7 --exact --version 7.1.0 --scope user`
 安装编译器，非标准位置通过 `ISCC` 指定。Linux 原生构建基线固定 Ubuntu 20.04
@@ -78,10 +82,24 @@ Windows 默认用户安装到 `%LOCALAPPDATA%\Programs\WezTerm GX`，可在向�
 更新；系统安装不冒充其他用户改写其快捷方式。旧版本目录保留供人工回退。
 
 配置继续位于用户的 `.config/wezterm`（尊重 XDG_CONFIG_HOME），既有
-`.wezterm.lua` 和个人配置保留。首次使用的普通用户由原生启动器初始化；
+`.wezterm.lua` 和个人配置保留。首次使用的普通用户（配置目录不存在，或只有设置页写的
+`gui-settings.json`，该文件保留）由原生启动器初始化；
 插件备份在 `%APPDATA%\wezterm-gx\backups` 或 `$XDG_DATA_HOME/wezterm-gx/backups`
 （未设 XDG 时为 `~/.local/share/wezterm-gx/backups`），不污染插件扫描目录。
 首次接管四个打包插件时保留备份和 state/；卸载不删除用户数据。
+已有配置按文件迁移（`wezterm-gx/config-version` 记下载荷版本、已发布指纹表摘要与配置目录；
+指纹表或根因文件变化时重跑）：与任一已发布版本相同的文件（文本 CRLF 视同 LF）先备份到
+上述 `backups/<时间戳>/wezterm-config/` 再换成载荷版；新增文件补装（入口 `wezterm.lua`
+不是 GX 发布的版本时只补新代码 require 的模块），删掉的已发布文件只在新代码 require 时
+补回；改过的文件、只读文件与符号链接保留，原因和载荷路径写进
+`wezterm-gx/config-migration.log`；不再随包的文件原样留下；`gui-settings.json` 永不触碰。
+各发布版都没变过的文件（如 `wezterm.lua`）改了也不挡升级；改了本次也更新的文件时，它
+require 的已更新模块及依赖者留在旧版，日志写明根因文件，该文件换回载荷版后下次启动补做。
+相互 require 的一组文件全有或全无，失败整组回滚，最多尝试 3 次并复用同一备份目录。
+已发布文件指纹表 `scripts/gx-launcher/released.rs` 由 `scripts/gx_config_fingerprints.py`
+只从 git 发布提交生成（`--check` 只读校验）；每次 GX Shell 发版后把该版本及其提交追加进
+脚本的 `RELEASES` 并重新生成——单仓根 `CHANGELOG.md` 最新标题以外带日期的版本没登记时，
+脚本与单测都会失败。
 升级前应保存会话并关闭旧版窗口及后台 mux；Windows 中旧进程可能锁住插件目录，
 启动器会保留原插件并给出重试提示，不强制结束用户 shell。启动器预建 resurrect
 会话目录；直接加载插件时，缺失目录的异步创建会避开 Lua require 的 C 调用边界。

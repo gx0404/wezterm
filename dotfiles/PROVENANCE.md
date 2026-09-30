@@ -48,6 +48,57 @@
   `utils/backdrops.lua` 新增 `set_default_from_sidecar()`（启动/重载时
   按 `gui-settings.json` 的 `wallpaper` 键覆盖默认壁纸），wezterm.lua
   在 `set_default` 后链式调用。
+- 2026-09-28 GX Shell 单仓：新增 `utils/gx-shell.lua`，`config/launch.lua`
+  在 GX Shell 安装包内运行时默认进入包内 GX Zsh，并把「GX Zsh」「herdr」放在
+  启动菜单最前面；独立安装不受影响。仅改仓库副本，本机 `~/.config/wezterm`
+  未同步，`make gx-sync` 会显示这两处差异。
+- 2026-09-30 GX Shell 0.2.0：`backdrops/` 16 张壁纸从原图等比缩到不超过
+  1920×1080（不放大，文件名与格式不变），并去掉元数据。壁纸与字形共用 GPU 纹理
+  atlas，图片长边超过 2046 像素就要 4096²、超过 4094 像素要 8192²：原图
+  （2560×1600～5760×3630）都要 4096² 以上，angry-samurai、final-showdown、
+  frieren、voyage 要 8192²；缩后全部（含默认的 nord-space.png）只需 2048²。
+  总量从 19,390,659 字节降到 6,256,115 字节。做法：Pillow 12.3 Lanczos 缩放；
+  JPEG 用 baseline、优化 Huffman 表、质量 85（源图是标准量化表且质量低于 85 的
+  沿用源质量：cherry-lava、house 为 75，sunset 为 80），色度采样与源图一致；
+  PNG 无损，zlib 9 级。JPEG 只留 JFIF 头，PNG 只留 IHDR/IDAT/IEND。去掉的是
+  ffmpeg 注释和 nord-space.png 的 GIMP 内置 sRGB ICC、EXIF、XMP 等块，都不含
+  作者或版权信息；画面里的署名和水印保持原样。原图在提交 `b0f5d696e` 及更早的
+  历史里。Oh My Zsh `gx/wezterm/backdrops/` 与本目录逐字节相同。本机
+  `~/.config/wezterm/backdrops` 还是原图时，`make gx-sync` 会列出这 16 个文件：
+  应把仓库版部署到本机，不要用 `GX_SYNC_WRITE=1` 回收，否则会把原图写回仓库。
+- 2026-09-30 GX Shell 0.2.0（Lua 配置）：以下都是仓库侧的有意改动，本机
+  `~/.config/wezterm` 未同步。本机还是旧配置时，`make gx-sync` 会把这些文件列为
+  CHANGED（新增的三个 `utils/*.lua` 列为 repo only），`make framework-check` 因此失败：
+  应先 `make gx-upgrade` 把仓库版部署到本机，不要用 `GX_SYNC_WRITE=1` 回收，否则旧配置
+  会覆盖这些改动。
+  - 默认 Shell：新增 `utils/shells.lua`（只用 `io.open` 探测已安装的 Shell，生成
+    `launch_menu` / `default_prog` / `default_domain` 与 herdr 同步所需信息）、
+    `utils/gui-settings.lua`（按 WezTerm 的规则定位设置页写的 `gui-settings.json`）、
+    `utils/wsl.lua`（`wezterm.default_wsl_domains()` 结果存 `wezterm.GLOBAL`：找到发行版后
+    每个 GUI 进程只跑一次 `wsl.exe`，空结果或失败 5 分钟后重试）。`config/launch.lua` 改为
+    调用它们，默认 Shell 取 `gui-settings.json` 的 `default_shell`，`gx-default-shell-changed`
+    事件让安装包内 herdr 的新窗格跟随；`config/domains.lua` 的 WSL 域改取 `utils/wsl.lua`。
+    没有选择时回退到的默认 Shell 总在启动菜单第一位，macOS 的顺序因此变为 Fish、Bash、
+    Nushell、Zsh。
+  - `events/new-tab-button.lua`：`+` 右键菜单在点击时按 `window:effective_config()` 生成
+    （启动菜单项、SSH/Unix 域，末项直达设置页 Shell 分区），不再 require `config.domains`。
+  - `config/bindings.lua`：Windows 改用与 Linux 相同的 `Ctrl+Shift` 方案（原为裸 `Alt`）；
+    带 Shift 的 `[ ] \ 0 9` 键位补绑 `{ } | ) (`；窗口缩放从 `SUPER+-` / `SUPER+=` 移到
+    `Leader -` / `Leader =`（macOS 也一样），`Ctrl+Shift+=` 放大字号；关闭标签先确认；
+    `Alt+Shift+S/V` 只在 Linux 绑定；resurrect 在保存/恢复键第一次按下时才加载。
+  - `config/plugins.lua`：插件目录不存在就不调用 `wezterm.plugin.require`（它会在配置
+    求值里同步 git clone）；resurrect 的 `init.lua` 还会 require dev.wezterm，两者都在
+    才绑定 resurrect 键位。
+  - `events/status.lua`：前台进程只在单标签的 herdr 应用模式下探测，每窗口至多 2 秒一次；
+    电池信息缓存 60 秒；时钟回拨时两个缓存都作废。
+  - `config/appearance.lua`：`front_end` 按平台取值（目前三个平台都是 OpenGL）；光标闪烁
+    改 `Constant` 缓动、`animation_fps = 10`，空闲窗口不再持续重绘。
+  - `config/general.lua`：`check_for_updates = false`；Windows 补齐免关闭确认的进程名
+    （带 `.exe` 的 shell、MSYS2 `env.exe`、`gitstatusd-msys_nt-10.0-x86_64`）。
+  - `config/fonts.lua`：Windows 在字体文件存在时追加 Microsoft YaHei、Segoe UI Emoji 回退。
+  - `utils/backdrops.lua`：`gui-settings.json` 的位置改由 `utils/gui-settings.lua` 解析。
+  - `tests/pure_fn_test.lua` 补上述行为的断言。Oh My Zsh `gx/wezterm/` 除 `backdrops/`
+    外与本目录逐字节相同。
 
 ## plugins/
 

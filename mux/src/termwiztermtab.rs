@@ -232,24 +232,10 @@ impl Pane for TermWizTerminalPane {
     }
 
     fn mouse_event(&self, event: MouseEvent) -> anyhow::Result<()> {
-        use termwiz::input::MouseButtons as Buttons;
-        use wezterm_term::input::MouseButton;
-
-        let mouse_buttons = match event.button {
-            MouseButton::Left => Buttons::LEFT,
-            MouseButton::Middle => Buttons::MIDDLE,
-            MouseButton::Right => Buttons::RIGHT,
-            MouseButton::WheelUp(_) => Buttons::VERT_WHEEL | Buttons::WHEEL_POSITIVE,
-            MouseButton::WheelDown(_) => Buttons::VERT_WHEEL,
-            MouseButton::WheelLeft(_) => Buttons::HORZ_WHEEL | Buttons::WHEEL_POSITIVE,
-            MouseButton::WheelRight(_) => Buttons::HORZ_WHEEL,
-            MouseButton::None => Buttons::NONE,
-        };
-
         let event = InputEvent::Mouse(TermWizMouseEvent {
             x: event.x as u16,
             y: event.y as u16,
-            mouse_buttons,
+            mouse_buttons: termwiz_mouse_buttons(&event),
             modifiers: event.modifiers,
         });
         if let Err(e) = self.input_tx.send(event) {
@@ -308,6 +294,29 @@ impl Pane for TermWizTerminalPane {
                 self.terminal.lock().erase_scrollback_and_viewport();
             }
         }
+    }
+}
+
+/// fork: termwiz reports a release with no buttons held, the same as
+/// its own escape parser does for SGR mouse reports; reporting the
+/// released button made overlays treat a release as a fresh click.
+/// A move keeps its button so that drags still register.
+fn termwiz_mouse_buttons(event: &MouseEvent) -> termwiz::input::MouseButtons {
+    use termwiz::input::MouseButtons as Buttons;
+    use wezterm_term::input::{MouseButton, MouseEventKind};
+
+    if event.kind == MouseEventKind::Release {
+        return Buttons::NONE;
+    }
+    match event.button {
+        MouseButton::Left => Buttons::LEFT,
+        MouseButton::Middle => Buttons::MIDDLE,
+        MouseButton::Right => Buttons::RIGHT,
+        MouseButton::WheelUp(_) => Buttons::VERT_WHEEL | Buttons::WHEEL_POSITIVE,
+        MouseButton::WheelDown(_) => Buttons::VERT_WHEEL,
+        MouseButton::WheelLeft(_) => Buttons::HORZ_WHEEL | Buttons::WHEEL_POSITIVE,
+        MouseButton::WheelRight(_) => Buttons::HORZ_WHEEL,
+        MouseButton::None => Buttons::NONE,
     }
 }
 
@@ -588,4 +597,74 @@ pub async fn run<
     .detach();
 
     result
+}
+
+// fork: covers termwiz_mouse_buttons, the release reporting fix
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use termwiz::input::MouseButtons as Buttons;
+    use wezterm_term::input::{MouseButton, MouseEventKind};
+
+    fn event(kind: MouseEventKind, button: MouseButton) -> MouseEvent {
+        MouseEvent {
+            kind,
+            x: 3,
+            y: 1,
+            x_pixel_offset: 0,
+            y_pixel_offset: 0,
+            button,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn release_reports_no_buttons() {
+        for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+            assert_eq!(
+                termwiz_mouse_buttons(&event(MouseEventKind::Release, button)),
+                Buttons::NONE
+            );
+        }
+    }
+
+    #[test]
+    fn press_and_drag_report_the_held_button() {
+        assert_eq!(
+            termwiz_mouse_buttons(&event(MouseEventKind::Press, MouseButton::Left)),
+            Buttons::LEFT
+        );
+        assert_eq!(
+            termwiz_mouse_buttons(&event(MouseEventKind::Press, MouseButton::Right)),
+            Buttons::RIGHT
+        );
+        assert_eq!(
+            termwiz_mouse_buttons(&event(MouseEventKind::Move, MouseButton::Left)),
+            Buttons::LEFT
+        );
+        assert_eq!(
+            termwiz_mouse_buttons(&event(MouseEventKind::Move, MouseButton::None)),
+            Buttons::NONE
+        );
+    }
+
+    #[test]
+    fn wheel_mapping_is_unchanged() {
+        assert_eq!(
+            termwiz_mouse_buttons(&event(MouseEventKind::Press, MouseButton::WheelUp(1))),
+            Buttons::VERT_WHEEL | Buttons::WHEEL_POSITIVE
+        );
+        assert_eq!(
+            termwiz_mouse_buttons(&event(MouseEventKind::Press, MouseButton::WheelDown(1))),
+            Buttons::VERT_WHEEL
+        );
+        assert_eq!(
+            termwiz_mouse_buttons(&event(MouseEventKind::Press, MouseButton::WheelLeft(1))),
+            Buttons::HORZ_WHEEL | Buttons::WHEEL_POSITIVE
+        );
+        assert_eq!(
+            termwiz_mouse_buttons(&event(MouseEventKind::Press, MouseButton::WheelRight(1))),
+            Buttons::HORZ_WHEEL
+        );
+    }
 }

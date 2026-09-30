@@ -2,7 +2,7 @@
 # 语义：docs/AGENT_RULES/<id>.md 是该域规则正文；paths 是 Git 可见文件的
 # glob（* 不跨目录、** 跨目录）；tasks 把任务类型路由到额外必读文档。
 # 维护：新增/移动文件后必须让 `python3 scripts/resolve_agent_rules.py --check`
-# 通过（全仓闭集：每个文件恰好命中一个领域或 root_only）。
+# 通过（全仓闭集：每个文件命中领域（多个时取并集）或 root_only，二者不重叠）。
 
 version = 2
 root_max_bytes = 16384
@@ -109,6 +109,9 @@ id = "dotfiles"
 doc = "docs/AGENT_RULES/dotfiles.md"
 paths = [
   "dotfiles/**",
+  "scripts/gx-launcher/**",
+  "scripts/gx_config_fingerprints.py",
+  "scripts/gx_package.py",
 ]
 tasks = []
 

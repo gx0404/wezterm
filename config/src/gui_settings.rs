@@ -10,6 +10,7 @@
 
 use crate::i18n::UiLanguage;
 use crate::{json_to_dynamic, xdg_config_home, HOME_DIR};
+use anyhow::Context;
 use mlua::Lua;
 use std::path::{Path, PathBuf};
 use wezterm_dynamic::Value;
@@ -33,30 +34,39 @@ fn settings_file_in_dir(dir: Option<&Path>) -> PathBuf {
     }
 }
 
-fn parse_file(path: &Path) -> Option<serde_json::Value> {
+/// `Ok(None)` when the file is absent or malformed. Any other read error
+/// is returned: treating an unreadable file as absent would let the next
+/// write replace it with a single key, dropping all the others.
+fn parse_file(path: &Path) -> anyhow::Result<Option<serde_json::Value>> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(err) => {
-            log::warn!("gui-settings: cannot read {}: {err}", path.display());
-            return None;
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err).with_context(|| format!("cannot read {}", path.display())),
     };
     match serde_json::from_str(&text) {
-        Ok(value) => Some(value),
+        Ok(value) => Ok(Some(value)),
         Err(err) => {
             // A corrupt GUI-owned file must not take the whole config down;
             // fall back to defaults and let the next settings write repair it.
             log::warn!("gui-settings: ignoring malformed {}: {err}", path.display());
-            None
+            Ok(None)
         }
     }
+}
+
+/// `parse_file` for readers: an unreadable file is logged and treated as
+/// absent, since reading must never fail the config load.
+fn read_file(path: &Path) -> Option<serde_json::Value> {
+    parse_file(path).unwrap_or_else(|err| {
+        log::warn!("gui-settings: {err:#}");
+        None
+    })
 }
 
 /// Load the settings sidecar next to `dir` (the config file's directory)
 /// as a dynamic Value; `Value::Null` when absent or unreadable.
 pub fn load_value_in_dir(dir: Option<&Path>) -> Value {
-    parse_file(&settings_file_in_dir(dir))
+    read_file(&settings_file_in_dir(dir))
         .map(|json| json_to_dynamic(&json))
         .unwrap_or(Value::Null)
 }
@@ -169,7 +179,8 @@ fn dynamic_to_json(value: &Value) -> serde_json::Value {
 }
 
 /// Upsert a single settings key, preserving other keys, then atomically
-/// replace the file (write to a sibling temp file + rename).
+/// replace the file (write to a sibling temp file + rename). An existing
+/// file that cannot be read is an error and is left untouched.
 pub fn store_key(key: &str, value: &Value) -> anyhow::Result<()> {
     store_key_in_dir(None, key, value)
 }
@@ -180,7 +191,7 @@ pub fn store_key(key: &str, value: &Value) -> anyhow::Result<()> {
 /// user's real gui-settings.json (WEZ-CFG-01).
 pub fn store_key_in_dir(dir: Option<&Path>, key: &str, value: &Value) -> anyhow::Result<()> {
     let path = settings_file_in_dir(dir);
-    let mut root = parse_file(&path).unwrap_or_else(|| serde_json::json!({}));
+    let mut root = parse_file(&path)?.unwrap_or_else(|| serde_json::json!({}));
     if !root.is_object() {
         log::warn!(
             "gui-settings: {} is not a JSON object; rewriting it",
@@ -204,19 +215,37 @@ pub fn store_key_in_dir(dir: Option<&Path>, key: &str, value: &Value) -> anyhow:
 /// Cheap language probe for early CLI startup: read the sidecar's
 /// top-level `language` without executing any Lua.
 pub fn peek_language() -> Option<UiLanguage> {
-    let root = parse_file(&settings_path())?;
+    let root = read_file(&settings_path())?;
     root.get("language")?.as_str().and_then(UiLanguage::parse)
 }
 
+/// fork: the settings overlay's default shell choice, a GX shell id
+/// (`gx-zsh`, `pwsh`, `wsl:<Distro>`, …) read back by the lua launch
+/// config. Absent means GX Zsh.
+pub const DEFAULT_SHELL_KEY: &str = "default_shell";
+
+/// The saved default shell id, read without executing any Lua.
+pub fn default_shell() -> Option<String> {
+    default_shell_in_dir(None)
+}
+
+/// `default_shell` against an explicit config directory (WEZ-CFG-01).
+pub fn default_shell_in_dir(dir: Option<&Path>) -> Option<String> {
+    let root = read_file(&settings_file_in_dir(dir))?;
+    root.get(DEFAULT_SHELL_KEY)?.as_str().map(str::to_string)
+}
+
 /// fork: keys owned by fork GUI overlays rather than the Config struct
-/// (e.g. the wallpaper overlay's `wallpaper` key, batch 13). They are
-/// persisted in the sidecar but consumed by the overlay / the lua
-/// backdrops module; applying them onto the lua config would warn
-/// about an invalid key on every load, so skip them silently here.
-const GUI_OWNED_KEYS: &[&str] = &["wallpaper"];
+/// (e.g. the wallpaper overlay's `wallpaper` key, batch 13, and the
+/// settings overlay's `default_shell`). They are persisted in the sidecar
+/// but consumed by the overlay / the lua config modules; applying them
+/// onto the lua config would warn about an invalid key on every load, so
+/// skip them silently here.
+const GUI_OWNED_KEYS: &[&str] = &["wallpaper", DEFAULT_SHELL_KEY];
 
 /// Remove a single settings key, preserving the others (atomic write
-/// like `store_key`). Missing file / missing key is a no-op.
+/// like `store_key`). Missing file / missing key is a no-op; an unreadable
+/// file is an error.
 pub fn delete_key(key: &str) -> anyhow::Result<()> {
     delete_key_in_dir(None, key)
 }
@@ -224,7 +253,7 @@ pub fn delete_key(key: &str) -> anyhow::Result<()> {
 /// `delete_key` against an explicit config directory (WEZ-CFG-01).
 pub fn delete_key_in_dir(dir: Option<&Path>, key: &str) -> anyhow::Result<()> {
     let path = settings_file_in_dir(dir);
-    let Some(mut root) = parse_file(&path) else {
+    let Some(mut root) = parse_file(&path)? else {
         return Ok(());
     };
     let Some(obj) = root.as_object_mut() else {
@@ -246,11 +275,12 @@ pub fn delete_key_in_dir(dir: Option<&Path>, key: &str) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    fn temp_dir() -> PathBuf {
+    /// A fresh directory per test: tests may share a process (threaded
+    /// `cargo test`), so each one needs its own name
+    fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "wezterm-gui-settings-test-{}-{}",
-            std::process::id(),
-            line!()
+            "wezterm-gui-settings-test-{}-{name}",
+            std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -259,7 +289,7 @@ mod tests {
 
     #[test]
     fn store_and_load_roundtrip() {
-        let dir = temp_dir();
+        let dir = temp_dir("roundtrip");
         store_key_in_dir(Some(&dir), "language", &Value::String("en".into())).unwrap();
         store_key_in_dir(
             Some(&dir),
@@ -283,7 +313,7 @@ mod tests {
 
     #[test]
     fn malformed_file_is_ignored() {
-        let dir = temp_dir();
+        let dir = temp_dir("malformed");
         std::fs::write(dir.join(GUI_SETTINGS_FILE), "{not json").unwrap();
         assert!(matches!(load_value_in_dir(Some(&dir)), Value::Null));
         let _ = std::fs::remove_dir_all(&dir);
@@ -291,7 +321,7 @@ mod tests {
 
     #[test]
     fn missing_file_is_null() {
-        let dir = temp_dir();
+        let dir = temp_dir("missing");
         assert!(matches!(load_value_in_dir(Some(&dir)), Value::Null));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -301,8 +331,8 @@ mod tests {
     // never reads the user's real sidecar.
     #[test]
     fn explicit_dir_isolates_from_ambient() {
-        let iso = temp_dir();
-        let ambient = temp_dir();
+        let iso = temp_dir("iso");
+        let ambient = temp_dir("ambient");
         store_key_in_dir(Some(&ambient), "language", &Value::String("en".into())).unwrap();
         store_key_in_dir(Some(&iso), "language", &Value::String("zh-CN".into())).unwrap();
 
@@ -323,11 +353,64 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ambient);
     }
 
+    #[test]
+    fn gui_owned_keys_never_reach_the_lua_config() {
+        let dir = temp_dir("owned-keys");
+        store_key_in_dir(Some(&dir), DEFAULT_SHELL_KEY, &Value::String("pwsh".into())).unwrap();
+        store_key_in_dir(Some(&dir), "wallpaper", &Value::String("a.jpg".into())).unwrap();
+        store_key_in_dir(Some(&dir), "font_size", &Value::U64(13)).unwrap();
+
+        let lua = Lua::new();
+        let config = mlua::Value::Table(lua.create_table().unwrap());
+        let table = match apply_to_lua(&lua, config, Some(&dir)).unwrap() {
+            mlua::Value::Table(table) => table,
+            other => panic!("expected a table, got {:?}", other),
+        };
+        assert_eq!(table.get::<_, i64>("font_size").unwrap(), 13);
+        // Setting them on a config builder would fail the strict key check
+        // and warn on every load; a plain table would accept them silently
+        assert!(!table.contains_key(DEFAULT_SHELL_KEY).unwrap());
+        assert!(!table.contains_key("wallpaper").unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn default_shell_is_stored_read_back_and_removed() {
+        let dir = temp_dir("default-shell");
+        store_key_in_dir(Some(&dir), "language", &Value::String("en".into())).unwrap();
+        assert_eq!(default_shell_in_dir(Some(&dir)), None);
+        store_key_in_dir(
+            Some(&dir),
+            DEFAULT_SHELL_KEY,
+            &Value::String("wsl:Ubuntu".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            default_shell_in_dir(Some(&dir)).as_deref(),
+            Some("wsl:Ubuntu")
+        );
+        delete_key_in_dir(Some(&dir), DEFAULT_SHELL_KEY).unwrap();
+        assert_eq!(default_shell_in_dir(Some(&dir)), None);
+
+        // Removing the choice keeps the other settings
+        let loaded = load_value_in_dir(Some(&dir));
+        let obj = match &loaded {
+            Value::Object(obj) => obj,
+            other => panic!("expected object, got {:?}", other),
+        };
+        assert_eq!(
+            obj.get_by_str("language"),
+            Some(&Value::String("en".into()))
+        );
+        assert_eq!(obj.get_by_str(DEFAULT_SHELL_KEY), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // WEZ-CFG-01: two loads against the same effective config dir resolve to
     // the same sidecar path (first load and reload agree).
     #[test]
     fn repeated_loads_resolve_same_path() {
-        let dir = temp_dir();
+        let dir = temp_dir("repeated");
         store_key_in_dir(Some(&dir), "font_size", &Value::U64(12)).unwrap();
         let first = load_value_in_dir(Some(&dir));
         let second = load_value_in_dir(Some(&dir));
@@ -337,6 +420,22 @@ mod tests {
             dir.join(GUI_SETTINGS_FILE)
         );
         assert!(dir.join(GUI_SETTINGS_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unreadable_file_is_never_replaced() {
+        // A directory in place of the file fails to read with an error
+        // other than NotFound on every platform
+        let dir = temp_dir("unreadable");
+        let path = dir.join(GUI_SETTINGS_FILE);
+        std::fs::create_dir(&path).unwrap();
+        assert!(store_key_in_dir(Some(&dir), "language", &Value::String("en".into())).is_err());
+        assert!(delete_key_in_dir(Some(&dir), "language").is_err());
+        assert!(path.is_dir(), "the unreadable entry must be left alone");
+        // Readers log it and carry on without the sidecar
+        assert!(matches!(load_value_in_dir(Some(&dir)), Value::Null));
+        assert_eq!(default_shell_in_dir(Some(&dir)), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -67,7 +67,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/block_dangerous.sh\"",
+            "command": "bash \"$(git rev-parse --show-toplevel)/wezterm/.claude/hooks/block_dangerous.sh\"",
             "timeout": 30
           }
         ]

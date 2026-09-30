@@ -649,6 +649,9 @@ pub enum KeyAssignment {
     ActivateCommandPalette,
     /// fork: open the settings overlay (herdr-style)
     OpenSettings,
+    /// fork: open the settings overlay directly on its Shell section, where
+    /// the default shell is chosen
+    ShowDefaultShellSettings,
     /// fork: open the main menu overlay (herdr-style)
     ShowMainMenu,
     /// fork: open the keybinding cheat-sheet overlay

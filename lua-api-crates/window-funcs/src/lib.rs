@@ -3,6 +3,7 @@ use config::lua::mlua::{self, Lua};
 use luahelper::impl_lua_conversion_dynamic;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Mutex;
 use wezterm_dynamic::{FromDynamic, ToDynamic};
 use window::{Appearance, Connection, ConnectionOps};
 
@@ -10,6 +11,35 @@ fn get_conn() -> mlua::Result<Rc<Connection>> {
     Connection::get().ok_or_else(|| {
         mlua::Error::external("cannot get window Connection: not running on the gui thread?")
     })
+}
+
+// fork: the config is also evaluated off the GUI thread (the config file
+// watcher reloads on its own thread) and windows without overrides use
+// that result as is. There is no Connection there, so these report what
+// the GUI thread last saw instead of assuming Light / failing.
+static LAST_KNOWN_APPEARANCE: Mutex<Option<Appearance>> = Mutex::new(None);
+static LAST_KNOWN_SCREENS: Mutex<Option<Screens>> = Mutex::new(None);
+
+/// fork: record the appearance reported by the windowing environment
+/// (set by the GUI when it changes, and on every GUI-thread query).
+pub fn set_last_known_appearance(appearance: Appearance) {
+    if let Ok(mut last) = LAST_KNOWN_APPEARANCE.lock() {
+        *last = Some(appearance);
+    }
+}
+
+fn last_known_appearance() -> Option<Appearance> {
+    LAST_KNOWN_APPEARANCE.lock().ok().and_then(|last| *last)
+}
+
+fn remember_screens(screens: &Screens) {
+    if let Ok(mut last) = LAST_KNOWN_SCREENS.lock() {
+        *last = Some(screens.clone());
+    }
+}
+
+fn last_known_screens() -> Option<Screens> {
+    LAST_KNOWN_SCREENS.lock().ok().and_then(|last| last.clone())
 }
 
 #[derive(Debug, Clone, FromDynamic, ToDynamic)]
@@ -80,11 +110,15 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
     window_mod.set(
         "screens",
         lua.create_function(|_, _: ()| {
-            let conn = get_conn()?;
+            let conn = match get_conn() {
+                Ok(conn) => conn,
+                Err(err) => return last_known_screens().ok_or(err),
+            };
             let screens: Screens = conn
                 .screens()
                 .map_err(|err| mlua::Error::external(format!("{err:#}")))?
                 .into();
+            remember_screens(&screens);
             Ok(screens)
         })?,
     )?;
@@ -93,14 +127,68 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
         "get_appearance",
         lua.create_function(|_, _: ()| {
             Ok(match Connection::get() {
-                Some(conn) => conn.get_appearance().to_string(),
+                Some(conn) => {
+                    let appearance = conn.get_appearance();
+                    set_last_known_appearance(appearance);
+                    appearance.to_string()
+                }
                 None => {
-                    // Gui hasn't started yet, assume light
-                    Appearance::Light.to_string()
+                    // fork: off the GUI thread report what the GUI last
+                    // saw; if the gui hasn't started yet, assume light
+                    last_known_appearance()
+                        .unwrap_or(Appearance::Light)
+                        .to_string()
                 }
             })
         })?,
     )?;
 
     Ok(())
+}
+
+// fork: test threads have no Connection, like the config file watcher
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn eval<T: for<'lua> mlua::FromLua<'lua>>(lua: &Lua, expr: &str) -> mlua::Result<T> {
+        let code = format!("return package.loaded.wezterm.gui.{expr}");
+        lua.load(code.as_str()).eval()
+    }
+
+    #[test]
+    fn appearance_off_the_gui_thread_is_the_last_one_the_gui_saw() {
+        let lua = Lua::new();
+        register(&lua).unwrap();
+        assert_eq!(eval::<String>(&lua, "get_appearance()").unwrap(), "Light");
+        set_last_known_appearance(Appearance::Dark);
+        assert_eq!(eval::<String>(&lua, "get_appearance()").unwrap(), "Dark");
+    }
+
+    #[test]
+    fn screens_off_the_gui_thread_are_the_last_ones_the_gui_saw() {
+        let lua = Lua::new();
+        register(&lua).unwrap();
+        assert!(eval::<String>(&lua, "screens().main.name").is_err());
+        let info = ScreenInfo {
+            name: "main".to_string(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+            max_fps: None,
+            effective_dpi: None,
+        };
+        remember_screens(&Screens {
+            main: info.clone(),
+            active: info.clone(),
+            by_name: HashMap::from([("main".to_string(), info)]),
+            origin_x: 0,
+            origin_y: 0,
+            virtual_width: 1920,
+            virtual_height: 1080,
+        });
+        assert_eq!(eval::<String>(&lua, "screens().main.name").unwrap(), "main");
+    }
 }

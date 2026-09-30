@@ -2,11 +2,13 @@
 
 {{since('nightly')}}
 
-Opens the settings overlay (a fork addition): four sections — Language
+Opens the settings overlay (a fork addition): five sections — Language
 (中文/English), Appearance (1001 built-in color schemes with fuzzy
 filtering, live preview on move/hover, Enter to apply, Esc to revert),
 Interaction (toggles for the right-click menu, scroll bar, audible bell
-and close confirmation) and Font (font size step/reset).
+and close confirmation), Font (font size step/reset) and Shell (the
+default shell, see [ShowDefaultShellSettings](ShowDefaultShellSettings.md),
+which opens the overlay on that section).
 
 Applying a value writes `gui-settings.json` next to the effective
 `wezterm.lua` and reloads the configuration so it applies globally and
