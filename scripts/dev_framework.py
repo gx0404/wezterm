@@ -12,7 +12,7 @@ import subprocess
 import sys
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,6 +84,27 @@ def ready(data: dict) -> None:
         raise ValueError("PENDING: " + ", ".join(pending))
 
 
+def windows_bash() -> str:
+    # System32 与 WindowsApps 下的 bash.exe 是 WSL 启动器，不能解释仓库脚本。
+    system32 = PureWindowsPath(os.environ.get("SYSTEMROOT") or r"C:\Windows", "System32")
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        folder = PureWindowsPath(entry)
+        if not entry or folder == system32 or "windowsapps" in (part.lower() for part in folder.parts):
+            continue
+        candidate = Path(entry) / "bash.exe"
+        if candidate.is_file():
+            return str(candidate)
+    raise ValueError("Windows 上运行 .sh 需要 PATH 中有 Git Bash 或 MSYS2 的 bash.exe"
+                     "（System32、WindowsApps 下的 WSL 启动器不可用）")
+
+
+def command(argv: list[str]) -> list[str]:
+    # Windows 不能直接执行 .sh（WinError 193），改由 bash 解释。
+    if os.name == "nt" and argv[0].endswith(".sh"):
+        return [windows_bash(), *argv]
+    return argv
+
+
 def run(data: dict, target: str) -> int:
     if target not in data["commands"]:
         raise ValueError(f"未知命令：{target}")
@@ -94,7 +115,7 @@ def run(data: dict, target: str) -> int:
         print(f"N/A {target}: {item['reason']}")
         return 0
     # 仅显式 run/ci 执行已审阅命令；不使用 shell 拼接和自动重试。
-    return subprocess.run(item["argv"], cwd=within(item.get("cwd", "."), allow_root=True),
+    return subprocess.run(command(item["argv"]), cwd=within(item.get("cwd", "."), allow_root=True),
                           check=False).returncode
 
 
@@ -198,7 +219,12 @@ def main() -> int:
                     cwd = within(item.get("cwd", "."), allow_root=True)
                     executable = item["argv"][0]
                     found = os.access(cwd / executable, os.X_OK) if "/" in executable else bool(shutil.which(executable))
-                    print(f"{'FOUND' if found else 'MISSING'} {name}: 可执行文件；未运行")
+                    detail = "可执行文件；未运行"
+                    try:
+                        command(item["argv"])  # 与 run 同一解析：Windows 的 .sh 入口还须找到 bash
+                    except ValueError as exc:
+                        found, detail = False, f"{exc}；未运行"
+                    print(f"{'FOUND' if found else 'MISSING'} {name}: {detail}")
                     failed |= not found
                 else:
                     print(f"{state.upper()} {name}: {item['reason']}")

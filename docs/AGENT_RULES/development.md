@@ -14,11 +14,14 @@
 - 命令调度：`scripts/dev_framework.py` 读 `docs/dev-framework.json`
   （schema 1；evidence_root 必须是隐藏且 ignored 的独立目录；ci 只含检查类
   目标且 lint/test 不可 N/A；configured 命令必须 argv 数组 + 仓内 cwd）。
+  Windows 上 `.sh` 入口经 PATH 中的 Git Bash/MSYS2 bash 执行（跳过 System32、
+  WindowsApps 下的 WSL 启动器），找不到时 doctor 报 MISSING、run 报错。
 - 版本：`scripts/version.py`——根 CHANGELOG.md 的最大 SemVer 为真源，
   `--check` 校验镜像、`--write` 原子写入（本仓 version_targets 为空，见
   docs/RELEASE.md 的两套版本体系说明）。
-- 工具钉版：`scripts/setup_env.sh` → `.local/tools/`（nextest 预编译包
-  sha256 钉版 + venv{graphifyy, tomli}）；Makefile 已把其 bin 前置 PATH。
+- 工具钉版：`scripts/setup_env.sh` → `.local/tools/`（nextest/stylua 预编译包
+  sha256 钉版 + venv{graphifyy, tomli}；Windows 下载 nextest/stylua 的 Windows
+  版并同样 sha256 钉版，跳过 venv）；Makefile 已把其 bin 前置 PATH。
 - hooks：`.claude/hooks/dangerous_patterns.conf` 是危险模式唯一真源，
   `pre_tool_use_gate.py` 消费（claude/codex 协议适配；ZCode 复用 claude 形）。
 

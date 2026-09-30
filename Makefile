@@ -34,6 +34,32 @@ servedocs:
 export PATH := $(CURDIR)/.local/tools/venv/bin:$(CURDIR)/.local/tools/nextest/bin:$(CURDIR)/.local/tools/stylua/bin:$(PATH)
 FRAMEWORK_PY := $(if $(wildcard .local/tools/venv/bin/python),.local/tools/venv/bin/python,python3)
 
+# Git Bash 调 MSYS2 make 时两套 msys-2.0.dll 运行时互不相认，子进程环境只剩 PATH/SYSTEMROOT
+# 等少数变量：缺 TMP/TEMP 时 dlltool/gcc 回退到 C:\WINDOWS\ 建临时文件而失败，缺 USERPROFILE
+# 时 Python 的 Path.home() 抛 RuntimeError，缺 LOCALAPPDATA 时 gx_package.py 找不到用户级
+# Inno Setup。仅 cygwin/msys 版 make 下用 cygpath -F 取 Windows 已知文件夹补缺失项，不覆盖已有值。
+ifneq ($(filter %-cygwin %-msys,$(MAKE_HOST)),)
+ifeq ($(and $(TMP),$(TEMP)),)
+WIN_TEMP_DIR := $(shell d="$$(/usr/bin/cygpath -m -F 28)/Temp" && test -d "$$d" && echo "$$d")
+ifneq ($(WIN_TEMP_DIR),)
+export TMP := $(or $(TMP),$(WIN_TEMP_DIR))
+export TEMP := $(or $(TEMP),$(WIN_TEMP_DIR))
+endif
+endif
+ifeq ($(USERPROFILE),)
+WIN_PROFILE_DIR := $(shell /usr/bin/cygpath -w -F 40)
+ifneq ($(WIN_PROFILE_DIR),)
+export USERPROFILE := $(WIN_PROFILE_DIR)
+endif
+endif
+ifeq ($(LOCALAPPDATA),)
+WIN_LOCAL_APPDATA_DIR := $(shell /usr/bin/cygpath -w -F 28)
+ifneq ($(WIN_LOCAL_APPDATA_DIR),)
+export LOCALAPPDATA := $(WIN_LOCAL_APPDATA_DIR)
+endif
+endif
+endif
+
 # build/test 沿用上方上游目标语义；框架命令经 dev_framework.py 调度，不重复定义。
 FRAMEWORK_COMMANDS := setup dev lint typecheck test-integration test-heavy \
 	generated-check generated-write ui-smoke graph graph-check kb kb-check framework-test \

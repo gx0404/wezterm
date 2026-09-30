@@ -24,6 +24,13 @@
 - 恢复独立 `gx-ci` 自动检查：GX 分支 push/PR 运行格式、框架规则及 Windows/Linux
   构建与全量测试，包含 escape-parser no_std 轮；只读权限、同分支取消旧 CI，
   不影响手动 `gx-release`，不恢复上游发布链。
+- Windows 本地构建提速说明（`docs/MAKE_COMMANDS.md`）：gnu 工具链 + MSYS2 系统
+  OpenSSL 静态链接 + lld + sccache + 行号级调试信息，winapi 改用 MinGW 导入库，
+  附机器级 cargo 配置与取舍原因。i9-13900H 实测：冷构建全部测试二进制
+  1613 s → 410 s（3.93 倍），sccache 热缓存 248 s；增量中位数核心 crate
+  31 s → 28 s、wezterm-gui 链接 11 s → 6 s。
+- `make setup` 支持 Windows：下载 Windows 版 nextest/stylua 并按 sha256 钉版
+  （优先系统 curl.exe），跳过框架 venv。
 
 ### Fixed
 - 补回 Codex 安全门 Python 适配器及 Git 白名单，复用共享策略并透传错误，避免
@@ -50,6 +57,13 @@
 - GX 工作流首次收拢时仅保留 `gx-release`，将 35 个上游流程及旧 Windows
   ZIP 流程原样归档；后续由独立 `gx-ci` 恢复自动检查。`main` 继续独立同步
   上游，保留历史构建。
+- Git Bash 调用 MSYS2 make 时 TMP/TEMP 丢失，dlltool 无法在 `C:\WINDOWS\` 建
+  临时文件，导致 `make check/test` 失败；Makefile fork 段补 TMP/TEMP 兜底。
+- 同一场景下 USERPROFILE/LOCALAPPDATA 也丢失：Python `Path.home()` 崩溃使
+  `make framework-check` 失败，打包脚本找不到用户级 Inno Setup；一并补回。
+- `scripts/dev_framework.py` 在 Windows 直接执行 `.sh` 入口报 WinError 193，
+  `make setup` 等失败；改经 PATH 中的 Git Bash/MSYS2 bash 执行，找不到时
+  `make ai-doctor` 报 MISSING。
 
 ## 0.2.0(2026-09-21)
 
