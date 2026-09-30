@@ -8,6 +8,11 @@ drift.  Run manually when adding entries; the output is committed.
     python3 scripts/gen_zh_table.py > config/src/i18n/zh_cn.rs
 """
 
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(newline="\n")
+
 PAIRS = [
     # ---- command palette: static briefs ----
     ("Paste primary selection", "粘贴主选区"),
