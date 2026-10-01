@@ -16,7 +16,10 @@ Lua gui 命名空间。平台窗口与事件抽象在 platform-window 域（`win
   `tab_state`/`pane_state`（每 pane 视口/选区/overlay 缓存）、`modal`、
   `preview_palette`（fork：窗口级易失预览调色板，只经
   `TermWindow::set_preview_palette` 设/清并在那里统一丢色相关缓存；设上
-  之后 `palette()`/`pane_palette()` 是渲染取色的唯一入口，不走配置重载）。
+  之后 `palette()`/`pane_palette()` 是渲染取色的唯一入口，不走配置重载。
+  fork：连续变更经 100ms 节流合并——palette 赋值与双代数失效在
+  `apply_preview_palette` 同一同步步完成，pending 未冲刷前保持旧值，
+  不出现错色帧）。
   跨线程通知统一走 `TermWindowNotif`（`Window::notify` → 主线程
   `dispatch_notif`）。
 - 渲染：`termwindow/render/paint.rs::paint_impl`（'pass 循环处理

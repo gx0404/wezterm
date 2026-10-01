@@ -14,7 +14,9 @@
   经 `notify_from_any_thread` 发布；GUI 前端与 CLI 都靠它驱动。
 - 输出泵：`read_from_pane_pty`（阻塞读线程）→ socketpair →
   `parse_buffered_data`（escape 解析，含 DECSET 2026 同步输出 hold/flush 与
-  coalesce 延迟）→ `send_actions_to_mux` → `Pane::perform_actions`。
+  coalesce 延迟）→ `send_actions_to_mux` → `Pane::perform_actions`；单批
+  action ≥2048 时按 2048 子批依次应用、子批间释放终端锁（fork：高速大输出
+  时渲染线程不再被单次长临界区挡住，小批路径与上游等价）。
 - 域与 pane：`mux/src/domain.rs::Domain` trait（LocalDomain、
   `ssh.rs::RemoteSshDomain`）；`pane.rs::Pane` trait +
   `localpane.rs::LocalPane`；`tab.rs::Tab`（`TabInner` 内 bintree pane 树 +

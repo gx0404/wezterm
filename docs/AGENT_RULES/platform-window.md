@@ -12,13 +12,20 @@
   消息循环、DPI：macOS 72 其余 96、外观、屏幕枚举）。
 - 窗口层：`window/src/lib.rs::WindowOps` trait + `WindowEvent` 枚举 +
   `WindowState` bitflags（can_resize/can_paint 门）；`WindowEventSender`
-  把事件回调挂到 wezterm-gui 的 `dispatch_window_event`。
+  把事件回调挂到 wezterm-gui 的 `dispatch_window_event`。剪贴板文本走
+  `get_clipboard/set_clipboard`；fork 增 `get_clipboard_image`（默认实现
+  解析 None，Windows 实现按 注册PNG → CF_DIBV5 → CF_DIB 取原始字节、
+  后台线程读取，window 层不引 `image` 依赖、只还字节）。
 - 平台选择：`window/src/os/x_and_wayland.rs`——Linux 上 `Connection`/
   `Window` 是 `X11(..)|Wayland(..)` 枚举，`create_new()` 先 Wayland（config
   `enable_wayland` + feature）失败回落 X11；其余平台 `os/{macos,windows}`。
 - 键盘编码：`os/x11/keyboard.rs::XKeymap`（xkbcommon+compose；X keycode 有
   +8 偏移）、`os/xkeysyms.rs::keysym_to_keycode`、各平台 keycodes.rs；
   输入类型真源在 `wezterm-input-types`（window 直接 re-export）。
+- vsync 关闭（fork）：Windows WGL 上下文创建后调 `wglSwapIntervalEXT(0)`
+  （`os/windows/wgl.rs`），与 `egl.rs::SwapInterval(0)`、macOS 一致——帧率
+  节流统一交给 GUI 的 max_fps 机制，不要在平台层重新启用 vsync（paint 会
+  在 wndProc 内同步等 vblank 卡住消息循环）。
 - 纹理契约：`window/src/bitmaps/atlas.rs::Atlas`（`allocate()` 失败给
   `OutOfTextureSpace`）+ `bitmaps/mod.rs::Texture2d` trait——GUI 的 atlas
   降级链依赖该契约。

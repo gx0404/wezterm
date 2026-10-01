@@ -31,8 +31,10 @@ nextest 版本以 `scripts/setup_env.sh` 为准；只通过当前进程环境选
   UTF-8，导致 `openssl-sys` 解析失败；这与 RC 模板中的 UTF-8 声明是不同层。
 - 使用支持中文调试信息路径的 NASM；本仓已验证 3.02。旧版本可能在生成
   OpenSSL 汇编调试信息时报告 `unable to hash file`，不应关闭汇编绕过。
-- 使用 GNU Make 时将 `BUILD_OPTS=--locked` 设置为环境变量，不作为 Make 命令行
-  赋值传入，避免 GNU Make 的 `MAKEFLAGS` 被 OpenSSL 的 NMake 错误继承。
+- 使用 GNU Make 时将 `BUILD_OPTS=--release --locked` 设置为环境变量，不作为
+  Make 命令行赋值传入，避免 GNU Make 的 `MAKEFLAGS` 被 OpenSSL 的 NMake 错误
+  继承。注意 fork 段默认 `BUILD_OPTS ?= --release`，环境变量整体覆盖默认值，
+  只写 `--locked` 会退回 dev 构建。
 
 例如在已配置上述工具 PATH 的 x64 Native Tools **cmd** 中：
 
@@ -40,7 +42,7 @@ nextest 版本以 `scripts/setup_env.sh` 为准；只通过当前进程环境选
 set "RUSTUP_TOOLCHAIN=1.96.1"
 set "CFLAGS=%CFLAGS% /utf-8"
 set "CXXFLAGS=%CXXFLAGS% /utf-8"
-set "BUILD_OPTS=--locked"
+set "BUILD_OPTS=--release --locked"
 gmake check build
 cargo nextest run --locked --all --no-fail-fast --test-threads 2
 cargo nextest run --locked -p wezterm-escape-parser
