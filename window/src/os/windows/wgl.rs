@@ -143,6 +143,20 @@ impl WglWrapper {
 
         Ok(())
     }
+
+    // fork: WGL swaps are vsync-throttled by default, so SwapBuffers blocks
+    // inside the wndProc paint path and stalls the whole message loop on
+    // vblank. Mirror window/src/egl.rs's SwapInterval(0) here and leave
+    // frame pacing to the existing max_fps mechanism. Silently skip when
+    // the driver has no WGL_EXT_swap_control.
+    fn disable_vsync(&self) {
+        if let Some(ext) = self.ext.as_ref() {
+            if ext.SwapIntervalEXT.is_loaded() {
+                let res = unsafe { ext.SwapIntervalEXT(0) };
+                log::trace!("wglSwapIntervalEXT(0) -> {}", res);
+            }
+        }
+    }
 }
 
 pub struct GlState {
@@ -322,6 +336,8 @@ impl GlState {
             wgl.wgl.MakeCurrent(hdc as *mut _, rc);
         }
 
+        wgl.disable_vsync();
+
         Ok(Self {
             wgl: Some(wgl),
             rc,
@@ -369,6 +385,8 @@ impl GlState {
         unsafe {
             wgl.wgl.MakeCurrent(hdc as *mut _, rc);
         }
+
+        wgl.disable_vsync();
 
         Ok(Self {
             wgl: Some(wgl),
