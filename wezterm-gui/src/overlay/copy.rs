@@ -39,6 +39,14 @@ lazy_static::lazy_static! {
 
 const SEARCH_CHUNK_SIZE: StableRowIndex = 1000;
 
+/// fork: row budget for one paragraph scan. A scrollback with no blank
+/// separator rows would otherwise walk its entire history in a single
+/// key press — hundreds of milliseconds of synchronous get_lines on the
+/// GUI thread even with thousand-row chunked fetching. Past the budget
+/// the scan stops at the furthest row it reached; repeated presses
+/// resume from there with a fresh budget.
+const PARAGRAPH_SCAN_ROW_LIMIT: usize = 10_000;
+
 /// fork (WZ-10): whether a row is blank — true unless any visible cell
 /// holds a non-whitespace character. `visible_cells` allocates nothing
 /// (the fetch path of the paragraph scan) and skips wide-char
@@ -78,56 +86,77 @@ fn paragraph_chunk_window(
 /// the adjacent paragraph in the requested direction). `is_blank(i)`
 /// reports whether row `i` is blank; rows are 0-based indices into a
 /// `rows`-long region. Pure so it can be unit tested.
+///
+/// fork: `scan_limit` caps how many rows one scan may walk away from the
+/// cursor; each `is_blank` probe beyond the cursor row spends one row of
+/// the budget, shared by every phase below. When the budget runs out the
+/// scan stops at the furthest row reached so far (a limit at or above
+/// `rows` keeps the scan exhaustive).
 fn scan_paragraph(
     rows: usize,
     cursor: usize,
     want_start: bool,
-    is_blank: impl Fn(usize) -> bool,
+    scan_limit: usize,
+    mut is_blank: impl FnMut(usize) -> bool,
 ) -> usize {
     let last = rows.saturating_sub(1);
     let mut i = cursor.min(last);
-    if is_blank(i) {
+    let remain = std::cell::Cell::new(scan_limit);
+    let mut blank = |i: usize| {
+        remain.set(remain.get().saturating_sub(1));
+        is_blank(i)
+    };
+    let exhausted = || remain.get() == 0;
+    // fork: the cursor row itself is free — the spent unit is refunded so
+    // the budget bounds the walk distance from the cursor, not the probe
+    // count. (The probe goes through `blank` because it holds the only
+    // borrow of `is_blank`.)
+    let cursor_blank = blank(i);
+    if remain.get() < scan_limit {
+        remain.set(remain.get() + 1);
+    }
+    if cursor_blank {
         // On a separator row: move to the adjacent paragraph
         if want_start {
-            while i > 0 && is_blank(i) {
+            while i > 0 && !exhausted() && blank(i) {
                 i -= 1;
             }
-            while i > 0 && !is_blank(i - 1) {
+            while i > 0 && !exhausted() && !blank(i - 1) {
                 i -= 1;
             }
         } else {
-            while i < last && is_blank(i) {
+            while i < last && !exhausted() && blank(i) {
                 i += 1;
             }
-            while i < last && !is_blank(i + 1) {
+            while i < last && !exhausted() && !blank(i + 1) {
                 i += 1;
             }
         }
         return i;
     }
     if want_start {
-        while i > 0 && !is_blank(i - 1) {
+        while i > 0 && !exhausted() && !blank(i - 1) {
             i -= 1;
         }
         if i == cursor {
             // Already at the paragraph start: continue to the previous one
-            while i > 0 && is_blank(i - 1) {
+            while i > 0 && !exhausted() && blank(i - 1) {
                 i -= 1;
             }
-            while i > 0 && !is_blank(i - 1) {
+            while i > 0 && !exhausted() && !blank(i - 1) {
                 i -= 1;
             }
         }
     } else {
-        while i < last && !is_blank(i + 1) {
+        while i < last && !exhausted() && !blank(i + 1) {
             i += 1;
         }
         if i == cursor {
             // Already at the paragraph end: continue to the next one
-            while i < last && is_blank(i + 1) {
+            while i < last && !exhausted() && blank(i + 1) {
                 i += 1;
             }
-            while i < last && !is_blank(i + 1) {
+            while i < last && !exhausted() && !blank(i + 1) {
                 i += 1;
             }
         }
@@ -1188,11 +1217,10 @@ impl CopyRenderable {
         // fork (WZ-10): chunked prefetch instead of one get_lines call
         // per row — a 200k-row unbroken log used to cost 200k
         // single-row fetches and froze the UI for seconds; now ~200
-        // thousand-row chunks.
-        const CHUNK: usize = 1000;
+        // thousand-row chunks (chunk size lives in paragraph_chunk_window).
         let cache: std::cell::RefCell<(usize, Vec<bool>)> =
             std::cell::RefCell::new((usize::MAX, Vec::new()));
-        let target = scan_paragraph(rows, idx, want_start, |i| {
+        let target = scan_paragraph(rows, idx, want_start, PARAGRAPH_SCAN_ROW_LIMIT, |i| {
             let mut c = cache.borrow_mut();
             let (ref mut start, ref mut blanks) = *c;
             if let Some((s, e)) = paragraph_chunk_window(i, *start, blanks.len(), rows, want_start)
@@ -2327,10 +2355,13 @@ pub fn copy_key_table() -> KeyTable {
 mod paragraph_tests {
     use super::scan_paragraph;
 
-    /// 'T' is a text row, '_' is a blank separator row
+    /// 'T' is a text row, '_' is a blank separator row. The default limit
+    /// keeps these small-buffer scans exhaustive.
     fn scan(pattern: &str, cursor: usize, want_start: bool) -> usize {
         let blanks: Vec<bool> = pattern.chars().map(|c| c == '_').collect();
-        scan_paragraph(blanks.len(), cursor, want_start, |i| blanks[i])
+        scan_paragraph(blanks.len(), cursor, want_start, blanks.len(), |i| {
+            blanks[i]
+        })
     }
 
     #[test]
@@ -2390,14 +2421,16 @@ mod paragraph_tests {
     fn paragraph_scan_fetches_in_thousand_row_chunks() {
         // fork (WZ-10): a paragraph jump across a 200k-row unbroken log
         // must fetch in ~rows/1000 chunks, not once per row (the old
-        // implementation made 200k single-row get_lines calls)
+        // implementation made 200k single-row get_lines calls). The limit
+        // is the full row count here so the scan stays exhaustive and the
+        // chunking (not the cap) is what's under test.
         use super::paragraph_chunk_window;
         let rows = 200_000usize;
         for want_start in [true, false] {
             let fetches = std::cell::Cell::new(0usize);
             let window = std::cell::RefCell::new((usize::MAX, 0usize)); // (start, len)
             let cursor = if want_start { rows - 1 } else { 0 };
-            let target = scan_paragraph(rows, cursor, want_start, |i| {
+            let target = scan_paragraph(rows, cursor, want_start, rows, |i| {
                 let mut w = window.borrow_mut();
                 if let Some((s, e)) = paragraph_chunk_window(i, w.0, w.1, rows, want_start) {
                     assert!(i >= s && i < e, "chunk [{s},{e}) must contain {i}");
@@ -2415,5 +2448,60 @@ mod paragraph_tests {
                 rows / 1000
             );
         }
+    }
+
+    #[test]
+    fn paragraph_scan_stops_at_the_row_budget() {
+        // fork: an unbroken scrollback longer than the budget must not be
+        // walked to its end in one press; the scan stops exactly the
+        // budget away from the cursor, having probed the budget plus the
+        // free cursor row
+        let rows = 20_000usize;
+        let limit = 10_000usize;
+        for want_start in [true, false] {
+            let probes = std::cell::Cell::new(0usize);
+            let cursor = if want_start { rows - 1 } else { 0 };
+            let target = scan_paragraph(rows, cursor, want_start, limit, |_| {
+                probes.set(probes.get() + 1);
+                false // no blank rows anywhere
+            });
+            let expected = if want_start { rows - 1 - limit } else { limit };
+            assert_eq!(target, expected, "want_start={want_start}");
+            assert_eq!(probes.get(), limit + 1, "want_start={want_start}");
+        }
+    }
+
+    #[test]
+    fn paragraph_scan_budget_spans_across_scan_phases() {
+        // fork: the budget is shared by every phase of the scan, so a
+        // separator run that eats it leaves the cursor mid-run instead of
+        // letting the follow-up phases restart with fresh budget
+        let blanks: Vec<bool> = vec![false, false, true, true, true, false, false];
+        let rows = blanks.len();
+        // Budget 2: walk off the separator row twice, then run out mid-run
+        let target = scan_paragraph(rows, 3, true, 2, |i| blanks[i]);
+        assert_eq!(target, 1);
+        // A generous budget still lands on the paragraph start
+        let target = scan_paragraph(rows, 3, true, rows, |i| blanks[i]);
+        assert_eq!(target, 0);
+    }
+
+    #[test]
+    fn paragraph_scan_budget_leaves_nearby_paragraphs_alone() {
+        // fork: real paragraphs sit within a few rows of the cursor; any
+        // sane budget keeps those jumps exact
+        let budget = 1_000usize;
+        let blanks: Vec<bool> = vec![true, true, false, false, false, true, false, false];
+        let rows = blanks.len();
+        assert_eq!(
+            scan_paragraph(rows, 5, true, budget, |i| blanks[i]),
+            2,
+            "start of the paragraph above"
+        );
+        assert_eq!(
+            scan_paragraph(rows, 2, false, budget, |i| blanks[i]),
+            4,
+            "end of the same paragraph"
+        );
     }
 }
