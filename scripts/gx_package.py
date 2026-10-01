@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -66,6 +67,165 @@ def digest(path: Path) -> str:
         for block in iter(lambda: source.read(1024 * 1024), b""):
             h.update(block)
     return h.hexdigest()
+
+
+def stage_path(value: str) -> str:
+    if not isinstance(value, str) or not value or chr(92) in value:
+        raise ValueError(f'unsafe stage path: {value!r}')
+    parts = value.split('/')
+    if any(not part or part in {'.', '..'} or part.endswith(('.', ' '))
+           or any(ord(char) < 32 or char in '<>:"|?*' for char in part)
+           for part in parts):
+        raise ValueError(f'unsafe stage path: {value!r}')
+    return value
+
+
+STAGE_MANIFEST = "stage-manifest.json"
+SOURCE_REPOSITORY = "gx0404/wezterm"
+STAGE_LINKS = {
+    f"root/usr/bin/{name}": f"../lib/wezterm-gx/{name}"
+    for name in ("wezterm-gx", "wezterm-gx-gui")
+}
+
+
+def stage_inventory(stage: Path, kind: str) -> list[dict]:
+    stage = Path(stage)
+    root_stat = stage.lstat()
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    if not stat.S_ISDIR(root_stat.st_mode) or getattr(root_stat, "st_file_attributes", 0) & reparse:
+        raise ValueError(f"stage root must be a plain directory: {stage}")
+    entries = []
+    names = set()
+    regular = set()
+
+    def visit(directory: Path):
+        for path in sorted(directory.iterdir(), key=lambda item: item.name):
+            rel = stage_path(path.relative_to(stage).as_posix())
+            folded = rel.casefold()
+            if folded in names:
+                raise ValueError(f"case-colliding stage path: {rel}")
+            names.add(folded)
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                target = os.readlink(path)
+                if kind != "deb" or STAGE_LINKS.get(rel) != target:
+                    raise ValueError(f"unsafe stage symlink: {rel} -> {target}")
+                entries.append({"path": rel, "symlink": target})
+            elif getattr(info, "st_file_attributes", 0) & reparse:
+                raise ValueError(f"unsafe stage reparse point: {rel}")
+            elif stat.S_ISDIR(info.st_mode):
+                visit(path)
+            elif stat.S_ISREG(info.st_mode):
+                if rel != STAGE_MANIFEST:
+                    regular.add(rel)
+                    entries.append({"path": rel, "size": info.st_size, "sha256": digest(path)})
+            else:
+                raise ValueError(f"unsupported stage file: {rel}")
+
+    visit(stage)
+    for entry in entries:
+        if "symlink" in entry:
+            target = "root/usr/lib/wezterm-gx/" + Path(entry["path"]).name
+            if target not in regular:
+                raise ValueError(f"stage symlink target is not a regular file: {entry['path']}")
+    return sorted(entries, key=lambda entry: entry["path"])
+
+
+def verify_stage(stage: Path) -> dict:
+    stage = Path(stage)
+    manifest_path = stage / STAGE_MANIFEST
+    info = manifest_path.lstat()
+    if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("stage manifest must be a regular file")
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate manifest key: {key}")
+            result[key] = value
+        return result
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
+    if not isinstance(manifest, dict) or type(manifest.get("schema")) is not int or manifest["schema"] != 2:
+        raise ValueError("stage manifest schema must be 2")
+    if manifest.get("source_repository") != SOURCE_REPOSITORY:
+        raise ValueError("unexpected stage source_repository")
+    kind = manifest.get("platform")
+    if kind not in {"windows", "deb"} or manifest.get("architecture") != "amd64":
+        raise ValueError("unsupported stage platform or architecture")
+    if not isinstance(manifest.get("source_commit"), str) or not re.fullmatch(r"[0-9a-f]{40}", manifest["source_commit"]):
+        raise ValueError("invalid stage source_commit")
+    if type(manifest.get("source_dirty")) is not bool:
+        raise ValueError("invalid stage source_dirty")
+    if not isinstance(manifest.get("package_version"), str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", manifest["package_version"]):
+        raise ValueError("invalid stage package_version")
+    for field in ("product_version", "resource_version"):
+        if not isinstance(manifest.get(field), str) or not manifest[field]:
+            raise ValueError(f"invalid stage {field}")
+    files = manifest.get("files")
+    if not isinstance(files, list):
+        raise ValueError("stage files must be a list")
+    expected = {}
+    folded = set()
+    for entry in files:
+        if not isinstance(entry, dict):
+            raise ValueError("invalid stage file entry")
+        rel = stage_path(entry.get("path"))
+        if rel == STAGE_MANIFEST or rel.casefold() in folded:
+            raise ValueError(f"duplicate or reserved stage path: {rel}")
+        folded.add(rel.casefold())
+        if "symlink" in entry:
+            if set(entry) != {"path", "symlink"} or kind != "deb" or STAGE_LINKS.get(rel) != entry["symlink"]:
+                raise ValueError(f"unsafe manifest symlink: {rel}")
+        elif (set(entry) != {"path", "size", "sha256"}
+              or type(entry["size"]) is not int or entry["size"] < 0
+              or not isinstance(entry["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])):
+            raise ValueError(f"invalid manifest file: {rel}")
+        expected[rel] = entry
+    actual = {entry["path"]: entry for entry in stage_inventory(stage, kind)}
+    missing = sorted(expected.keys() - actual.keys())
+    extra = sorted(actual.keys() - expected.keys())
+    if missing or extra:
+        raise ValueError(f"stage inventory mismatch: missing={missing}, extra={extra}")
+    for rel, entry in expected.items():
+        if actual[rel] != entry:
+            raise ValueError(f"stage file mismatch: {rel}")
+    required = ["build-inputs/gx-config-releases.json"]
+    if kind == "windows":
+        required.append("build-inputs/terminal.ico")
+    for rel in required:
+        if rel not in actual or "symlink" in actual[rel]:
+            raise ValueError(f"missing regular build input: {rel}")
+    binaries = manifest.get("binaries")
+    if not isinstance(binaries, dict):
+        raise ValueError("invalid stage binaries")
+    prefix = "app/" if kind == "windows" else "root/usr/lib/wezterm-gx/"
+    suffix = ".exe" if kind == "windows" else ""
+    if set(binaries) != {name + suffix for name in BINARIES}:
+        raise ValueError("stage binary set mismatch")
+    for name, sha in binaries.items():
+        if actual.get(prefix + name, {}).get("sha256") != sha:
+            raise ValueError(f"stage binary hash mismatch: {name}")
+    return manifest
+
+
+def stage_build_inputs(stage: Path, kind: str, root: Path = ROOT):
+    inputs = {"gx-config-releases.json": root / "scripts/gx-config-releases.json"}
+    if kind == "windows":
+        inputs["terminal.ico"] = root / "assets/windows/terminal.ico"
+    for name, source in inputs.items():
+        if source.is_symlink() or not source.is_file():
+            raise ValueError(f"missing regular build input: {source}")
+        copy_file(source, stage / "build-inputs" / name)
+
+
+def write_stage_manifest(stage: Path, manifest: dict) -> dict:
+    manifest = dict(manifest, schema=2, source_repository=SOURCE_REPOSITORY)
+    manifest["files"] = stage_inventory(stage, manifest["platform"])
+    (stage / STAGE_MANIFEST).write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return verify_stage(stage)
 
 
 def version_from_changelog(root: Path = ROOT) -> str:
@@ -131,8 +291,10 @@ def verify_inno():
 
 
 def source_info(root: Path = ROOT) -> tuple[str, bool]:
+    top = Path(output(["git", "-C", root, "rev-parse", "--show-toplevel"])).resolve()
+    if top != root.resolve():
+        raise ValueError("WezTerm sources must be an independent Git checkout")
     sha = output(["git", "-C", root, "rev-parse", "HEAD"])
-    # In the gx_shell monorepo, sibling components are not WezTerm sources.
     dirty = bool(output(["git", "-C", root, "status", "--porcelain", "--untracked-files=normal", "--", "."]))
     return sha, dirty
 
@@ -475,6 +637,17 @@ def container_deb(args, version: str):
 
 
 def main() -> int:
+    if sys.argv[1:2] == ["verify-stage"]:
+        parser = argparse.ArgumentParser(description="Verify a self-contained GX stage without building or Git history")
+        parser.add_argument("--stage", type=Path, required=True)
+        args = parser.parse_args(sys.argv[2:])
+        try:
+            manifest = verify_stage(args.stage)
+            print(f"PASS stage: {args.stage}; {manifest['platform']}; {manifest['source_commit']}; {len(manifest['files'])} files")
+            return 0
+        except (ValueError, OSError) as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("platform", choices=["windows", "deb", "auto"])
     parser.add_argument("--version", help="GX X.Y.Z; defaults to CHANGELOG.md")
@@ -529,8 +702,8 @@ def main() -> int:
             manifest = build_manifest(version, sha, dirty, product_version, kind, hashes, abi)
             if kind == "deb":
                 manifest["deb_depends"] = depends
-            (stage / "stage-manifest.json").write_text(
-                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            stage_build_inputs(stage, kind)
+            write_stage_manifest(stage, manifest)
             print(f"STAGED {stage}\nProduct: {product_version}; source_dirty={dirty}")
             return 0
         dest = args.output_dir.resolve()

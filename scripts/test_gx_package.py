@@ -106,9 +106,16 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(handoff[-1], "/gx-owned-stage")
 
     def test_dirty_check_is_scoped_to_the_wezterm_tree(self):
-        with patch.object(package, "output", side_effect=["a" * 40, ""]) as git:
-            self.assertEqual(package.source_info(Path("wezterm")), ("a" * 40, False))
-        self.assertEqual(git.call_args_list[1].args[0][-2:], ["--", "."])
+        root = Path("wezterm").resolve()
+        with patch.object(package, "output", side_effect=[str(root), "a" * 40, ""]) as git:
+            self.assertEqual(package.source_info(root), ("a" * 40, False))
+        self.assertEqual(git.call_args_list[2].args[0][-2:], ["--", "."])
+
+    def test_source_info_rejects_parent_repository(self):
+        root = Path("wezterm").resolve()
+        with patch.object(package, "output", return_value=str(root.parent)):
+            with self.assertRaisesRegex(ValueError, "independent Git checkout"):
+                package.source_info(root)
 
     def test_stage_dir_must_be_new_before_anything_builds(self):
         with tempfile.TemporaryDirectory() as directory, \
@@ -243,6 +250,161 @@ class PackageTests(unittest.TestCase):
             with patch.object(package, "output", side_effect=["GLIBC_2.9 GLIBC_2.31", "  NEEDED libc.so.6"]):
                 self.assertEqual(package.audit_linux_binary(binary),
                                  {"max_glibc": "2.31", "needed": ["libc.so.6"]})
+
+
+class StageTests(unittest.TestCase):
+    def make_stage(self, root, kind='windows'):
+        stage = root / 'stage'
+        stage.mkdir()
+        prefix = 'app' if kind == 'windows' else 'root/usr/lib/wezterm-gx'
+        binaries = {}
+        for name in package.BINARIES:
+            name += '.exe' if kind == 'windows' else ''
+            path = stage / prefix / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'fixture binary\r\n')
+            binaries[name] = package.digest(path)
+        payload = stage / prefix / 'config.lua'
+        payload.write_bytes(b'local value = 1\r\n')
+        package.stage_build_inputs(stage, kind)
+        manifest = {
+            'schema': 1, 'platform': kind, 'architecture': 'amd64',
+            'source_commit': 'a' * 40, 'source_dirty': True,
+            'package_version': '1.2.3', 'product_version': 'fixture-version',
+            'resource_version': 'b' * 64, 'binaries': binaries,
+        }
+        package.write_stage_manifest(stage, manifest)
+        return stage
+
+    def rewrite_manifest(self, stage, transform):
+        path = stage / package.STAGE_MANIFEST
+        manifest = json.loads(path.read_text(encoding='utf-8'))
+        transform(manifest)
+        path.write_text(json.dumps(manifest), encoding='utf-8')
+
+    def test_stage_contract_covers_raw_bytes_and_build_inputs(self):
+        for kind in ('windows', 'deb'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                stage = self.make_stage(Path(tmp), kind)
+                manifest = package.verify_stage(stage)
+                self.assertEqual(manifest['schema'], 2)
+                self.assertEqual(manifest['source_repository'], 'gx0404/wezterm')
+                self.assertEqual(manifest['source_commit'], 'a' * 40)
+                self.assertIs(manifest['source_dirty'], True)
+                self.assertEqual(manifest['package_version'], '1.2.3')
+                files = {entry['path']: entry for entry in manifest['files']}
+                actual = {path.relative_to(stage).as_posix() for path in stage.rglob('*')
+                          if path.is_file() and path.name != package.STAGE_MANIFEST}
+                self.assertEqual(set(files), actual)
+                self.assertIn('build-inputs/gx-config-releases.json', files)
+                self.assertEqual('build-inputs/terminal.ico' in files, kind == 'windows')
+                for name, entry in files.items():
+                    data = (stage / name).read_bytes()
+                    self.assertEqual(entry['size'], len(data))
+                    self.assertEqual(entry['sha256'], package.hashlib.sha256(data).hexdigest())
+                self.assertEqual((stage / 'build-inputs/gx-config-releases.json').read_bytes(),
+                                 (package.ROOT / 'scripts/gx-config-releases.json').read_bytes())
+
+    def test_stage_rejects_tampering_missing_and_extra_files(self):
+        for operation in ('tamper', 'missing', 'extra'):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory() as tmp:
+                stage = self.make_stage(Path(tmp))
+                path = stage / 'app/config.lua'
+                if operation == 'tamper':
+                    path.write_bytes(path.read_bytes().replace(b'1', b'2'))
+                elif operation == 'missing':
+                    path.unlink()
+                else:
+                    (stage / 'unexpected.txt').write_bytes(b'extra')
+                with self.assertRaises(ValueError):
+                    package.verify_stage(stage)
+
+    def test_stage_rejects_unsafe_manifest_paths(self):
+        for path in ('../escape', '/absolute', 'a//b', 'a/./b', 'C:/escape',
+                     'a' + chr(92) + 'b', '', 'a' + chr(0), 'a./b', 'a /b'):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as tmp:
+                stage = self.make_stage(Path(tmp))
+                self.rewrite_manifest(stage, lambda manifest: manifest['files'][0].update(path=path))
+                with self.assertRaises(ValueError):
+                    package.verify_stage(stage)
+
+    def test_stage_rejects_invalid_and_duplicate_inventory_entries(self):
+        mutations = {
+            'duplicate': lambda m: m['files'].append(dict(m['files'][0])),
+            'case_collision': lambda m: m['files'].append(dict(m['files'][0], path=m['files'][0]['path'].upper())),
+            'invalid_hash': lambda m: m['files'][0].update(sha256='not-a-hash'),
+            'boolean_size': lambda m: m['files'][0].update(size=True),
+            'unknown_field': lambda m: m['files'][0].update(unexpected=True),
+            'self_inventory': lambda m: m['files'][0].update(path=package.STAGE_MANIFEST),
+            'wrong_schema': lambda m: m.update(schema=1),
+            'wrong_repository': lambda m: m.update(source_repository='other/wezterm'),
+            'unsafe_link': lambda m: m['files'].append({'path': 'root/usr/bin/wezterm-gx', 'symlink': '../../escape'}),
+        }
+        for name, mutation in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                stage = self.make_stage(Path(tmp))
+                self.rewrite_manifest(stage, mutation)
+                with self.assertRaises(ValueError):
+                    package.verify_stage(stage)
+
+    def test_stage_requires_exported_build_inputs(self):
+        for kind, name in (('windows', 'terminal.ico'), ('windows', 'gx-config-releases.json'),
+                           ('deb', 'gx-config-releases.json')):
+            with self.subTest(kind=kind, name=name), tempfile.TemporaryDirectory() as tmp:
+                stage = self.make_stage(Path(tmp), kind)
+                (stage / 'build-inputs' / name).unlink()
+                self.rewrite_manifest(stage, lambda m: m.update(files=package.stage_inventory(stage, kind)))
+                with self.assertRaises(ValueError):
+                    package.verify_stage(stage)
+
+    def test_linux_entry_symlinks_are_fixed_and_resolve_to_regular_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stage = self.make_stage(Path(tmp), 'deb')
+            for name, target in package.STAGE_LINKS.items():
+                path = stage / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                (stage / 'root/usr/lib/wezterm-gx' / path.name).write_bytes(b'launcher')
+                try:
+                    path.symlink_to(target)
+                except OSError as error:
+                    self.skipTest(f'host does not permit symlink creation: {error}')
+            manifest = json.loads((stage / package.STAGE_MANIFEST).read_text(encoding='utf-8'))
+            package.write_stage_manifest(stage, manifest)
+            verified = package.verify_stage(stage)
+            links = {entry['path']: entry['symlink'] for entry in verified['files'] if 'symlink' in entry}
+            self.assertEqual(links, package.STAGE_LINKS)
+            path = stage / next(iter(package.STAGE_LINKS))
+            path.unlink()
+            path.symlink_to('../../escape')
+            with self.assertRaises(ValueError):
+                package.verify_stage(stage)
+
+    def test_stage_rejects_unapproved_and_directory_symlinks(self):
+        for kind in ('windows', 'deb'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                stage = self.make_stage(Path(tmp), kind)
+                path = stage / 'unapproved'
+                try:
+                    path.symlink_to(stage / 'build-inputs', target_is_directory=True)
+                except OSError as error:
+                    self.skipTest(f'host does not permit symlink creation: {error}')
+                with self.assertRaises(ValueError):
+                    package.verify_stage(stage)
+
+    def test_verify_stage_cli_runs_without_git_or_build_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stage = self.make_stage(root)
+            command = [package.sys.executable, '-B', str(package.ROOT / 'scripts/gx_package.py'),
+                       'verify-stage', '--stage', str(stage)]
+            env = dict(package.os.environ, PATH='')
+            result = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('PASS stage:', result.stdout)
+            (stage / 'unexpected.txt').write_bytes(b'extra')
+            result = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('ERROR:', result.stderr)
 
 
 class ReleaseTests(unittest.TestCase):
