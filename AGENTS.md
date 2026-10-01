@@ -38,8 +38,9 @@ python3 scripts/resolve_agent_rules.py --check                   # 闭集/体积
   改动只在随上游同步时产生，不主动重排/重注释上游正文（见 code-comments.md）。
 - 上游 issue/PR 由人类操作；agent 不代为提交。发布链（ci/tag.sh、
   ci/create-release.sh、ci/deploy.sh）只在上游仓库运行，本 fork 不复建。
-- GX 定制源码在 `gx0404/wezterm` 的 `gx` 分支维护，`main` 仅同步上游；
-  `.github/workflows/gx-ci.yml` 检查 `gx`，组件手动发布仍走 `gx-release`。
+- GX 定制源码在 `gx0404/wezterm` 的默认分支 `feature/gx_wezterm` 维护，
+  `main` 仅同步上游；`.github/workflows/gx-ci.yml` 检查该默认分支，
+  组件手动发布仍走 `gx-release`，源码 ref 默认选择 `feature/gx_wezterm`。
   `gx0404/gx_shell` 只持有组件 manifest 与集成打包逻辑，不再包含组件源码：
   按完整提交 SHA checkout 本仓，再用 `scripts/gx_package.py --stage-dir` 取得载荷。
   组件与集成仓 SHA 分开登记，不能再要求二者相等；不调用上游发布链。

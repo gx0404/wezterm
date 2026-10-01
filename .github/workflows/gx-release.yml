@@ -7,7 +7,7 @@ on:
       ref:
         description: 构建分支、标签或提交（main 用于同步上游）
         required: true
-        default: gx
+        default: feature/gx_wezterm
         type: string
       version:
         description: 包版本（留空自动读取 CHANGELOG；手填 X.Y.Z 必须与其一致）

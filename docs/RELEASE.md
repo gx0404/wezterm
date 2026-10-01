@@ -44,13 +44,13 @@ python3 scripts/gx_package.py deb --container
 `--stage-dir <新目录>` 只构建、核验并输出载荷（Windows：`app/`、`fonts/`；deb：
 `root/`）与 `stage-manifest.json`（deb 另含 `deb_depends`），不调用 Inno Setup /
 dpkg-deb，可与 `--container` 组合。`gx0404/gx_shell` 只保存组件 manifest 和集成
-打包代码，不再保存 WezTerm 源码；从本仓 `gx` 分支选择完整 SHA，在仓外独立
+打包代码，不再保存 WezTerm 源码；从本仓 `feature/gx_wezterm` 分支选择完整 SHA，在仓外独立
 checkout 并递归初始化子模块，再调用此入口。脏检查只统计组件工作树，容器构建
 挂载该 Git 工作树。stage 构建仍需要 Git checkout；源码归档只保证指纹生成/校验
 无需 Git，不将缺少子模块和提交身份的归档伪装成可发布构建。
 
 集成 manifest 至少应锁定 `repository`（`https://github.com/gx0404/wezterm.git`）、
-`branch`（`gx`，仅供维护导航）、`revision`（完整 40 位 SHA，实际 checkout 真源）、
+`branch`（`feature/gx_wezterm`，仅供维护导航）、`revision`（完整 40 位 SHA，实际 checkout 真源）、
 `submodules`（递归）、`package_version`（本仓 CHANGELOG）、`license`（`LICENSE.md`）
 以及指纹登记表路径 `scripts/gx-config-releases.json`。`stage-manifest.json` 的
 `source_commit` 必须等于组件 `revision`，而非集成仓提交；`package_version` 也
@@ -139,10 +139,10 @@ GX Shell 版本，`--prefix dotfiles/wezterm-config`），不能再引用集成�
 
 GitHub 操作流程：
 
-1. 本 fork 的默认分支设为 `gx`，`main` 专门同步上游。
+1. 本 fork 的默认分支设为 `feature/gx_wezterm`，`main` 专门同步上游。
    `gx-release` 必须存在于默认分支，目标构建分支也须含同版打包脚本；
    GitHub 的手动入口要求的是默认分支，不限定分支名为 `main`。
-2. Actions → gx-release → Run workflow，Branch 选择 `gx`，
+2. Actions → gx-release → Run workflow，Branch 选择 `feature/gx_wezterm`，
    ref 保持默认即可，**version 留空自动取目标提交的 CHANGELOG 版本**。
    若手填 X.Y.Z，必须与 CHANGELOG 一致；错误会同时显示输入值、期望值和修正方式。
    publish 默认为 true；关掉仍完整构建和验证，但不创建标签或 Release。
@@ -180,7 +180,7 @@ Windows 安装/升级/卸载日志和字体加载记录上传到 `evidence-windo
 
 GX 分支的 `.github/workflows/` 保留两个独立入口：
 
-- `gx-ci.yml`：`gx` 的 push、目标为该分支的 PR 自动触发，
+- `gx-ci.yml`：`feature/gx_wezterm` 的 push、目标为该分支的 PR 自动触发，
   也可手动运行。检查格式、框架规则及 Windows/Linux 构建与测试，不生成安装包
   或发布 Release；同一 PR/分支的新运行取消旧 CI，不影响发布流程。
 - `gx-release.yml`：仅手动触发，构建并验证双平台安装包，按 `publish` 选项发布。

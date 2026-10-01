@@ -24,15 +24,20 @@ class WorkflowTests(unittest.TestCase):
         self.assertIsNotNone(match, name)
         return match.group(1)
 
-    def test_only_gx_push_pull_request_and_manual_events(self):
+    def test_only_default_branch_push_pull_request_and_manual_events(self):
         events = self.workflow.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
         self.assertEqual(textwrap.dedent(events).strip(), textwrap.dedent("""\
             push:
-              branches: [gx]
+              branches: [feature/gx_wezterm]
             pull_request:
-              branches: [gx]
+              branches: [feature/gx_wezterm]
             workflow_dispatch:
         """).strip())
+
+    def test_release_source_defaults_to_the_fork_branch(self):
+        release = (ROOT / ".github/workflows/gx-release.yml").read_text(encoding="utf-8")
+        ref_input = release.split("\n      ref:\n", 1)[1].split("\n      version:\n", 1)[0]
+        self.assertRegex(ref_input, r"(?m)^        default: feature/gx_wezterm$")
 
     def test_read_only_and_no_publishing_or_privileged_pr_context(self):
         self.assertEqual(re.findall(r"^permissions:\n((?:  .+\n)+)", self.workflow, re.M),

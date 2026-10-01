@@ -2,9 +2,9 @@ name: gx-ci
 
 on:
   push:
-    branches: [gx]
+    branches: [feature/gx_wezterm]
   pull_request:
-    branches: [gx]
+    branches: [feature/gx_wezterm]
   workflow_dispatch:
 
 permissions:
