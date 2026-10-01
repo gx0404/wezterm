@@ -7,17 +7,27 @@
 //! 读回）；`r` 随机预览、`a` 添加（路径输入，Tab 补全/`~` 展开/粘贴，
 //! 校验可解码后复制进壁纸目录）、`d` 删除（`y` 二次确认，只删目录内
 //! 条目）；Esc/点外/被顶掉经 `Modal::on_dismissed` 还原未确认预览。
+//!
+//! 性能口径（批 13 复审）：目录扫描与预览的文件读取/层构建都不在
+//! GUI 线程做——扫描与加载分别派到工作线程，结果经
+//! `TermWindowNotif::Apply` 回主线程；hover/按键 repeat 的预览请求先
+//! 做 ~100ms 去抖合并；回填/应用前用票据（实例号/加载代次）校验，
+//! 过期结果直接丢弃。
 
-use crate::termwindow::background::{load_background_layer, LoadedBackgroundLayer};
+use crate::termwindow::background::{
+    load_background_layer, prune_image_cache_except, prune_image_cache_lru, LoadedBackgroundLayer,
+};
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
 use crate::termwindow::{DimensionContext, TermWindow, TermWindowNotif, UIItemType};
 use config::i18n::tr;
 use config::keyassignment::KeyAssignment;
 use config::{BackgroundLayer, BackgroundSource, Dimension, ImageFileSource, ImageFileSourceWrap};
-use std::cell::{Ref, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use wezterm_dynamic::Value;
 use wezterm_term::{KeyCode, KeyModifiers};
 use window::color::LinearRgba;
@@ -27,6 +37,26 @@ use window::{Clipboard, WindowOps};
 const IMAGE_EXTENSIONS: &[&str] = &[
     "jpg", "jpeg", "png", "gif", "bmp", "ico", "tiff", "pnm", "dds", "tga",
 ];
+
+/// 预览去抖窗口：hover/按键 repeat 连续改选中时合并，静置这么久才开工
+const PREVIEW_DEBOUNCE_MS: u64 = 100;
+
+/// 预览会话内 IMAGE_CACHE 的 LRU 条目上限（缓存的是原始文件字节，
+/// 不设限的话连翻几十张图会累积数百 MB）
+const PREVIEW_IMAGE_CACHE_KEEP: usize = 8;
+
+/// 异步回调票据源：浮层实例号与预览加载代次都从这里取全局唯一号，
+/// 回到 GUI 线程后比对即可丢弃过期结果（选中已变/浮层已换/已被回填）
+fn next_ticket() -> u64 {
+    static TICKET: AtomicU64 = AtomicU64::new(1);
+    TICKET.fetch_add(1, Ordering::Relaxed)
+}
+
+/// 去抖窗口内记录的待预览项
+struct PendingPreview {
+    name: String,
+    path: PathBuf,
+}
 
 /// 目录里的一张壁纸
 #[derive(Clone)]
@@ -275,21 +305,28 @@ pub struct WallpaperOverlay {
     /// 进入浮层时的当前壁纸（Enter 之外的还原目标）
     current_on_open: RefCell<Option<String>>,
     element: RefCell<Option<Vec<ComputedElement>>>,
+    /// 本浮层实例的唯一号：异步扫描/去抖回调回 GUI 线程后先比对它，
+    /// 不匹配说明浮层已关闭或换成了另一个实例
+    instance: u64,
+    /// 去抖窗口内记录的待预览项（最后一次选中变化的）
+    pending: RefCell<Option<PendingPreview>>,
+    /// 是否已有去抖定时器在飞（同时最多一个）
+    tick_scheduled: Cell<bool>,
+    /// 最近一次启动的预览加载代次；结果回来时仍等于它才应用
+    preview_gen: Cell<u64>,
+    /// 后台目录扫描是否仍在途（期间空列表显示扫描中而非空态；
+    /// 同步 rescan 也会置 false，使迟到的扫描结果被丢弃）
+    scanning: Cell<bool>,
 }
 
 impl WallpaperOverlay {
     pub fn new(term_window: &TermWindow) -> Self {
         let dir = wallpaper_dir();
-        let entries = scan_wallpapers(&dir);
         let current = current_wallpaper_name(&term_window.window_background);
-        let selected = current
-            .as_ref()
-            .and_then(|name| entries.iter().position(|e| &e.name == name))
-            .unwrap_or(0);
-        Self {
+        let overlay = Self {
             dir,
-            entries: RefCell::new(entries),
-            selected: RefCell::new(selected),
+            entries: RefCell::new(vec![]),
+            selected: RefCell::new(0),
             top_row: RefCell::new(0),
             max_rows_on_screen: RefCell::new(0),
             mode: RefCell::new(Mode::Browse),
@@ -298,7 +335,70 @@ impl WallpaperOverlay {
             previewing: RefCell::new(None),
             current_on_open: RefCell::new(current),
             element: RefCell::new(None),
+            instance: next_ticket(),
+            pending: RefCell::new(None),
+            tick_scheduled: Cell::new(false),
+            preview_gen: Cell::new(0),
+            scanning: Cell::new(true),
+        };
+        overlay.spawn_scan(term_window);
+        overlay
+    }
+
+    /// 开浮层时的目录扫描放工作线程（逐文件 metadata+读图片头是 IO），
+    /// 先渲染空列表，结果经 `TermWindowNotif::Apply` 回 GUI 线程回填。
+    fn spawn_scan(&self, term_window: &TermWindow) {
+        let Some(window) = term_window.window.as_ref() else {
+            // 拿不到窗口句柄就无法把结果投回 GUI 线程，退回同步扫描
+            self.install_entries(scan_wallpapers(&self.dir));
+            return;
+        };
+        let window = window.clone();
+        let dir = self.dir.clone();
+        let instance = self.instance;
+        promise::spawn::spawn(async move {
+            let entries =
+                promise::spawn::spawn_into_new_thread(move || Ok(scan_wallpapers(&dir))).await;
+            if let Ok(entries) = entries {
+                window.notify(TermWindowNotif::Apply(Box::new(move |tw| {
+                    if let Some(m) = tw.get_modal() {
+                        if let Some(overlay) = m.downcast_ref::<WallpaperOverlay>() {
+                            overlay.fill_entries(tw, instance, entries);
+                        }
+                    }
+                })));
+            }
+        })
+        .detach();
+    }
+
+    /// 扫描结果落到状态：选中行优先回到当前壁纸（与开浮层口径一致）
+    fn install_entries(&self, entries: Vec<WallpaperEntry>) {
+        let selected = self
+            .current_on_open
+            .borrow()
+            .as_ref()
+            .and_then(|name| entries.iter().position(|e| &e.name == name))
+            .unwrap_or(0);
+        self.entries.replace(entries);
+        self.selected.replace(selected);
+        self.top_row.replace(0);
+        self.scanning.set(false);
+    }
+
+    /// 后台扫描回填：实例号不匹配（浮层已换）或期间已有同步 rescan
+    /// （scanning 已被置 false）时丢弃结果
+    fn fill_entries(
+        &self,
+        term_window: &mut TermWindow,
+        instance: u64,
+        entries: Vec<WallpaperEntry>,
+    ) {
+        if self.instance != instance || !self.scanning.get() {
+            return;
         }
+        self.install_entries(entries);
+        term_window.invalidate_modal();
     }
 
     fn move_selection(&self, delta: isize) -> bool {
@@ -335,8 +435,9 @@ impl WallpaperOverlay {
         *top_row = (*top_row as isize + delta).clamp(0, max_top as isize) as usize;
     }
 
-    /// 实时预览选中行（只换背景层，不重载 Lua）
-    fn preview_selected(&self, term_window: &mut TermWindow) {
+    /// 实时预览选中行（只换背景层，不重载 Lua）。重活（文件读取+
+    /// 层构建）不在这里做：先记待预览项，去抖窗口过后才异步开工。
+    fn preview_selected(&self, term_window: &TermWindow) {
         let entries = self.entries.borrow();
         let selected = *self.selected.borrow();
         let Some(entry) = entries.get(selected) else {
@@ -345,21 +446,123 @@ impl WallpaperOverlay {
         if self.previewing.borrow().as_deref() == Some(entry.name.as_str()) {
             return;
         }
-        let defs = preview_defs(&self.original, &entry.path);
-        let mut layers = vec![];
-        for def in &defs {
-            match load_background_layer(def, &term_window.dimensions, &term_window.render_metrics) {
-                Ok(layer) => layers.push(layer),
-                Err(err) => {
-                    self.error
-                        .replace(Some(format!("{}: {err:#}", tr("preview failed"))));
-                    return;
+        if self
+            .pending
+            .borrow()
+            .as_ref()
+            .map_or(false, |p| p.name == entry.name)
+        {
+            return;
+        }
+        *self.pending.borrow_mut() = Some(PendingPreview {
+            name: entry.name.clone(),
+            path: entry.path.clone(),
+        });
+        self.schedule_preview_tick(term_window);
+    }
+
+    /// 去抖：hover/按键 repeat 在窗口内的连续变化合并成最后一次；
+    /// 同一时刻至多一个定时器在飞，到期经 `TermWindowNotif::Apply`
+    /// 回 GUI 线程开工。
+    fn schedule_preview_tick(&self, term_window: &TermWindow) {
+        if self.tick_scheduled.get() {
+            return;
+        }
+        let Some(window) = term_window.window.as_ref() else {
+            return;
+        };
+        let window = window.clone();
+        self.tick_scheduled.set(true);
+        let instance = self.instance;
+        promise::spawn::spawn(async move {
+            smol::Timer::after(Duration::from_millis(PREVIEW_DEBOUNCE_MS)).await;
+            window.notify(TermWindowNotif::Apply(Box::new(move |tw| {
+                if let Some(m) = tw.get_modal() {
+                    if let Some(overlay) = m.downcast_ref::<WallpaperOverlay>() {
+                        overlay.on_preview_tick(tw, instance);
+                    }
                 }
+            })));
+        })
+        .detach();
+    }
+
+    /// 去抖到期：取出最后一次记录的待预览项，把层构建派到工作线程
+    /// （fs::read + 内容哈希 + 遮罩/渐变层构建都在那边）。
+    fn on_preview_tick(&self, term_window: &mut TermWindow, instance: u64) {
+        self.tick_scheduled.set(false);
+        if self.instance != instance {
+            return;
+        }
+        let Some(pending) = self.pending.borrow_mut().take() else {
+            return;
+        };
+        if self.previewing.borrow().as_deref() == Some(pending.name.as_str()) {
+            return;
+        }
+        let Some(window) = term_window.window.as_ref() else {
+            return;
+        };
+        let window = window.clone();
+        let defs = preview_defs(&self.original, &pending.path);
+        let dimensions = term_window.dimensions;
+        let render_metrics = term_window.render_metrics;
+        let gen = next_ticket();
+        self.preview_gen.set(gen);
+        let name = pending.name;
+        promise::spawn::spawn(async move {
+            let result = promise::spawn::spawn_into_new_thread(move || {
+                let mut layers = vec![];
+                for def in &defs {
+                    layers.push(load_background_layer(def, &dimensions, &render_metrics)?);
+                }
+                Ok(layers)
+            })
+            .await;
+            window.notify(TermWindowNotif::Apply(Box::new(move |tw| {
+                if let Some(m) = tw.get_modal() {
+                    if let Some(overlay) = m.downcast_ref::<WallpaperOverlay>() {
+                        overlay.apply_preview_result(tw, gen, &name, result);
+                    }
+                }
+            })));
+        })
+        .detach();
+    }
+
+    /// 工作线程的预览结果回 GUI 线程：加载代次仍是最新才应用，否则
+    /// 丢弃（选中已再变、或期间浮层被替换都会让代次过期）。
+    fn apply_preview_result(
+        &self,
+        term_window: &mut TermWindow,
+        gen: u64,
+        name: &str,
+        result: anyhow::Result<Vec<LoadedBackgroundLayer>>,
+    ) {
+        if self.preview_gen.get() != gen {
+            return;
+        }
+        match result {
+            Ok(layers) => {
+                self.previewing.replace(Some(name.to_string()));
+                term_window.window_background = layers;
+                // 预览会话内限制 IMAGE_CACHE 规模（见常量注释）
+                prune_image_cache_lru(PREVIEW_IMAGE_CACHE_KEEP);
+                invalidate_window(term_window);
+            }
+            Err(err) => {
+                self.error
+                    .replace(Some(format!("{}: {err:#}", tr("preview failed"))));
+                term_window.invalidate_modal();
             }
         }
-        self.previewing.replace(Some(entry.name.clone()));
-        term_window.window_background = layers;
-        invalidate_window(term_window);
+    }
+
+    /// 丢弃在途的预览（目录重扫/浮层关闭等状态重置时调用）：
+    /// 清待预览项并作废加载代次，迟到的工作线程结果会被丢弃。
+    fn drop_pending_preview(&self) {
+        *self.pending.borrow_mut() = None;
+        self.preview_gen.set(next_ticket());
     }
 
     /// Enter：应用并持久化（写 sidecar + reload；reload 后 Lua 侧
@@ -386,6 +589,10 @@ impl WallpaperOverlay {
     }
 
     fn rescan(&self) {
+        // 同步重扫（仅添加/删除后的单次动作）：条目集变化即作废在途
+        // 预览与迟到的开浮层扫描结果
+        self.drop_pending_preview();
+        self.scanning.set(false);
         let entries = scan_wallpapers(&self.dir);
         let keep = {
             let old = self.entries.borrow();
@@ -540,28 +747,29 @@ impl WallpaperOverlay {
         match &mode {
             Mode::Browse => {
                 if entries.is_empty() {
-                    // 空态（批 13 spec）：引导按 a 添加
+                    // 空态（批 13 spec）：引导按 a 添加；目录扫描仍在途时
+                    // 先显示扫描中，避免把 loading 误读成空目录
+                    let text = if self.scanning.get() {
+                        tr("(scanning…)").into_owned()
+                    } else {
+                        tr("(empty — press 'a' to add a wallpaper)").into_owned()
+                    };
                     rows.push(
-                        Element::new(
-                            &font,
-                            ElementContent::Text(
-                                tr("(empty — press 'a' to add a wallpaper)").into_owned(),
-                            ),
-                        )
-                        .colors(ElementColors {
-                            border: BorderColor::default(),
-                            bg: LinearRgba::TRANSPARENT.into(),
-                            text: fg.clone(),
-                        })
-                        .padding(BoxDimension {
-                            left: Dimension::Cells(0.5),
-                            right: Dimension::Cells(0.5),
-                            top: Dimension::Cells(0.),
-                            bottom: Dimension::Cells(0.),
-                        })
-                        .min_width(Some(Dimension::Percent(1.)))
-                        .display(DisplayType::Block)
-                        .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
+                        Element::new(&font, ElementContent::Text(text))
+                            .colors(ElementColors {
+                                border: BorderColor::default(),
+                                bg: LinearRgba::TRANSPARENT.into(),
+                                text: fg.clone(),
+                            })
+                            .padding(BoxDimension {
+                                left: Dimension::Cells(0.5),
+                                right: Dimension::Cells(0.5),
+                                top: Dimension::Cells(0.),
+                                bottom: Dimension::Cells(0.),
+                            })
+                            .min_width(Some(Dimension::Percent(1.)))
+                            .display(DisplayType::Block)
+                            .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
                     );
                 }
                 for (display_idx, entry) in entries
@@ -951,10 +1159,15 @@ impl Modal for WallpaperOverlay {
     /// 批 13：关闭时还原未确认的预览。Enter 已把 previewing 清空，
     /// 只有 Esc/点外/被顶掉且预览仍在时才回到进入时的层栈。
     fn on_dismissed(&self, term_window: &mut TermWindow) {
+        // 在途的预览请求/加载一并作废（浮层没了，结果也没意义）
+        self.drop_pending_preview();
         if self.previewing.borrow().is_some() {
             term_window.window_background = self.original.clone();
             invalidate_window(term_window);
         }
+        // 预览会话结束：IMAGE_CACHE 只留下最终层栈仍引用的文件，
+        // 纯粹翻过的图全部出缓存
+        prune_image_cache_except(&term_window.window_background);
     }
 }
 

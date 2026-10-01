@@ -8,9 +8,10 @@ use anyhow::Context;
 use config::{
     BackgroundHorizontalAlignment, BackgroundLayer, BackgroundRepeat, BackgroundSize,
     BackgroundSource, BackgroundVerticalAlignment, ConfigHandle, DimensionContext, Gradient,
-    GradientOrientation,
+    GradientOrientation, RgbaColor,
 };
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use termwiz::image::{ImageData, ImageDataType};
@@ -19,7 +20,16 @@ use wezterm_term::StableRowIndex;
 lazy_static::lazy_static! {
     static ref IMAGE_CACHE: Mutex<HashMap<String, CachedImage>> = Mutex::new(HashMap::new());
     static ref GRADIENT_CACHE: Mutex<Vec<CachedGradient>> = Mutex::new(vec![]);
+    // fork: solid color layers (window-background masks) used to refill a
+    // window-sized RGBA buffer on every load; cache the uniform buffer by
+    // (color, size) so preview bursts stop re-allocating it
+    static ref COLOR_LAYER_CACHE: Mutex<Vec<CachedColorLayer>> = Mutex::new(vec![]);
 }
+
+// fork: monotonically increasing access ticks backing LRU eviction for
+// the caches above
+static IMAGE_CACHE_TICK: AtomicU64 = AtomicU64::new(1);
+static COLOR_LAYER_TICK: AtomicU64 = AtomicU64::new(1);
 
 struct CachedGradient {
     g: Gradient,
@@ -184,11 +194,72 @@ impl CachedGradient {
     }
 }
 
+// fork: bound for the solid color layer cache; a background stack holds a
+// couple of masks and a few window sizes, so this is plenty while keeping
+// the footprint tiny
+const COLOR_LAYER_CACHE_MAX: usize = 8;
+
+// fork: cache entry for a uniform (mask) color layer
+struct CachedColorLayer {
+    color: RgbaColor,
+    size: u32,
+    image: Arc<ImageData>,
+    last_used: u64,
+}
+
+impl CachedColorLayer {
+    fn load(color: &RgbaColor, size: u32) -> Arc<ImageData> {
+        let mut cache = COLOR_LAYER_CACHE.lock().unwrap();
+        if let Some(entry) = cache
+            .iter_mut()
+            .find(|entry| entry.color == *color && entry.size == size)
+        {
+            entry.last_used = COLOR_LAYER_TICK.fetch_add(1, Ordering::Relaxed);
+            return Arc::clone(&entry.image);
+        }
+
+        let mut imgbuf = image::RgbaImage::new(size, size);
+        let src_pixel = {
+            let (r, g, b, a) = color.to_srgb_u8();
+            image::Rgba([r, g, b, a])
+        };
+        for (_x, _y, pixel) in imgbuf.enumerate_pixels_mut() {
+            *pixel = src_pixel;
+        }
+        let image = Arc::new(ImageData::with_data(ImageDataType::new_single_frame(
+            size,
+            size,
+            imgbuf.into_vec(),
+        )));
+
+        cache.push(Self {
+            color: *color,
+            size,
+            image: Arc::clone(&image),
+            last_used: COLOR_LAYER_TICK.fetch_add(1, Ordering::Relaxed),
+        });
+        if cache.len() > COLOR_LAYER_CACHE_MAX {
+            let lru = cache
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(idx, _)| idx);
+            if let Some(idx) = lru {
+                cache.swap_remove(idx);
+            }
+        }
+
+        image
+    }
+}
+
 struct CachedImage {
     modified: SystemTime,
     image: Arc<ImageData>,
     marked: bool,
     speed: f32,
+    // fork: LRU tick, bumped on every access; drives prune_image_cache_lru
+    last_used: u64,
 }
 
 impl CachedImage {
@@ -200,6 +271,7 @@ impl CachedImage {
         if let Some(cached) = cache.get_mut(path) {
             if cached.modified == modified && cached.speed == speed {
                 cached.marked = false;
+                cached.last_used = IMAGE_CACHE_TICK.fetch_add(1, Ordering::Relaxed);
                 return Ok(Arc::clone(&cached.image));
             }
         }
@@ -218,6 +290,7 @@ impl CachedImage {
                 image: Arc::clone(&image),
                 marked: false,
                 speed,
+                last_used: IMAGE_CACHE_TICK.fetch_add(1, Ordering::Relaxed),
             },
         );
 
@@ -240,6 +313,41 @@ impl CachedImage {
             !entry.marked
         });
     }
+}
+
+// fork: the wallpaper preview overlay can pull dozens of full-size files
+// through IMAGE_CACHE in a single session; bound it by evicting the
+// least-recently-used entries. Evicting an entry only drops the cached
+// bytes; live windows keep their Arc<ImageData> and the next config
+// reload re-reads the file.
+pub(crate) fn prune_image_cache_lru(keep: usize) {
+    let mut cache = IMAGE_CACHE.lock().unwrap();
+    if cache.len() <= keep {
+        return;
+    }
+    let mut usage: Vec<(u64, String)> = cache
+        .iter()
+        .map(|(path, entry)| (entry.last_used, path.clone()))
+        .collect();
+    usage.sort_unstable();
+    let evict = usage.len() - keep;
+    for (_, path) in &usage[..evict] {
+        log::trace!("Pruning {} from image cache", path);
+        cache.remove(path);
+    }
+}
+
+// fork: called when a wallpaper preview session ends; keeps only entries
+// still referenced by the resulting layer stack, dropping the images the
+// user merely scrolled past.
+pub(crate) fn prune_image_cache_except(layers: &[LoadedBackgroundLayer]) {
+    let mut cache = IMAGE_CACHE.lock().unwrap();
+    cache.retain(|path, _| {
+        layers.iter().any(|layer| match &layer.def.source {
+            BackgroundSource::File(source) => source.path == *path,
+            _ => false,
+        })
+    });
 }
 
 #[derive(Clone)]
@@ -317,18 +425,11 @@ pub(crate) fn load_background_layer(
 
             let size = width.min(height);
 
-            let mut imgbuf = image::RgbaImage::new(size, size);
-            let src_pixel = {
-                let (r, g, b, a) = color.to_srgb_u8();
-                image::Rgba([r, g, b, a])
-            };
-            for (_x, _y, pixel) in imgbuf.enumerate_pixels_mut() {
-                *pixel = src_pixel;
-            }
-            let data = imgbuf.into_vec();
-            Arc::new(ImageData::with_data(ImageDataType::new_single_frame(
-                size, size, data,
-            )))
+            // fork: the uniform buffer is served from the (color, size)
+            // cache; the wallpaper preview overlay rebuilds the layer
+            // stack on every selection change, which used to refill a
+            // window-sized buffer each time
+            CachedColorLayer::load(color, size)
         }
         BackgroundSource::File(source) => CachedImage::load(&source.path, source.speed)?,
     };
