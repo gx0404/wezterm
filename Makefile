@@ -32,6 +32,11 @@ servedocs:
 # AI 协作开发框架（fork 维护段，上游没有；命令手册见 docs/MAKE_COMMANDS.md）
 # 工具解析序：项目钉版 .local/tools > 系统 PATH（安装：make setup）。
 export PATH := $(CURDIR)/.local/tools/venv/bin:$(CURDIR)/.local/tools/nextest/bin:$(CURDIR)/.local/tools/stylua/bin:$(PATH)
+
+# 日常二进制必须是优化构建：上游 build 目标的 $(BUILD_OPTS) 未定义时 cargo
+# 落 dev profile（opt-level 0 + debug assertions），高速输出/滚动明显卡顿。
+# 需要开发期快速迭代时显式 BUILD_OPTS= make build 覆盖。
+BUILD_OPTS ?= --release
 FRAMEWORK_PY := $(if $(wildcard .local/tools/venv/bin/python),.local/tools/venv/bin/python,python3)
 
 # Git Bash 调 MSYS2 make 时两套 msys-2.0.dll 运行时互不相认，子进程环境只剩 PATH/SYSTEMROOT

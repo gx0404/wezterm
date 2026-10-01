@@ -1102,7 +1102,7 @@
       "anchor": "上游目标（语义随上游）",
       "id": "docs/MAKE_COMMANDS.md#上游目标（语义随上游）",
       "source": "docs/MAKE_COMMANDS.md",
-      "text": "## 上游目标（语义随上游）\n\n| 目标 | 作用 | 前置/副作用 |\n|---|---|---|\n| `make all` / `make build` | 依次构建 wezterm、wezterm-gui、wezterm-mux-server、strip-ansi-escapes（release） | 需系统图形依赖（`./get-deps`）；耗时 |\n| `make check` | cargo check + 4 个指定包（escape-parser/cell/surface/ssh） | 只读 |\n| `make test` | cargo nextest 全量 + escape-parser no_std 轮 | 需 nextest（make setup）；ssh e2e 需本机 sshd |\n| `make fmt` | cargo +nightly fmt（**会改文件**） | 需 nightly 工具链 |\n| `make docs` / `make servedocs` | 构建文档站（docker/podman + gelatyx + 网络） | 上游流程，本地无容器时不可用 |"
+      "text": "## 上游目标（语义随上游）\n\n| 目标 | 作用 | 前置/副作用 |\n|---|---|---|\n| `make all` / `make build` | 依次构建 wezterm、wezterm-gui、wezterm-mux-server、strip-ansi-escapes；fork 段设 `BUILD_OPTS ?= --release`，默认 release 产物，`BUILD_OPTS= make build` 回退 dev | 需系统图形依赖（`./get-deps`）；release 耗时 |\n| `make check` | cargo check + 4 个指定包（escape-parser/cell/surface/ssh） | 只读 |\n| `make test` | cargo nextest 全量 + escape-parser no_std 轮 | 需 nextest（make setup）；ssh e2e 需本机 sshd |\n| `make fmt` | cargo +nightly fmt（**会改文件**） | 需 nightly 工具链 |\n| `make docs` / `make servedocs` | 构建文档站（docker/podman + gelatyx + 网络） | 上游流程，本地无容器时不可用 |"
     },
     {
       "anchor": "与 CI 的差异及未采纳项",
@@ -1314,7 +1314,7 @@
     "docs/AI_TOOLS.md": "e6a52d5e8b10b57424931d727b33f5fcc50ea6ecd6f8b60bee820085595b251f",
     "docs/ARCHITECTURE.md": "4a82c062c9f23c099d93fc6220102057424ad0b02020d97af1825a36dae5afc7",
     "docs/DEVELOPMENT.md": "90a8d67b18aeb531aa72bfb3246d496aca207cfe8810ad33ff1354c6c89c86ae",
-    "docs/MAKE_COMMANDS.md": "d60c019f5f90fd4e6f9c239e848ff5981243a717d64c662d618064a36022b7a0",
+    "docs/MAKE_COMMANDS.md": "a21f0fce69a146f3c9d5f4397f24361ed72567b4f2bc5157cdd105e2c9fbcad8",
     "docs/README.md": "e422cf6ead4de20f835c7d24215854992e5db7949fdf8bf449ec6b81e64fe986",
     "docs/RELEASE.md": "e4df54ae12b5bcb355d73145881d38c56f7dd0002ef708b12cc4d9b24936b98e",
     "docs/TESTING.md": "0f7a0ce65a110706ebadb67acb8718beb40d95131bccaf4ae572e9bdb2b6133a"

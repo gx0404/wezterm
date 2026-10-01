@@ -8,7 +8,7 @@
 
 | 目标 | 作用 | 前置/副作用 |
 |---|---|---|
-| `make all` / `make build` | 依次构建 wezterm、wezterm-gui、wezterm-mux-server、strip-ansi-escapes（release） | 需系统图形依赖（`./get-deps`）；耗时 |
+| `make all` / `make build` | 依次构建 wezterm、wezterm-gui、wezterm-mux-server、strip-ansi-escapes；fork 段设 `BUILD_OPTS ?= --release`，默认 release 产物，`BUILD_OPTS= make build` 回退 dev | 需系统图形依赖（`./get-deps`）；release 耗时 |
 | `make check` | cargo check + 4 个指定包（escape-parser/cell/surface/ssh） | 只读 |
 | `make test` | cargo nextest 全量 + escape-parser no_std 轮 | 需 nextest（make setup）；ssh e2e 需本机 sshd |
 | `make fmt` | cargo +nightly fmt（**会改文件**） | 需 nightly 工具链 |
