@@ -99,6 +99,12 @@ use prevcursor::PrevCursorPos;
 
 const ATLAS_SIZE: usize = 128;
 
+/// fork: minimum spacing between two full preview-palette flushes. Each
+/// flush ages out the colour-derived caches and rebuilds the tab bar, so
+/// a burst of scheme changes (arrowing through the settings overlay)
+/// coalesces into at most one flush per window.
+const PREVIEW_PALETTE_THROTTLE: Duration = Duration::from_millis(100);
+
 lazy_static::lazy_static! {
     static ref WINDOW_CLASS: Mutex<String> = Mutex::new(wezterm_gui_subcommands::DEFAULT_WINDOW_CLASS.to_owned());
     static ref POSITION: Mutex<Option<GuiPosition>> = Mutex::new(None);
@@ -480,6 +486,17 @@ pub struct TermWindow {
     /// and nothing stays pinned in the overrides once the overlay is
     /// dismissed (WZ-03).
     preview_palette: Option<ColorPalette>,
+    /// fork: coalescing state for `set_preview_palette`. The outer Option
+    /// means a flush is queued; the inner is the target preview palette
+    /// (None = clear the preview). Until it flushes, `preview_palette`
+    /// keeps the value its caches were last invalidated for.
+    pending_preview_palette: Option<Option<ColorPalette>>,
+    /// fork: deadline of the queued preview flush; Some implies exactly
+    /// one timer is in flight to call `flush_pending_preview_palette`.
+    preview_flush_deadline: Option<Instant>,
+    /// fork: when the colour caches were last invalidated for a preview
+    /// change; consecutive flushes stay PREVIEW_PALETTE_THROTTLE apart.
+    last_preview_invalidation: Option<Instant>,
 
     ui_items: Vec<UIItem>,
     dragging: Option<(UIItem, MouseEvent)>,
@@ -738,6 +755,9 @@ impl TermWindow {
             config_overrides: wezterm_dynamic::Value::default(),
             palette: None,
             preview_palette: None,
+            pending_preview_palette: None,
+            preview_flush_deadline: None,
+            last_preview_invalidation: None,
             focused: None,
             mux_window_id,
             mux_window_id_for_subscriptions: Arc::new(Mutex::new(mux_window_id)),
@@ -1809,6 +1829,17 @@ fn bell_throttle(
     }
 }
 
+/// fork: whether a preview-palette flush may run at `now`, extracted pure
+/// so the trailing-edge throttle semantics are unit testable. `None` means
+/// no flush has run yet, so the first change of a burst always lands
+/// immediately.
+fn preview_flush_ready(last_invalidation: Option<Instant>, now: Instant) -> bool {
+    match last_invalidation {
+        None => true,
+        Some(last) => now >= last + PREVIEW_PALETTE_THROTTLE,
+    }
+}
+
 /// fork: whether a window carries per-window config overrides. Both `nil`
 /// (never set, or cleared) and `{}` from `window:set_config_overrides`
 /// mean there are none.
@@ -1851,10 +1882,40 @@ impl TermWindow {
     /// window size alone: going through `apply_dimensions` would push
     /// SIGWINCH down every pty, amplifying a single hover into the innermost
     /// nested program.
+    ///
+    /// fork: rapid changes coalesce. A flush costs a full reshaping of the
+    /// visible rows plus a tab bar rebuild, which saturates the GUI thread
+    /// when a key repeat or a mouse sweep crosses the whole scheme list, so
+    /// flushes are spaced by PREVIEW_PALETTE_THROTTLE. Until a deferred
+    /// flush lands, `preview_palette` keeps the value its caches were
+    /// invalidated for, so any frame painted mid-burst stays consistent.
     pub fn set_preview_palette(&mut self, palette: Option<ColorPalette>) {
         if self.preview_palette == palette {
+            // Already showing this scheme; drop a queued flush instead of
+            // paying for the rebuild. An in-flight timer wakes to an empty
+            // queue and does nothing.
+            self.pending_preview_palette = None;
             return;
         }
+        let now = Instant::now();
+        if preview_flush_ready(self.last_preview_invalidation, now) || self.window.is_none() {
+            self.apply_preview_palette(palette, now);
+            return;
+        }
+        self.pending_preview_palette = Some(palette);
+        if self.preview_flush_deadline.is_none() {
+            if let Some(last) = self.last_preview_invalidation {
+                self.schedule_preview_flush(last + PREVIEW_PALETTE_THROTTLE);
+            }
+        }
+    }
+
+    /// fork: the expensive half of a preview change. Assigning the palette
+    /// and ageing out the colour caches must happen in one synchronous step:
+    /// a paint that ran between them would mix the new palette with cached
+    /// colours.
+    fn apply_preview_palette(&mut self, palette: Option<ColorPalette>, now: Instant) {
+        self.pending_preview_palette = None;
         self.preview_palette = palette;
         self.palette.take();
         // Both caches bake colours in, so they must age out with the
@@ -1872,6 +1933,45 @@ impl TermWindow {
         if let Some(window) = self.window.as_ref() {
             window.invalidate();
         }
+        self.last_preview_invalidation = Some(now);
+    }
+
+    /// fork: consume the queued preview target. Runs on the GUI thread via
+    /// `TermWindowNotif::Apply`. An overdue timer can lose a race against a
+    /// more recent immediate apply; the readiness check re-arms the flush in
+    /// that case so flushes stay spaced by PREVIEW_PALETTE_THROTTLE.
+    fn flush_pending_preview_palette(&mut self) {
+        self.preview_flush_deadline = None;
+        let target = match self.pending_preview_palette.take() {
+            Some(target) => target,
+            None => return,
+        };
+        let now = Instant::now();
+        if !preview_flush_ready(self.last_preview_invalidation, now) {
+            self.pending_preview_palette = Some(target);
+            if let Some(last) = self.last_preview_invalidation {
+                self.schedule_preview_flush(last + PREVIEW_PALETTE_THROTTLE);
+            }
+            return;
+        }
+        self.apply_preview_palette(target, now);
+    }
+
+    /// fork: wake the GUI thread once when the throttle window elapses,
+    /// following the same Timer + notify pattern as
+    /// `schedule_next_status_update`.
+    fn schedule_preview_flush(&mut self, deadline: Instant) {
+        let Some(window) = self.window.as_ref().cloned() else {
+            return;
+        };
+        self.preview_flush_deadline = Some(deadline);
+        promise::spawn::spawn(async move {
+            Timer::at(deadline).await;
+            window.notify(TermWindowNotif::Apply(Box::new(|tw| {
+                tw.flush_pending_preview_palette()
+            })));
+        })
+        .detach();
     }
 
     pub fn config_was_reloaded(&mut self) {
@@ -4102,5 +4202,55 @@ mod bell_throttle_tests {
         let (cool, next) = bell_throttle(last, t0 + Duration::from_millis(102), Duration::ZERO);
         assert!(!cool);
         assert_eq!(next, last);
+    }
+}
+
+#[cfg(test)]
+mod preview_flush_tests {
+    use super::{preview_flush_ready, PREVIEW_PALETTE_THROTTLE};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn first_change_of_a_burst_applies_immediately() {
+        let t0 = Instant::now();
+        assert!(preview_flush_ready(None, t0));
+    }
+
+    #[test]
+    fn changes_inside_the_window_are_deferred() {
+        let t0 = Instant::now();
+        let last = t0;
+        assert!(!preview_flush_ready(
+            Some(last),
+            t0 + PREVIEW_PALETTE_THROTTLE - Duration::from_millis(1)
+        ));
+    }
+
+    #[test]
+    fn window_boundary_lets_the_flush_through() {
+        let t0 = Instant::now();
+        let last = t0;
+        // exactly at the boundary and beyond it
+        assert!(preview_flush_ready(
+            Some(last),
+            t0 + PREVIEW_PALETTE_THROTTLE
+        ));
+        assert!(preview_flush_ready(
+            Some(last),
+            t0 + PREVIEW_PALETTE_THROTTLE + Duration::from_millis(1)
+        ));
+        // the same predicate backs the re-arm check inside
+        // `flush_pending_preview_palette`: an overdue timer that lost a race
+        // against a more recent apply must defer again instead of flushing
+        // early
+        let last = t0 + Duration::from_millis(50);
+        assert!(!preview_flush_ready(
+            Some(last),
+            t0 + PREVIEW_PALETTE_THROTTLE
+        ));
+        assert!(preview_flush_ready(
+            Some(last),
+            t0 + Duration::from_millis(150)
+        ));
     }
 }
