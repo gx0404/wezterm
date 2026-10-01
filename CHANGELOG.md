@@ -60,6 +60,13 @@
   新增纯 Lua 5.4 单测 `scripts/tests/gx_shells.lua`（Shell
   探测、默认 Shell 解析、herdr 同步提示）；`tests/pure_fn_test.lua` 增加键位断言与
   `config/launch.lua` 不启动子进程的断言。
+- `Ctrl+V` 粘贴支持剪贴板图片：`window` 层新增 `get_clipboard_image` 抽象与 Windows 实现
+  （按注册 `PNG` → `CF_DIBV5` → `CF_DIB` 优先级取原始字节，后台线程读取不卡 GUI），GUI 侧
+  在 spawn 线程转码（DIB 合成文件头按 BMP 解码、32bpp alpha 全 0 视为不透明、最长边超过
+  2048px 降采样）后以 OSC 1337 内联图片经 `perform_actions` 直接应用到终端——不经 PTY 输入、
+  不依赖 shell 回显，vim/htop 等全屏应用内同样生效。新增配置
+  `clipboard_image_paste = "inline" | "path" | "none"`（默认 inline；path 模式写临时文件把
+  路径作为文本粘贴），无图、转码失败或配置 none 时回落原文本粘贴行为不变。
 
 ### Changed
 - 不兼容：Windows 键位改为与 Linux 相同的 `Ctrl+Shift` 方案，不再占用裸 `Alt`（`SUPER`
@@ -102,6 +109,31 @@
   的遮罩下几乎看不出。已有安装里未改动的壁纸随配置迁移换成新版，原图进备份。
 - 开发：规则路由把 `scripts/gx-launcher/**`、`scripts/gx_package.py`、
   `scripts/gx_config_fingerprints.py` 同时归入 dotfiles 领域（一个文件命中多个领域时取并集）。
+- 上游同步：本地新建 `main` 分支（跟踪 `origin/main`）快进到 wezterm/wezterm 上游
+  `cab251610` 并推送 origin；`feature/gx_wezterm` 执行 `git merge main` 确认已包含全部
+  上游提交（本轮上游无新增，选择性吸收流程留待后续同步轮使用）。
+- 构建：`make build` / `make all` 默认产出 release 二进制（Makefile fork 段
+  `BUILD_OPTS ?= --release`，`BUILD_OPTS= make build` 回退 dev）。此前 `$(BUILD_OPTS)`
+  未定义时落 dev profile（opt-level 0 + debug assertions），日常使用二进制高速输出、
+  滚动、打字全面掉帧；`docs/MAKE_COMMANDS.md` 的 release 表述同步修正。
+- 性能：Windows WGL 上下文创建后调用 `wglSwapIntervalEXT(0)` 关闭 vsync，帧率节流交由
+  既有 `max_fps` 机制（对齐 EGL 的 `SwapInterval(0)` 与 macOS 自管节流）。此前
+  `SwapBuffers` 在 wndProc 内同步等待 vblank，paint 期间整个消息循环停摆，拖动/滚动迟滞。
+- 性能：壁纸浮层——预览的整文件读取与层栈构建移到后台线程（过期结果按票据丢弃，选中
+  已变/浮层已关不回放）；遮罩 Color 层按（颜色, 尺寸）缓存，不再每次预览逐像素填充
+  窗口尺寸 RGBA（2560×1440 约 8.3MB/次）；打开浮层的目录扫描后台化、先渲染空列表再回填；
+  预览会话的图片文件缓存设 LRU 上限 8、浮层关闭后只保留最终层栈引用。
+- 性能：设置浮层——确认动作去抖：字号/配色用现成通道本地即时预览（`adjust_font_scale` /
+  预览调色板），`gui-settings` 持久化与全量 Lua 重载在停止连击 300ms 后合并为一次，
+  Esc 关闭/切换分区前先落盘，长按 Enter 不再以按键 repeat 频率（约 30Hz）触发全量重载。
+- 性能：配色预览失效节流 100ms——`set_preview_palette` 拆为「入队 + 定时冲刷」，palette
+  赋值与缓存失效在同一同步步完成（不会出现错色帧），按住 ↓/鼠标滑过配色列表时全窗口
+  重 shaping 从每步一次降到至多 10 次/秒，终态在最后一次变更后 100ms 内落地。
+- 性能：mux 输出泵对 ≥2048 个 action 的大批次按 2048 子批依次应用，子批间释放 pane 终端
+  锁，高速大输出（cat 大文件/编译日志）时 GUI 渲染线程不再被单次长临界区挡住；小批次
+  路径零改动。
+- 性能：copy 浮层段落跳转（`{` / `}`）加 1 万行扫描预算，无空行分隔的超大 scrollback
+  不再单击就全量同步扫描（原先数百毫秒卡顿），重复按键从停点续扫。
 
 ### Fixed
 - GX 自动 CI 的 push/PR 与手动发布源码 ref 对齐默认分支 `feature/gx_wezterm`，
@@ -141,6 +173,11 @@
   未挂载的兄弟目录被 `git status` 视为删除、产物被误标为脏构建。
 - AI 工具安全门按本组件根相对化绝对路径，注册命令指向 `wezterm/` 下的脚本，修复
   并入单仓后文件保护规则对绝对路径失效；钩子测试改为按配置原样执行注册命令。
+- Windows 首帧 present 失败时 `ShowWindow` 的兜底等待从 1.5s 缩短到 300ms，慢驱动/异常
+  环境下开窗不再出现可感知的白屏等待。
+- `window/Cargo.toml` 补 winapi `shellapi` feature：拖放功能引入的 `winapi::um::shellapi`
+  导入原先依赖传递 feature 统一（clipboard-win 5.4.1 后失去该传递路径），导致单 crate
+  `cargo check -p window` / `cargo nextest run -p window` 独立编译失败。
 
 ## 0.3.0(TBD)
 
