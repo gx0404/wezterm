@@ -123,13 +123,41 @@ pub struct Mux {
 
 const BUFSIZE: usize = 1024 * 1024;
 
+/// fork: sub-batch size, and the minimum batch size that gets sub-batched,
+/// when applying parsed output actions.  `LocalPane::perform_actions`
+/// holds the pane's terminal mutex for the whole call, while the GUI
+/// render thread locks that same mutex to walk the visible lines, so
+/// applying one huge batch (a full parser-buffer read can parse into far
+/// more actions than this) in a single call starves the renderer and
+/// drops frames during heavy output.
+const SUB_BATCH_ACTIONS: usize = 2048;
+
+/// fork: feed `actions` to `perform` as a single call (upstream behavior;
+/// the common small-batch path is unchanged and pays no extra cost), or,
+/// for batches of `SUB_BATCH_ACTIONS` or more, as ordered sub-batches so
+/// the pane's terminal mutex is released between them and the renderer
+/// can interleave.  Only the single parser thread drives this, so
+/// ordering within the batch is preserved.
+fn perform_actions_in_chunks<F: FnMut(Vec<Action>)>(actions: Vec<Action>, mut perform: F) {
+    if actions.len() < SUB_BATCH_ACTIONS {
+        perform(actions);
+        return;
+    }
+    for chunk in actions.chunks(SUB_BATCH_ACTIONS) {
+        perform(chunk.to_vec());
+    }
+}
+
 /// This function applies parsed actions to the pane and notifies any
 /// mux subscribers about the output event
 fn send_actions_to_mux(pane: &Weak<dyn Pane>, dead: &Arc<AtomicBool>, actions: Vec<Action>) {
     let start = Instant::now();
     match pane.upgrade() {
         Some(pane) => {
-            pane.perform_actions(actions);
+            // fork: apply huge batches in sub-batches so the GUI render
+            // thread can grab the terminal mutex in between; see
+            // `perform_actions_in_chunks`.
+            perform_actions_in_chunks(actions, |batch| pane.perform_actions(batch));
             histogram!("send_actions_to_mux.perform_actions.latency").record(start.elapsed());
             Mux::notify_from_any_thread(MuxNotification::PaneOutput(pane.pane_id()));
         }
@@ -1874,5 +1902,47 @@ mod parse_buffered_data_tests {
         drop(tx);
         handle.join().expect("pump thread");
         assert!(batches.recv().is_err(), "unexpected extra batch");
+    }
+}
+
+// fork: 大批 action 子批切分单测：小批与恰好等于阈值的批次保持单次调用
+// （常态路径零变化）；超过阈值的大批按上限切分且严格保序。
+#[cfg(test)]
+mod action_sub_batch_tests {
+    use super::*;
+
+    fn print_actions(n: usize) -> Vec<Action> {
+        (0..n)
+            .map(|i| Action::Print(char::from(b'a' + (i % 26) as u8)))
+            .collect()
+    }
+
+    #[test]
+    fn small_batch_is_performed_as_a_single_call() {
+        let mut calls = Vec::new();
+        let actions = print_actions(SUB_BATCH_ACTIONS - 1);
+        perform_actions_in_chunks(actions.clone(), |batch| calls.push(batch));
+        assert_eq!(calls, vec![actions]);
+    }
+
+    #[test]
+    fn batch_at_threshold_is_performed_as_a_single_call() {
+        // 恰好等于阈值：切分路径只产生一个完整子批，等价于单次调用
+        let mut calls = Vec::new();
+        let actions = print_actions(SUB_BATCH_ACTIONS);
+        perform_actions_in_chunks(actions.clone(), |batch| calls.push(batch));
+        assert_eq!(calls, vec![actions]);
+    }
+
+    #[test]
+    fn large_batch_is_split_into_ordered_sub_batches() {
+        let mut calls = Vec::new();
+        let actions = print_actions(SUB_BATCH_ACTIONS * 2 + 7);
+        perform_actions_in_chunks(actions.clone(), |batch| calls.push(batch));
+        assert_eq!(
+            calls.iter().map(Vec::len).collect::<Vec<_>>(),
+            vec![SUB_BATCH_ACTIONS, SUB_BATCH_ACTIONS, 7]
+        );
+        assert_eq!(calls.concat(), actions);
     }
 }
