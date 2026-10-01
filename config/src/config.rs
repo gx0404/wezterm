@@ -911,6 +911,30 @@ pub struct Config {
     #[dynamic(default)]
     pub canonicalize_pasted_newlines: Option<NewlineCanon>,
 
+    /// Controls what the `Paste` action does when the clipboard holds an
+    /// image rather than (only) text. {{since('nightly')}}
+    ///
+    /// Fork addition, default `"Inline"`:
+    ///
+    /// - `"Inline"` decodes the image (PNG as-is; DIB/DIBV5 transcoded to
+    ///   PNG, downsampled when the longest edge exceeds 2048 pixels) and
+    ///   inserts it into the pane as an inline image (OSC 1337), without
+    ///   writing anything to the pty input.
+    /// - `"Path"` writes the PNG to a temporary file and pastes the file
+    ///   path as text.
+    /// - `"None"` never treats the clipboard as an image; pasting always
+    ///   sends text.
+    ///
+    /// When no image is available, the image cannot be decoded, or the
+    /// mode is `"None"`, pasting falls back to the historical text
+    /// behavior.
+    ///
+    /// Reading image data from the clipboard is currently implemented on
+    /// Windows; on other platforms this option has no effect and pasting
+    /// is text-only.
+    #[dynamic(default)]
+    pub clipboard_image_paste: ClipboardImagePasteMode,
+
     #[dynamic(default = "default_unicode_version")]
     pub unicode_version: u8,
 
@@ -2249,6 +2273,54 @@ pub enum NotificationHandling {
     SuppressFromFocusedWindow,
 }
 
+/// Controls what the `Paste` action does when the clipboard holds an
+/// image. {{since('nightly')}}
+///
+/// Fork addition. See also `Config::clipboard_image_paste`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClipboardImagePasteMode {
+    /// Decode the image and insert it into the pane as an inline image
+    /// (OSC 1337), without writing anything to the pty input
+    #[default]
+    Inline,
+    /// Write the image to a temporary PNG file and paste its path as text
+    Path,
+    /// Never treat the clipboard as an image; always paste text
+    None,
+}
+
+// fork: serialized as lowercase strings on the Lua/config surface
+// ("inline"/"path"/"none") rather than the Rust variant names
+impl FromDynamic for ClipboardImagePasteMode {
+    fn from_dynamic(
+        value: &wezterm_dynamic::Value,
+        options: wezterm_dynamic::FromDynamicOptions,
+    ) -> Result<Self, wezterm_dynamic::Error> {
+        let s = String::from_dynamic(value, options)?;
+        match s.as_str() {
+            "inline" => Ok(Self::Inline),
+            "path" => Ok(Self::Path),
+            "none" => Ok(Self::None),
+            s => Err(wezterm_dynamic::Error::Message(format!(
+                "`{s}` is not valid, use one of `inline`, `path` or `none`"
+            ))),
+        }
+    }
+}
+
+impl ToDynamic for ClipboardImagePasteMode {
+    fn to_dynamic(&self) -> wezterm_dynamic::Value {
+        wezterm_dynamic::Value::String(
+            match self {
+                Self::Inline => "inline",
+                Self::Path => "path",
+                Self::None => "none",
+            }
+            .to_string(),
+        )
+    }
+}
+
 fn validate_row_or_col(value: &u16) -> Result<(), String> {
     if *value < 1 {
         Err("initial_cols and initial_rows must be non-zero".to_string())
@@ -2288,4 +2360,68 @@ fn default_macos_forward_mods() -> Modifiers {
 
 fn default_colr_rasterizer() -> FontRasterizerSelection {
     FontRasterizerSelection::Harfbuzz
+}
+
+// fork: `clipboard_image_paste` 的默认值与小写序列化守门
+#[cfg(test)]
+mod clipboard_image_paste_tests {
+    use super::*;
+    use wezterm_dynamic::{FromDynamicOptions, UnknownFieldAction, Value};
+
+    #[test]
+    fn default_is_inline() {
+        assert_eq!(
+            Config::default_config().clipboard_image_paste,
+            ClipboardImagePasteMode::Inline
+        );
+    }
+
+    #[test]
+    fn lowercase_values_roundtrip() {
+        let options = FromDynamicOptions::default();
+        for (text, mode) in [
+            ("inline", ClipboardImagePasteMode::Inline),
+            ("path", ClipboardImagePasteMode::Path),
+            ("none", ClipboardImagePasteMode::None),
+        ] {
+            let value = Value::String(text.to_string());
+            assert_eq!(
+                ClipboardImagePasteMode::from_dynamic(&value, options).unwrap(),
+                mode
+            );
+            assert_eq!(mode.to_dynamic(), value);
+        }
+    }
+
+    #[test]
+    fn unknown_value_is_rejected() {
+        assert!(ClipboardImagePasteMode::from_dynamic(
+            &Value::String("Inline".to_string()),
+            FromDynamicOptions::default()
+        )
+        .is_err());
+        assert!(ClipboardImagePasteMode::from_dynamic(
+            &Value::Bool(true),
+            FromDynamicOptions::default()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn explicit_value_is_accepted_in_config() {
+        let mut obj = std::collections::BTreeMap::new();
+        obj.insert(
+            Value::String("clipboard_image_paste".into()),
+            Value::String("path".into()),
+        );
+        let cfg = Config::from_dynamic(
+            &Value::Object(obj.into()),
+            FromDynamicOptions {
+                unknown_fields: UnknownFieldAction::Deny,
+                deprecated_fields: UnknownFieldAction::Warn,
+            },
+        )
+        .unwrap();
+        assert_eq!(cfg.clipboard_image_paste, ClipboardImagePasteMode::Path);
+    }
 }
