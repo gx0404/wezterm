@@ -37,19 +37,27 @@ export PATH := $(CURDIR)/.local/tools/venv/bin:$(CURDIR)/.local/tools/nextest/bi
 # 落 dev profile（opt-level 0 + debug assertions），高速输出/滚动明显卡顿。
 # 需要开发期快速迭代时显式 BUILD_OPTS= make build 覆盖。
 BUILD_OPTS ?= --release
+
+# 编译、构建的一切产物只落在仓库目录内（规则见 docs/AGENT_RULES/development.md
+# 「构建产物仓内封闭」）：构建目标 target/、sccache 编译缓存、构建进程临时文件
+# 都固定仓内，防止外部环境变量或工具默认值把产物带到仓外。.local/ 已整目录
+# gitignore；产物目录不存在时这里就地创建。
+export CARGO_TARGET_DIR := $(CURDIR)/target
+SCCACHE_CACHE_DIR := $(CURDIR)/.local/sccache
+export SCCACHE_DIR := $(SCCACHE_CACHE_DIR)
+BUILD_TMP_DIR := $(CURDIR)/.local/tmp
+$(shell mkdir -p "$(SCCACHE_CACHE_DIR)" "$(BUILD_TMP_DIR)")
 FRAMEWORK_PY := $(if $(wildcard .local/tools/venv/bin/python),.local/tools/venv/bin/python,python3)
 
 # Git Bash 调 MSYS2 make 时两套 msys-2.0.dll 运行时互不相认，子进程环境只剩 PATH/SYSTEMROOT
 # 等少数变量：缺 TMP/TEMP 时 dlltool/gcc 回退到 C:\WINDOWS\ 建临时文件而失败，缺 USERPROFILE
 # 时 Python 的 Path.home() 抛 RuntimeError，缺 LOCALAPPDATA 时 gx_package.py 找不到用户级
-# Inno Setup。仅 cygwin/msys 版 make 下用 cygpath -F 取 Windows 已知文件夹补缺失项，不覆盖已有值。
+# Inno Setup。仅 cygwin/msys 版 make 下补缺失项，不覆盖已有值：TMP/TEMP 优先仓内
+# .local/tmp（构建临时文件不外泄），USERPROFILE/LOCALAPPDATA 仍取 Windows 已知文件夹。
 ifneq ($(filter %-cygwin %-msys,$(MAKE_HOST)),)
 ifeq ($(and $(TMP),$(TEMP)),)
-WIN_TEMP_DIR := $(shell d="$$(/usr/bin/cygpath -m -F 28)/Temp" && test -d "$$d" && echo "$$d")
-ifneq ($(WIN_TEMP_DIR),)
-export TMP := $(or $(TMP),$(WIN_TEMP_DIR))
-export TEMP := $(or $(TEMP),$(WIN_TEMP_DIR))
-endif
+export TMP := $(or $(TMP),$(BUILD_TMP_DIR))
+export TEMP := $(or $(TEMP),$(BUILD_TMP_DIR))
 endif
 ifeq ($(USERPROFILE),)
 WIN_PROFILE_DIR := $(shell /usr/bin/cygpath -w -F 40)

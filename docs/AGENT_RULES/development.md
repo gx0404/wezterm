@@ -27,6 +27,15 @@
 
 ## 不变量
 
+- **构建产物仓内封闭**：编译、构建的一切产物与缓存只落仓内既定位置——
+  `target/`（构建目标，Makefile fork 段显式 `export CARGO_TARGET_DIR`）、
+  `.local/sccache`（sccache 编译缓存，`SCCACHE_DIR`）、`.local/tmp`（构建进程
+  临时目录，MSYS make 缺 TMP/TEMP 时的回落值）、`deps/`（get-deps）、
+  `.ui-evidence/`（截图证据）与打包 stage 目录；`.local/` 整目录 gitignore。
+  禁止把 `CARGO_TARGET_DIR`/`OUT_DIR`/`SCCACHE_DIR`/`TMP|TEMP` 指到仓库外，
+  也不得依赖指向仓外的外部环境变量默认值；不经 make 直接调用 cargo/脚本构建
+  的会话同样受此约束。用户级共享层（rustup 工具链本体、`~/.cargo` 依赖源
+  缓存）不是构建产物，不在此列。
 - **并行会话防双写**：写入仓库前复查并行信号（untracked/修改清单短间隔
   增长、出现非本轮新建的产物目录）；发现并行推进即转只读验收 + 逐项声明
   的外科修复，不双写。判定进度用 ctime 或文件清单快照，不信 mtime

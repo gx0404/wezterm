@@ -134,6 +134,11 @@
   路径零改动。
 - 性能：copy 浮层段落跳转（`{` / `}`）加 1 万行扫描预算，无空行分隔的超大 scrollback
   不再单击就全量同步扫描（原先数百毫秒卡顿），重复按键从停点续扫。
+- 构建：编译、构建产物仓内封闭——Makefile fork 段显式固定 `CARGO_TARGET_DIR` 为仓内
+  `target/`、`SCCACHE_DIR` 为 `.local/sccache`、MSYS make 缺失 `TMP`/`TEMP` 时回落仓内
+  `.local/tmp`（原为系统 Temp），构建目标、编译缓存与构建临时文件不再外泄到仓库外；
+  规则固化为 docs/AGENT_RULES/development.md 的「构建产物仓内封闭」不变量
+  （`.local/` 整目录 gitignore）。
 
 ### Fixed
 - GX 自动 CI 的 push/PR 与手动发布源码 ref 对齐默认分支 `feature/gx_wezterm`，
