@@ -2,16 +2,16 @@ use super::*;
 use crate::connection::ConnectionOps;
 use crate::parameters::{self, Parameters};
 use crate::{
-    Appearance, Clipboard, CursorIcon, DeadKeyStatus, Dimensions, Handled, KeyCode, KeyEvent,
-    Modifiers, MouseButtons, MouseEvent, MouseEventKind, MousePress, Point, RawKeyEvent, Rect,
-    RequestedWindowGeometry, ResolvedGeometry, ScreenPoint, ScreenRect, ULength, WindowDecorations,
-    WindowEvent, WindowEventSender, WindowOps, WindowState,
+    Appearance, Clipboard, ClipboardImage, ClipboardImageFormat, CursorIcon, DeadKeyStatus,
+    Dimensions, Handled, KeyCode, KeyEvent, Modifiers, MouseButtons, MouseEvent, MouseEventKind,
+    MousePress, Point, RawKeyEvent, Rect, RequestedWindowGeometry, ResolvedGeometry, ScreenPoint,
+    ScreenRect, ULength, WindowDecorations, WindowEvent, WindowEventSender, WindowOps, WindowState,
 };
 use anyhow::{bail, Context};
 use async_trait::async_trait;
 use config::{ConfigHandle, ImePreeditRendering, SrgbaTuple, SystemBackdrop};
 use lazy_static::lazy_static;
-use promise::Future;
+use promise::{Future, Promise};
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
     RawWindowHandle, Win32WindowHandle, WindowHandle, WindowsDisplayHandle,
@@ -661,7 +661,9 @@ impl WindowInner {
     }
 
     /// 首帧永远失败（如 GPU 初始化失败）时也不能让用户面对无窗口进程，
-    /// 超时后照常把窗口显示出来
+    /// 超时后照常把窗口显示出来。fork: 兜底从 1.5s 缩到 300ms，让 present
+    /// 失败路径尽快 show；此时首帧背景由 fill_unpresented_background
+    /// 填终端背景色兜底，白帧风险可控
     fn arm_first_frame_fallback(&mut self) {
         if self.show_fallback_armed {
             return;
@@ -669,10 +671,10 @@ impl WindowInner {
         self.show_fallback_armed = true;
         let hwnd = self.hwnd;
         promise::spawn::spawn(async move {
-            async_io::Timer::after(std::time::Duration::from_millis(1500)).await;
+            async_io::Timer::after(std::time::Duration::from_millis(300)).await;
             Connection::with_window_inner(hwnd, |inner| {
                 if !inner.first_frame_presented {
-                    log::warn!("no frame presented within 1.5s of show(); showing window anyway");
+                    log::warn!("no frame presented within 300ms of show(); showing window anyway");
                     inner.first_frame_presented();
                 }
                 Ok(())
@@ -1047,6 +1049,17 @@ impl WindowOps for Window {
         clipboard_win::set_clipboard_string(&text).ok();
     }
 
+    fn get_clipboard_image(&self, _clipboard: Clipboard) -> Future<Option<ClipboardImage>> {
+        let mut promise = Promise::new();
+        let future = promise.get_future().unwrap();
+        // fork: 图片载荷可达数 MB，读取放后台线程后再 resolve；文本
+        // get_clipboard 是调用线程 eager 的，图片刻意不 eager
+        std::thread::spawn(move || {
+            promise.ok(read_clipboard_image());
+        });
+        future
+    }
+
     fn set_window_drag_position(&self, coords: ScreenPoint) {
         Connection::with_window_inner(self.0, move |inner| {
             inner.window_drag_position = Some(coords);
@@ -1120,6 +1133,57 @@ impl WindowOps for Window {
                 color: top_border_color,
             }),
         }))
+    }
+}
+
+// fork: 按 注册PNG → CF_DIBV5 → CF_DIB 优先级探测剪贴板图片并取原始字节。
+// 探测走 GetPriorityClipboardFormat（无需打开剪贴板）；读取需独占打开，
+// 剪贴板被其他进程短暂占用时重试几次。返回 None 表示无可用图片格式
+fn read_clipboard_image() -> Option<ClipboardImage> {
+    let mut candidates: Vec<(u32, ClipboardImageFormat)> = Vec::new();
+    if let Some(png) = clipboard_win::raw::register_format("PNG") {
+        candidates.push((png.get(), ClipboardImageFormat::Png));
+    }
+    candidates.push((
+        clipboard_win::formats::CF_DIBV5,
+        ClipboardImageFormat::DibV5,
+    ));
+    candidates.push((clipboard_win::formats::CF_DIB, ClipboardImageFormat::Dib));
+
+    let ids: Vec<u32> = candidates.iter().map(|(id, _)| *id).collect();
+    let format = clipboard_win::raw::which_format_avail(&ids)?;
+    let (format, kind) = candidates
+        .iter()
+        .find(|(id, _)| *id == format.get())
+        .copied()?;
+
+    // 剪贴板是全局互斥资源，被其他进程占用时 OpenClipboard 会失败
+    let mut opened = false;
+    for _ in 0..10 {
+        if clipboard_win::raw::open().is_ok() {
+            opened = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if !opened {
+        log::warn!("unable to open clipboard to read image");
+        return None;
+    }
+
+    let mut data = Vec::new();
+    let result = clipboard_win::raw::get_vec(format, &mut data);
+    if clipboard_win::raw::close().is_err() {
+        log::debug!("failed to close clipboard after image read");
+    }
+
+    match result {
+        Ok(size) if size > 0 => Some(ClipboardImage { data, format: kind }),
+        Ok(_) => None,
+        Err(err) => {
+            log::warn!("error reading clipboard image format {}: {}", format, err);
+            None
+        }
     }
 }
 

@@ -56,6 +56,26 @@ impl Default for Clipboard {
     }
 }
 
+// fork: 图片剪贴板读取。data 的语义随 format 变化：PNG 为原样字节；
+// DIB 族为从 BITMAPINFOHEADER 起始、无 14 字节 BITMAPFILEHEADER 的
+// DIB 原始字节，由上层解码
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipboardImageFormat {
+    /// 注册格式 "PNG" 的原样 PNG 字节
+    Png,
+    /// CF_DIBV5：以 BITMAPV5HEADER 起始的 DIB 字节
+    DibV5,
+    /// CF_DIB：以 BITMAPINFOHEADER 起始的 DIB 字节
+    Dib,
+}
+
+// fork: WindowOps::get_clipboard_image 的返回载荷
+#[derive(Debug, Clone)]
+pub struct ClipboardImage {
+    pub data: Vec<u8>,
+    pub format: ClipboardImageFormat,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Dimensions {
     pub pixel_width: usize,
@@ -328,6 +348,11 @@ pub trait WindowOps {
 
     /// Set some text in the clipboard
     fn set_clipboard(&self, clipboard: Clipboard, text: String);
+
+    // fork: 读取剪贴板图片；不支持的平台默认立即解析为 None
+    fn get_clipboard_image(&self, _clipboard: Clipboard) -> Future<Option<ClipboardImage>> {
+        Future::result(Ok(None))
+    }
 
     /// Set window level. Depending on the environment and user preferences
     fn set_window_level(&self, _level: WindowLevel) {}
