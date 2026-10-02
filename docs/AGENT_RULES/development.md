@@ -21,7 +21,9 @@
   docs/RELEASE.md 的两套版本体系说明）。
 - 工具钉版：`scripts/setup_env.sh` → `.local/tools/`（nextest/stylua 预编译包
   sha256 钉版 + venv{graphifyy, tomli}；Windows 下载 nextest/stylua 的 Windows
-  版并同样 sha256 钉版，跳过 venv）；Makefile 已把其 bin 前置 PATH。
+  版并同样 sha256 钉版，跳过 venv）；lua 5.4 同为钉版（Windows 用 LuaBinaries
+  预编译包、失败回退官方源码 mingw 编译；Linux/mac 官方源码 posix 编译），
+  是 `scripts/tests/*.lua` 纯 Lua 单测的运行器。Makefile 已把其 bin 前置 PATH。
 - hooks：`.claude/hooks/dangerous_patterns.conf` 是危险模式唯一真源，
   `pre_tool_use_gate.py` 消费（claude/codex 协议适配；ZCode 复用 claude 形）。
 

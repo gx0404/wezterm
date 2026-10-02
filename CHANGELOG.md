@@ -68,6 +68,13 @@
   `clipboard_image_paste = "inline" | "path" | "none"`（默认 inline；path 模式写临时文件把
   路径作为文本粘贴），无图、转码失败或配置 none 时回落原文本粘贴行为不变。
 
+- 开发环境：`make setup` 钉版安装 lua 5.4 到 `.local/tools/lua/`（Windows 用
+  LuaBinaries 预编译包、失败回退官方源码 mingw 编译；Linux/mac 官方源码 posix
+  编译，均 sha256 校验），`scripts/tests/gx_shells.lua`/`gx_resurrect.lua` 可在
+  本机直接运行（gx_shells 274 例、gx_resurrect 全过）；`setup --check` 增加 lua
+  诊断项，Makefile PATH 解析序覆盖。`dotfiles/wezterm-config/tests/pure_fn_test.lua`
+  不依赖该解释器，经 wezterm mlua 运行（639 例全过）。
+
 ### Changed
 - 不兼容：Windows 键位改为与 Linux 相同的 `Ctrl+Shift` 方案，不再占用裸 `Alt`（`SUPER`
   由 `Alt` 改为 `Ctrl+Shift`，`SUPER_REV` 由 `Ctrl+Alt` 改为 `Ctrl+Alt+Shift`）。例如搜索

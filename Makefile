@@ -31,7 +31,7 @@ servedocs:
 # ---------------------------------------------------------------------------
 # AI 协作开发框架（fork 维护段，上游没有；命令手册见 docs/MAKE_COMMANDS.md）
 # 工具解析序：项目钉版 .local/tools > 系统 PATH（安装：make setup）。
-export PATH := $(CURDIR)/.local/tools/venv/bin:$(CURDIR)/.local/tools/nextest/bin:$(CURDIR)/.local/tools/stylua/bin:$(PATH)
+export PATH := $(CURDIR)/.local/tools/venv/bin:$(CURDIR)/.local/tools/nextest/bin:$(CURDIR)/.local/tools/stylua/bin:$(CURDIR)/.local/tools/lua/bin:$(PATH)
 
 # 日常二进制必须是优化构建：上游 build 目标的 $(BUILD_OPTS) 未定义时 cargo
 # 落 dev profile（opt-level 0 + debug assertions），高速输出/滚动明显卡顿。

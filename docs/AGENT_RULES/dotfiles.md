@@ -101,6 +101,10 @@
 
 - 语法：`bash -n dotfiles/install.sh scripts/gx_install.sh`；
   `python3 -m py_compile scripts/gx_bundle.py`。
+- 纯 Lua 单测：`dotfiles/wezterm-config/tests/pure_fn_test.lua` 经 wezterm mlua
+  运行（`wezterm --config-file <该文件> show-keys`，末行 `PURE_FN_TEST: ALL PASS`）；
+  `scripts/tests/gx_shells.lua`/`gx_resurrect.lua` 用项目钉版 lua54
+  （`make setup` 装到 `.local/tools/lua/bin/`，wezterm 模块与文件系统自带 stub）。
 - 启动器与指纹表：`rustc --edition=2021 --test scripts/gx-launcher/main.rs -o
   .local/gx-tests/launcher-tests && .local/gx-tests/launcher-tests`；
   `python3 -m unittest discover -s scripts -p 'test_gx_*.py'` 与

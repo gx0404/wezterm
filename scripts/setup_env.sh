@@ -7,6 +7,9 @@
 #   .local/tools/venv/                        # graphifyy(图谱) + tomli(py3.10 TOML)
 #   .local/tools/stylua/bin/stylua            # lua 代码块格式化（generated-check/
 #                                             # update-derived-files 与 docs 构建同一约定）
+#   .local/tools/lua/bin/lua54                 # scripts/tests/*.lua 纯 Lua 单测的运行器
+#                                             #（dotfiles tests/pure_fn_test.lua 不走它，
+#                                             # 经 wezterm mlua 跑）
 #
 # Windows（uname -s 为 MINGW*/MSYS*/CYGWIN*）：nextest 与 stylua 换装 Windows 预编译包
 # （bin 下为 cargo-nextest.exe / stylua.exe）；框架 venv 跳过（仅图谱与 py3.10 需要，
@@ -44,6 +47,13 @@ STYLUA_URL="https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA_
 STYLUA_SHA256="ca6f1cf52eaf69e6632b81acef9c197aa24b85eb30d2455a35e7dbe28ae77c72"
 # Windows 用 stylua-windows-x86_64.zip（内含 stylua.exe）。
 STYLUA_SHA256_WINDOWS="e77d0ea1226b8b389b43f702240091249a96eea25857281f90ea24d0eb9eb969"
+LUA_VERSION="5.4.8"
+# LuaBinaries 预编译包（Windows x86_64；lua54.exe + lua54.dll，附 lua.exe 别名）。
+LUA_URL_WINDOWS="https://sourceforge.net/projects/luabinaries/files/${LUA_VERSION}/Tools%20Executables/lua-${LUA_VERSION}_Win64_bin.zip/download"
+LUA_SHA256_WINDOWS="20321e893509e575d2454dd7bbf05342c1f3cb1b3788c0ec5a55ae4279dde169"
+# 官方源码包：Linux 直接编译（posix 无 readline 依赖），Windows 预编译失败时回退 mingw 编译。
+LUA_TARBALL_URL="https://www.lua.org/ftp/lua-${LUA_VERSION}.tar.gz"
+LUA_TARBALL_SHA256="4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae"
 
 # ---- 平台分支：Windows（Git Bash/MSYS2/Cygwin）换用 Windows 预编译包 ----
 IS_WINDOWS=0
@@ -144,6 +154,13 @@ check_all() {
     else
         miss stylua "运行 scripts/setup_env.sh 安装项目钉版（键表派生物比对/写入用）"
     fi
+    if [ -x "${TOOLS}/lua/bin/lua54${EXE}" ]; then
+        ok "lua $("${TOOLS}/lua/bin/lua54${EXE}" -v 2>/dev/null | awk 'NR==1{print $2}')（项目钉版，scripts/tests 的 lua 单测）"
+    elif command -v lua54 >/dev/null 2>&1; then
+        note "lua54 走系统 PATH（建议安装项目钉版：scripts/setup_env.sh）"
+    else
+        miss lua54 "运行 scripts/setup_env.sh 安装项目钉版（scripts/tests 的 lua 单测运行器）"
+    fi
     [ "$fail" -eq 0 ] && echo "[setup-env] 诊断通过" || echo "[setup-env] 存在缺项（见上）"
     return "$fail"
 }
@@ -211,6 +228,52 @@ install_stylua() {
     ok "stylua ${STYLUA_VERSION} -> ${dest}/bin/"
 }
 
+install_lua() {
+    local dest="${TOOLS}/lua"
+    if [ -x "${dest}/bin/lua54${EXE}" ] \
+        && "${dest}/bin/lua54${EXE}" -v 2>/dev/null | grep -q "Lua ${LUA_VERSION}"; then
+        note "lua ${LUA_VERSION} 已是钉版，跳过"
+        return 0
+    fi
+    mkdir -p "${dest}/bin"
+    local tmp
+    tmp="$(new_tmpdir)"
+    trap 'rm -rf "${tmp}"' RETURN
+    if [ "${IS_WINDOWS}" = 1 ]; then
+        note "下载 lua ${LUA_VERSION}（Windows x86_64 预编译）"
+        if download "${LUA_URL_WINDOWS}" "${tmp}/lua.zip"; then
+            echo "${LUA_SHA256_WINDOWS}  ${tmp}/lua.zip" | sha256sum -c - \
+                || { echo "[setup-env] sha256 校验失败，拒绝安装" >&2; return 1; }
+            unzip -o -q "${tmp}/lua.zip" -d "${tmp}/lua-bin"
+            install -m 0755 "${tmp}/lua-bin/lua54.exe" "${tmp}/lua-bin/lua54.dll" "${dest}/bin/"
+            # lua 名字别名：lua.exe 与 lua54.dll 同目录，加载链不受影响
+            cp -f "${dest}/bin/lua54.exe" "${dest}/bin/lua.exe"
+            ok "lua ${LUA_VERSION} -> ${dest}/bin/"
+            return 0
+        fi
+        note "预编译包下载失败，回退源码编译（需要 gcc 与 make 在 PATH）"
+    fi
+    note "下载 lua ${LUA_VERSION} 源码（编译安装）"
+    download "${LUA_TARBALL_URL}" "${tmp}/lua.tgz" \
+        || { echo "[setup-env] 下载失败" >&2; return 1; }
+    echo "${LUA_TARBALL_SHA256}  ${tmp}/lua.tgz" | sha256sum -c - \
+        || { echo "[setup-env] sha256 校验失败，拒绝安装" >&2; return 1; }
+    tar -xzf "${tmp}/lua.tgz" -C "${tmp}"
+    local plat="posix" # 无 readline 依赖，任意 Linux/mac 开发机可编
+    [ "${IS_WINDOWS}" = 1 ] && plat="mingw"
+    (cd "${tmp}/lua-${LUA_VERSION}" && make "${plat}" -j4) \
+        || { echo "[setup-env] 编译失败（需要 gcc 与 make 在 PATH）" >&2; return 1; }
+    if [ "${IS_WINDOWS}" = 1 ]; then
+        install -m 0755 "${tmp}/lua-${LUA_VERSION}/src/lua.exe" \
+            "${tmp}/lua-${LUA_VERSION}/src/lua54.dll" "${dest}/bin/"
+        cp -f "${dest}/bin/lua.exe" "${dest}/bin/lua54.exe"
+    else
+        install -m 0755 "${tmp}/lua-${LUA_VERSION}/src/lua" "${dest}/bin/lua54"
+        ln -sf lua54 "${dest}/bin/lua"
+    fi
+    ok "lua ${LUA_VERSION}（源码编译）-> ${dest}/bin/"
+}
+
 install_venv() {
     local venv="${TOOLS}/venv"
     if [ -x "${venv}/bin/python" ] && "${venv}/bin/python" -c "import tomli" 2>/dev/null \
@@ -243,6 +306,7 @@ else
         install_venv
     fi
     install_stylua
+    install_lua
     if [ "${IS_WINDOWS}" = 1 ]; then
         echo "[setup-env] 完成：make test / make generated-check 现在使用项目钉版工具（Windows 未装框架 venv，make graph 需自备 graphify）"
     else
