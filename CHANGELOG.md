@@ -183,6 +183,11 @@
 - `window/Cargo.toml` 补 winapi `shellapi` feature：拖放功能引入的 `winapi::um::shellapi`
   导入原先依赖传递 feature 统一（clipboard-win 5.4.1 后失去该传递路径），导致单 crate
   `cargo check -p window` / `cargo nextest run -p window` 独立编译失败。
+- 修复 Windows 粗体行字母间距错乱（`Started`、`Waiting` 等粗体文本被拉成比例间距）：
+  GDI/DirectWrite 对 GDI legacy 族名 `JetBrainsMono Nerd Font` 只解析 Regular 面，合成的
+  Bold 变体落空后回退微软雅黑（比例字体）。dotfiles `config/fonts.lua` 在 Windows 改用
+  typographic 族名 `JetBrainsMono NF`（两路全字重可解析），macOS/Linux 保持原名；验证见
+  `.ui-evidence` font-bold-fix 批次（ls-fonts 解析链 Before/After 与等宽像素测量）。
 
 ## 0.3.0(TBD)
 

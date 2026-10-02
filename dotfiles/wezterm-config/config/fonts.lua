@@ -2,7 +2,12 @@ local wezterm = require('wezterm')
 local platform = require('utils.platform')
 
 -- local font_family = 'Maple Mono NF'
-local font_family = 'JetBrainsMono Nerd Font'
+-- Windows：GDI/DirectWrite 对 "JetBrainsMono Nerd Font"（GDI legacy 族名）只认
+-- Regular 面——粗体变体解析落空后回退到微软雅黑（比例字体），表现为粗体行
+-- 字母间距错乱。typographic 族名 "JetBrainsMono NF" 两路都能解析全部字重
+-- （验证：wezterm ls-fonts 的 When Intensity=Bold 段应命中 NerdFont Bold 而非
+-- Microsoft YaHei / 内置 JetBrains Mono）。macOS/Linux 用原名。
+local font_family = platform.is_win and 'JetBrainsMono NF' or 'JetBrainsMono Nerd Font'
 -- local font_family = 'CartographCF Nerd Font'
 
 -- 本机沿用旧字号 12（源机器为 12.5）。
