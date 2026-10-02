@@ -21,9 +21,11 @@
   docs/RELEASE.md 的两套版本体系说明）。
 - 工具钉版：`scripts/setup_env.sh` → `.local/tools/`（nextest/stylua 预编译包
   sha256 钉版 + venv{graphifyy, tomli}；Windows 下载 nextest/stylua 的 Windows
-  版并同样 sha256 钉版，跳过 venv）；lua 5.4 同为钉版（Windows 用 LuaBinaries
-  预编译包、失败回退官方源码 mingw 编译；Linux/mac 官方源码 posix 编译），
-  是 `scripts/tests/*.lua` 纯 Lua 单测的运行器。Makefile 已把其 bin 前置 PATH。
+  版并同样 sha256 钉版，venv 同样安装——Windows venv 是 Scripts/ 布局，
+  脚本补 `bin/graphify` shim 对齐 graphify.sh 既定解析路径）；lua 5.4 同为
+  钉版（Windows 用 LuaBinaries 预编译包、失败回退官方源码 mingw 编译；
+  Linux/mac 官方源码 posix 编译），是 `scripts/tests/*.lua` 纯 Lua 单测的
+  运行器。Makefile 已把其 bin 前置 PATH。
 - hooks：`.claude/hooks/dangerous_patterns.conf` 是危险模式唯一真源，
   `pre_tool_use_gate.py` 消费（claude/codex 协议适配；ZCode 复用 claude 形）。
 
@@ -47,8 +49,9 @@
   危险模式改动必须 `python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`。
 - lint 门不得吞退出码（禁止 `--exit-zero`、禁止 `| tail` 接验收命令）；
   诊断（ai-doctor）只报告缺失并给修复命令，不隐式安装。
-- 生成物纪律：`graphify-out/graph.json`、`kb/chunks.json`、`.graphify_*`
-  指纹只能经 `make graph / make kb` 重建；有意变更才写盘并审 diff，默认
+- 生成物纪律：`graphify-out/graph.json`、`kb/chunks.json`、
+  `graphify-out/source-fingerprint.json` 指纹只能经 `make graph / make kb`
+  重建；有意变更才写盘并审 diff，默认
   `make graph-check / kb-check` 只读校验。
 - 证据纪律：UI 证据只写 `.ui-evidence/`（ignored）；`make evidence TASK=x`
   分配的目录里 result.json 如实登记 status 与 images_reviewed，没读图不写

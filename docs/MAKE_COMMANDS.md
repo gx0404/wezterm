@@ -19,7 +19,7 @@
 | 目标 | 作用 | 前置/副作用 |
 |---|---|---|
 | `make help` | 目标总览 | 无 |
-| `make setup` | 钉版安装 nextest、stylua + venv(graphifyy/tomli) 到 `.local/tools/`（Windows 装 Windows 版、跳过 venv） | 联网下载；幂等 |
+| `make setup` | 钉版安装 nextest、stylua、lua + venv(graphifyy/tomli) 到 `.local/tools/`（Windows 装 Windows 版预编译包，venv 同样安装并补 bin shim） | 联网下载；幂等 |
 | `make ai-doctor` | 只读诊断命令入口 | 无 |
 | `make framework-check` | resolver --check（规则闭集/体积/排序守门） | 无 |
 | `make framework-ready` | 配置完整门（拒绝 pending 命令） | 无 |
@@ -73,13 +73,14 @@
 才用到）：
 
 ```bash
-pacman -S --needed mingw-w64-x86_64-{gcc,lld,sccache,openssl,python,lua54} make
+pacman -S --needed mingw-w64-x86_64-{gcc,lld,sccache,openssl,python} make
 ```
 
 gcc 连带 binutils 的 dlltool，并提供仓库 `.cargo/config.toml` 指定的
 `x86_64-w64-mingw32-gcc` 链接驱动；python 提供框架脚本用的 `python3`
-（Windows 自带的 `python3` 只是商店占位符）；lua54 提供跑
-`scripts/tests/*.lua` 的 `lua5.4`。
+（Windows 自带的 `python3` 只是商店占位符）。跑 `scripts/tests/*.lua` 的
+解释器由 `make setup` 钉版安装（`.local/tools/lua/`，见上表），不再需要
+MSYS2 的 lua54 包。
 
 每个会话先设 PATH（不改系统 PATH）：
 
@@ -128,7 +129,10 @@ WINAPI_NO_BUNDLED_LIBRARIES = "1"
 
 sccache 缓存上限（默认 10 GiB）写在 `%APPDATA%\Mozilla\sccache\config\config`，
 设为 40 GiB；改后执行 `sccache --stop-server` 生效，`sccache --show-stats`
-看命中：
+看命中。经 make 构建时缓存目录与构建临时文件已固定仓内
+（`SCCACHE_DIR=.local/sccache`、`TMP/TEMP` 回落 `.local/tmp`，见
+development.md「构建产物仓内封闭」）；不经 make 直接调 cargo 的会话要自设
+`SCCACHE_DIR` 才守得住同一不变量。
 
 ```toml
 [cache.disk]
@@ -153,11 +157,11 @@ size = 42949672960
 - 框架命令的 `.sh` 入口（setup、generated-check、graph 等）经 PATH 中的
   Git Bash 或 MSYS2 bash 执行，跳过 System32 与 WindowsApps 下的 WSL 启动器；
   找不到 bash 时 `make ai-doctor` 报 MISSING，`make <目标>` 报错说明原因。
-- `make setup` 安装钉版 nextest/stylua 的 Windows 版（sha256 校验）；框架 venv
-  跳过（python3 ≥ 3.11 自带 tomllib，resolver 可直接运行；`make graph` 需自备
-  graphify）。下载优先用系统自带 `curl.exe`，走 Windows 证书库（杀软或代理解密
-  HTTPS 时，MSYS2 curl 的自带 CA 包会报自签名证书）；解压需要 `unzip`（Git for
-  Windows 自带）。
+- `make setup` 安装钉版 nextest/stylua/lua 的 Windows 版（sha256 校验）与框架
+  venv（graphifyy/tomli；Windows venv 是 Scripts/ 布局，脚本会补
+  `bin/graphify` shim 供 graphify.sh 既定解析路径）。下载优先用系统自带
+  `curl.exe`，走 Windows 证书库（杀软或代理解密 HTTPS 时，MSYS2 curl 的自带
+  CA 包会报自签名证书）；解压需要 `unzip`（Git for Windows 自带）。
 
 ### 实测对比
 

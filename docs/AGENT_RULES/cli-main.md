@@ -2,7 +2,7 @@
 
 ## 范围
 
-`wezterm/`（主 CLI 二进制：21 个 cli 子命令、asciicast 录制回放、tls 凭据）、
+`wezterm/`（主 CLI 二进制：19 个 cli 子命令、asciicast 录制回放、tls 凭据）、
 `wezterm-gui-subcommands/`（GUI/CLI 共用的 clap 定义）。
 
 ## 符号真源
@@ -16,7 +16,7 @@
   proxy、tlscreds、move-pane-to-new-tab、split-pane、send-text、get-text、
   activate-pane-direction、get-pane-direction、kill-pane、activate-pane、
   adjust-pane-size、activate-tab、set-tab-title、set-window-title、
-  rename-workspace、zoom-pane），每命令一个同名文件，`cmd.run(client).await`。
+  rename-workspace、zoom-pane、spawn），每命令一个同名文件，`cmd.run(client).await`。
 - 录制回放：`wezterm/src/asciicast.rs`（Record/Play + 平台 TTY 包装）。
 - 子命令契约：`wezterm-gui-subcommands` 是 GUI 与 CLI 子命令一致性的单一
   事实源（`DEFAULT_WINDOW_CLASS`、`name_equals_value` 解析等）。

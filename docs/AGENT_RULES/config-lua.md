@@ -16,9 +16,9 @@
   `Config::from_dynamic` 校验并打印栈回溯）、`wezterm.on/emit`、
   `action_callback`；`package.searchers[2]` 被替换以把 require 的文件加入
   reload 监视列表。
-- 注册中心：`env-bootstrap/src/lib.rs::register_lua_modules` 把 15 个
-  lua-api-crates push 进 `config::lua::add_context_setup_func`；window-funcs
-  例外，由 wezterm-gui 单独注册（GUI 进程才可用）。
+- 注册中心：`env-bootstrap/src/lib.rs::register_lua_modules` 把 14 个
+  lua-api-crates push 进 `config::lua::add_context_setup_func`；第 15 个
+  window-funcs 例外，由 wezterm-gui 单独注册（GUI 进程才可用）。
 - 动态值层：`wezterm-dynamic/src/value.rs::Value`（对齐 Lua 类型集且为
   TOML/JSON 超集）+ `FromDynamic/ToDynamic`（含 UnknownFieldAction）。
   Lua↔Rust 一律经 `luahelper::to_lua/from_lua` 的 Dynamic 往返。

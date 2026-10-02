@@ -1,13 +1,13 @@
 {
   "artifacts": {
-    "GRAPH_REPORT.md": "781a839d3d64572614afe87afe2ffe5c89c2edf9d19ca0f86d0e8940fa07a59a",
-    "graph.json": "eff49ce6df2eb74172de0cb06844fc706905575ff8eb3cbb901cdd7a964e70a2"
+    "GRAPH_REPORT.md": "01d069923163732deb8a60ddeb9d8fe09c3fc91555d90cb18162551b1f21f040",
+    "graph.json": "7bbd5c8c35086057e70fc270e6700177f41da305a1656616375b4a5e5964846b"
   },
   "index_root": ".",
   "pipeline": {
-    ".graphifyignore": "86626d83156239a9a9c9161f0c9cad2e62494e88e2812c6721c45211a8b945d0",
-    "scripts/graphify.sh": "8f72cbc7ed7c5f288a3283e168eb9d6093a4e38840d8ae1ad3c36f6cc75d1931",
-    "scripts/graphify_fingerprint.py": "863b446f704fdd5eb1093cafd0b8a5ba47231683d9cfc1f7cffb7ed5de70f16d"
+    ".graphifyignore": "79bbd771655529edab1d222d22850bfea15775c3999ec7f9ed54f237a6c4cca0",
+    "scripts/graphify.sh": "47c8f48dd6b139791a30858d1f404d98256fd64798944de6986d2df2b3cf04bb",
+    "scripts/graphify_fingerprint.py": "ad29abe16fa4f1ab9d70e1445fcb7fa546a87b00dbdeaa6439b6a5a034964f12"
   },
   "schema_version": 1,
   "source": {
@@ -17,7 +17,7 @@
       "wezterm-char-props/src/nerdfonts_data.rs",
       "wezterm-gui/src/unicode_names.rs"
     ],
-    "file_count": 442,
-    "sha256": "40b166063cb5c53a4045d20f07682043a12f86f81c0f540040ad4debd351c5c3"
+    "file_count": 447,
+    "sha256": "2620601272ddc982d46522c46ea6bcd82379842134ab7460c27d541be32b8d49"
   }
 }

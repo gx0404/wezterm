@@ -11,7 +11,7 @@
   段排除框架文档）；生成的 `mkdocs.yml`（gitignored）INHERIT 它。
 - 导航生成：`ci/generate-docs.py` 扫描 docs/ 与 lua-api-crates 生成索引页
   与 nav；`docs/SUMMARY.md`（mdbook）同源生成。
-- Lua API 参考：`docs/config/lua/**`（542 个文件）由 Rust doc 注释经文档
+- Lua API 参考：`docs/config/lua/**` 由 Rust doc 注释经文档
   链路生成——**不是手写文档**。
 - changelog：`docs/changelog.md`（上游产品变更，`### Continuous/Nightly`
   未发布段 + `#### Changed/Added/Fixed`；版本名=日期-时间-hash）。

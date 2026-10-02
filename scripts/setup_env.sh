@@ -12,8 +12,9 @@
 #                                             # 经 wezterm mlua 跑）
 #
 # Windows（uname -s 为 MINGW*/MSYS*/CYGWIN*）：nextest 与 stylua 换装 Windows 预编译包
-# （bin 下为 cargo-nextest.exe / stylua.exe）；框架 venv 跳过（仅图谱与 py3.10 需要，
-# python3>=3.11 自带 tomllib，resolver 可直接运行）。
+# （bin 下为 cargo-nextest.exe / stylua.exe）；lua 用 LuaBinaries 预编译包；框架 venv
+# 同样安装（Windows venv 是 Scripts/ 布局，install_venv 会补 bin/graphify shim 供
+# scripts/graphify.sh 的既定解析路径使用）。
 #
 # 解析序：Makefile 已把上述 bin 目录前置到 PATH；$WEZTERM_TOOLCHAIN_ROOT
 # 可整体重定向 .local/tools（CI 或离线复用）。
@@ -100,13 +101,23 @@ need_python3() {
     fi
 }
 
-# Windows 不装框架 venv（graphifyy 仅图谱需要，tomli 仅 py3.10 需要），只提示 resolver 能否直接运行。
-note_venv_windows() {
-    if python3 -c "import tomllib" </dev/null >/dev/null 2>&1; then
-        note "框架 venv：Windows 分支跳过（仅图谱与 py3.10 需要）；python3 自带 tomllib，resolver 可直接运行"
+# venv 健康检查（两平台统一）：Linux/mac 用 bin/，Windows venv 用 Scripts/ 布局。
+venv_python() {
+    if [ -x "${TOOLS}/venv/bin/python" ]; then
+        printf '%s\n' "${TOOLS}/venv/bin/python"
+    elif [ -x "${TOOLS}/venv/Scripts/python.exe" ]; then
+        printf '%s\n' "${TOOLS}/venv/Scripts/python.exe"
     else
-        note "框架 venv：Windows 分支跳过；当前 python3 无 tomllib，resolver 需要 python3>=3.11（或自装 tomli）"
+        return 1
     fi
+}
+
+venv_ready() {
+    local py
+    py="$(venv_python)" || return 1
+    "${py}" -c "import tomli" >/dev/null 2>&1 || return 1
+    [ -x "${TOOLS}/venv/bin/graphify" ] || return 1
+    "${TOOLS}/venv/bin/graphify" --version 2>/dev/null | grep -q "${GRAPHIFY_VERSION}"
 }
 
 # Git Bash 与 MSYS2 的 /tmp 指向不同目录，两套工具混用（如 MSYS2 bash 调 Git 自带的 unzip）时
@@ -140,12 +151,10 @@ check_all() {
     else
         miss cargo-nextest "运行 scripts/setup_env.sh 安装项目钉版"
     fi
-    if [ "${IS_WINDOWS}" = 1 ]; then
-        note_venv_windows
-    elif [ -x "${TOOLS}/venv/bin/python" ]; then
-        ok "框架 venv $("${TOOLS}/venv/bin/python" --version 2>&1 | awk '{print $2}')（tomli+graphifyy）"
+    if venv_ready; then
+        ok "框架 venv $("$(venv_python)" --version 2>&1 | awk '{print $2}')（tomli+graphifyy ${GRAPHIFY_VERSION}）"
     else
-        note "框架 venv 未安装（resolver 在 py3.10 上依赖其 tomli）：scripts/setup_env.sh"
+        miss "框架 venv" "运行 scripts/setup_env.sh 安装（tomli + graphifyy ${GRAPHIFY_VERSION}）"
     fi
     if [ -x "${TOOLS}/stylua/bin/stylua${EXE}" ]; then
         ok "stylua $("${TOOLS}/stylua/bin/stylua${EXE}" --version 2>/dev/null | awk '{print $NF}')（项目钉版）"
@@ -275,21 +284,40 @@ install_lua() {
 }
 
 install_venv() {
-    local venv="${TOOLS}/venv"
-    if [ -x "${venv}/bin/python" ] && "${venv}/bin/python" -c "import tomli" 2>/dev/null \
-        && "${venv}/bin/graphify" --version 2>/dev/null | grep -q "${GRAPHIFY_VERSION}"; then
+    if venv_ready; then
         note "框架 venv（tomli + graphifyy ${GRAPHIFY_VERSION}）已就绪，跳过"
         return 0
     fi
-    if command -v uv >/dev/null 2>&1; then
-        uv venv --python "$(command -v python3)" "${venv}" >/dev/null
-        uv pip install --python "${venv}/bin/python" "graphifyy==${GRAPHIFY_VERSION}" tomli >/dev/null
-    else
-        python3 -m venv "${venv}"
-        "${venv}/bin/pip" install --quiet "graphifyy==${GRAPHIFY_VERSION}" tomli
+    local venv="${TOOLS}/venv"
+    # WindowsApps 下的 python3 可能是占位符：必须先验证可运行；Windows 上回退 py 启动器。
+    local pyexe=""
+    local cand
+    for cand in python3 python; do
+        if command -v "${cand}" >/dev/null 2>&1 && "${cand}" -c "" </dev/null >/dev/null 2>&1; then
+            pyexe="$(command -v "${cand}")"
+            break
+        fi
+    done
+    if [ -z "${pyexe}" ] && command -v py >/dev/null 2>&1 && py -3 -c "" </dev/null >/dev/null 2>&1; then
+        pyexe="$(py -3 -c 'import sys; print(sys.executable)')"
     fi
-    "${venv}/bin/python" -c "import tomli" || return 1
-    "${venv}/bin/graphify" --version | grep -q "${GRAPHIFY_VERSION}" || return 1
+    [ -n "${pyexe}" ] || { echo "[setup-env] 没有可运行的 Python>=3.11，无法建框架 venv" >&2; return 1; }
+    if command -v uv >/dev/null 2>&1; then
+        uv venv --python "${pyexe}" "${venv}" >/dev/null
+        uv pip install --python "$(venv_python)" "graphifyy==${GRAPHIFY_VERSION}" tomli >/dev/null
+    else
+        "${pyexe}" -m venv "${venv}"
+        "$(venv_python)" -m pip install --quiet "graphifyy==${GRAPHIFY_VERSION}" tomli
+    fi
+    # Windows venv 是 Scripts/ 布局：补 bin/graphify shim，对齐 scripts/graphify.sh
+    # 与 Makefile 的既定解析路径。
+    if [ ! -x "${venv}/bin/graphify" ] && [ -x "${venv}/Scripts/graphify.exe" ]; then
+        mkdir -p "${venv}/bin"
+        printf '#!/usr/bin/env bash\nexec "$(cd "$(dirname "${BASH_SOURCE[0]}")/../Scripts" && pwd)/graphify.exe" "$@"\n' \
+            > "${venv}/bin/graphify"
+        chmod +x "${venv}/bin/graphify"
+    fi
+    venv_ready || { echo "[setup-env] 框架 venv 校验失败" >&2; return 1; }
     ok "框架 venv -> ${venv}（tomli + graphifyy ${GRAPHIFY_VERSION}）"
 }
 
@@ -300,16 +328,8 @@ else
     need_python3 "系统包管理器安装"
     [ "$fail" -ne 0 ] && { echo "[setup-env] 必备引导工具缺失，先按提示安装" >&2; exit 1; }
     install_nextest
-    if [ "${IS_WINDOWS}" = 1 ]; then
-        note_venv_windows
-    else
-        install_venv
-    fi
+    install_venv
     install_stylua
     install_lua
-    if [ "${IS_WINDOWS}" = 1 ]; then
-        echo "[setup-env] 完成：make test / make generated-check 现在使用项目钉版工具（Windows 未装框架 venv，make graph 需自备 graphify）"
-    else
-        echo "[setup-env] 完成：make test / make graph / make generated-check / make framework-check 现在使用项目钉版工具"
-    fi
+    echo "[setup-env] 完成：make test / make graph / make generated-check / make framework-check 现在使用项目钉版工具"
 fi

@@ -9,7 +9,7 @@ WezTerm：GPU 加速、Lua 配置、内建多路复用（mux）的跨平台终�
 本 fork（gx0404/wezterm）与上游 wezterm/wezterm 保持同步，叠加 AI 协作
 开发框架与少量定制。
 
-## Workspace 布局（68 包）
+## Workspace 布局（67 包）
 
 - **终端仿真核心**：`term/`（wezterm-term，模型与状态机应用层）、
   `wezterm-escape-parser/`（转义序列→语义 Action，no_std）、`vtparse/`
@@ -29,7 +29,7 @@ WezTerm：GPU 加速、Lua 配置、内建多路复用（mux）的跨平台终�
 - **进程/IO**：`pty/`（portable-pty，含串口）、`procinfo/`、
   `filedescriptor/`、`umask/`。
 - **SSH**：`wezterm-ssh/`（libssh-rs/ssh2 双后端）。
-- **CLI**：`wezterm/`（主 CLI + 21 个 cli 子命令）、
+- **CLI**：`wezterm/`（主 CLI + 19 个 cli 子命令）、
   `wezterm-gui-subcommands/`（GUI/CLI 共享 clap 定义）。
 - **支撑**：`promise`（异步骨架，smol 系）、`bidi`（UAX#9）、`bintree`
   （pane 布局树）、`lfucache`、`rangeset`、`ratelim`、`base91`、

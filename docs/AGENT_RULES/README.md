@@ -27,9 +27,11 @@
 |---|---|---|
 | build-ci-release | ci/ .github/ nix/ Cargo.* deny.toml wezterm-version | 构建、CI、依赖、版本、生成物清单 |
 | cli-main | wezterm/ wezterm-gui-subcommands/ | CLI 入口与子命令 |
+| code-comments | （task=code） | 代码注释与 rustdoc 规范 |
 | code-review | （task=review） | 只读审核规程 |
 | config-lua | config/ lua-api-crates/ wezterm-dynamic/ env-bootstrap/ 等 | Lua 配置链 |
 | development | scripts/ AGENT_RULES Makefile 工具面 | 框架自身 |
+| dotfiles | dotfiles/ 用户环境快照与安装链 | 本机配置与发布 |
 | font-shaping | wezterm-font/ wezterm-char-props/ deps/ | 字体与 shaping |
 | gui-rendering | wezterm-gui/ | GUI 前端 |
 | mux-domain | mux/ wezterm-client/ mux-server codec/ | 多路复用与协议 |

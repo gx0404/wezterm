@@ -52,7 +52,7 @@ python3 scripts/resolve_agent_rules.py --check                   # 闭集/体积
 
 ## 项目模型
 
-- Cargo workspace 68 包、约 20 万行手写 Rust + 约 21 万行生成数据表
+- Cargo workspace 67 包、约 20 万行手写 Rust + 约 21 万行生成数据表
   （`wezterm-gui/src/unicode_names.rs`、`wezterm-char-props/src/emoji_variation.rs`、
   `nerdfonts_data.rs`、`config/src/scheme_data.rs` 等；再生成命令见
   build-ci-release.md 的生成物清单）。
@@ -65,8 +65,9 @@ python3 scripts/resolve_agent_rules.py --check                   # 闭集/体积
   （seqno 每次 advance 递增；行号用四种不同类型防混用）；mux 全局单例
   `mux/src/lib.rs::MUX`（pane 树在 `Tab` 的 bintree，GUI 只缓存视口/选区）；
   GUI 窗口状态在 `wezterm-gui/src/termwindow/mod.rs::TermWindow`。
-- 配置链：wezterm.lua → `config::lua::make_lua_context`（15 个 lua-api-crates
-  经 env-bootstrap 注册）→ `wezterm_dynamic::Value` → `Config::from_dynamic` →
+- 配置链：wezterm.lua → `config::lua::make_lua_context`（15 个 lua-api-crates：
+  14 个经 env-bootstrap 注册、window-funcs 由 wezterm-gui 单独注册）→
+  `wezterm_dynamic::Value` → `Config::from_dynamic` →
   `ConfigHandle`（generation 计数；Lua 仅主线程，重载经 `LuaPipe` 回主线程）。
 - 平台抽象：`window` crate（Linux 上 Connection/Window 是 X11|Wayland 枚举）；
   平台代码只进 `window/os/`、`wezterm-font/locator|shaper`、`pty/src/win` 等
@@ -140,6 +141,7 @@ push 目标只允许 origin。提交前提出 commit message 并对齐。
 |---|---|
 | `build-ci-release` | ci/、.github/、nix/、workspace 依赖与版本、生成物清单 |
 | `cli-main` | wezterm/ 主 CLI 与 clap 子命令定义 |
+| `code-comments` | 代码注释与 rustdoc 规范（`--task code`） |
 | `config-lua` | config/、lua-api-crates/、wezterm-dynamic、Lua 加载与热重载 |
 | `development` | 框架自身：scripts/、AGENT_RULES、Makefile、工具面 |
 | `dotfiles` | dotfiles/ 用户环境快照与跨机安装链（gx-bundle/install/sync） |

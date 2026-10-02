@@ -74,6 +74,12 @@
   本机直接运行（gx_shells 274 例、gx_resurrect 全过）；`setup --check` 增加 lua
   诊断项，Makefile PATH 解析序覆盖。`dotfiles/wezterm-config/tests/pure_fn_test.lua`
   不依赖该解释器，经 wezterm mlua 运行（639 例全过）。
+- 开发环境：`make setup` 在 Windows 也安装框架 venv（graphifyy/tomli，原先跳过），
+  并补 `bin/graphify` shim 对齐 graphify.sh 既定解析路径（Windows venv 是 Scripts/
+  布局）；`make graph` 在本机开箱可用，图谱与指纹已随本轮代码变更重建。文档同步：
+  AGENTS/ARCHITECTURE 包数 67、cli 子命令 19（补 spawn）、lua-api-crates 注册数
+  14+1、AGENT_RULES 域清单补 code-comments/dotfiles、MAKE_COMMANDS 的 setup/
+  sccache/TMP 段、product-docs 去掉易漂移的文件计数、development 的图谱指纹路径。
 
 ### Changed
 - 不兼容：Windows 键位改为与 Linux 相同的 `Ctrl+Shift` 方案，不再占用裸 `Alt`（`SUPER`

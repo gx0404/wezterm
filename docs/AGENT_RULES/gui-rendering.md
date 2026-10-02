@@ -35,6 +35,9 @@ Lua gui 命名空间。平台窗口与事件抽象在 platform-window 域（`win
 - 输入：`termwindow/keyevent.rs`（leader 键 → `inputmap.rs::InputMap` 命中
   → `perform_key_assignment` 大分派；未命中经 dead-key/compose 编码写入
   pane）；鼠标在 `mouseevent.rs`（选区、超链接 `UIItem::hit_test`）。
+  粘贴漏斗 `termwindow/clipboard.rs::paste_from_clipboard`（fork：配置
+  `clipboard_image_paste` 非 none 时先取剪贴板图片，spawn 线程转码后经
+  OSC 1337 `perform_actions` 内联应用或写临时文件粘贴路径，失败回落文本）。
 - 前端映射：`frontend.rs::GuiFrontEnd`——`known_windows` 是 GUI Window ↔
   mux window 的映射所有者；订阅 `MuxNotification` 驱动重绘与退出。
 
