@@ -36,6 +36,18 @@
   刷新。`default_dpi` 取光标所在显示器（尊重 `dpi_by_screen`/`dpi`），
   `WM_DPICHANGED` 采纳系统建议矩形。WGL `PixelFormatProfile::{Lean,Legacy}`
   先请求无 MSAA/深度/模板再回退，探测结果 thread_local 缓存、探测窗口销毁。
+- 混合显卡（fork）：`os/windows/mod.rs` 导出 `NvOptimusEnablement` /
+  `AmdPowerXpressRequestHighPerformance` 两个 `#[no_mangle] #[used]` static，
+  `wezterm-gui/build.rs` 按 target env 用 `.def`（gnu）或 `/EXPORT`（msvc）
+  把它们放进 exe 导出表（`objdump -p` 可见）；`Connection::create_new` 经
+  `hybrid_gpu_hints()` 引用一次防止被链接器丢弃。
+- Windows 外观与集成（fork）：`apply_theme` 在 `win32_frame_follow_colors`
+  开启且 Win11 时设 DWM 35/36/34 颜色与 33 圆角偏好（按
+  `window_frame.active_titlebar_bg` 亮度判深浅）；`request_attention` 用
+  `FlashWindowEx`，`WindowOps::set_progress(ProgressState)` 默认空实现、
+  Windows 用 `ITaskbarList3`；IME 位置重放 `WindowInner.last_ime_rect`；
+  剪贴板读写都在后台线程退避重试；滚轮行数来自 `SPI_GETWHEELSCROLLLINES`
+  并在 `WM_SETTINGCHANGE` 失效。
 - 纹理契约：`window/src/bitmaps/atlas.rs::Atlas`（`allocate()` 失败给
   `OutOfTextureSpace`）+ `bitmaps/mod.rs::Texture2d` trait——GUI 的 atlas
   降级链依赖该契约。

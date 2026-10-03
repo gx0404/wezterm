@@ -112,6 +112,14 @@
   `window_frame.tab_corner_radius`（默认 0.5cell）、`window_frame.close_button_hover_bg`
   （默认 #c42b1c）；设置页「外观」新增「窗口材质：壁纸 / Mica / Acrylic / 纯色」行写入
   `gui-settings.json` 的 `window_material`。
+- 混合显卡（NVIDIA Optimus / AMD PowerXpress）机器默认选用独显：`wezterm-gui.exe` 导出
+  `NvOptimusEnablement` 与 `AmdPowerXpressRequestHighPerformance`（gnu 经 `.def`、msvc 经
+  `/EXPORT`），驱动据此把 OpenGL 上下文路由到独显，台式机无影响。
+- Windows 任务栏集成：`bell_requests_attention` 在 Windows 生效（`FlashWindowEx`）；OSC 9;4
+  进度映射到任务栏按钮（`ITaskbarList3`，错误/暂停态为红/黄）。
+- 新配置 `win32_frame_follow_colors`（默认 false）：Win11 22000+ 的 DWM 标题栏/文字/边框颜色
+  跟随 `window_frame.*`，随焦点切换 active/inactive，`RESIZE`/`INTEGRATED_BUTTONS` 装饰下设
+  圆角偏好；Win10 静默跳过。
 
 
 ### Changed
@@ -308,6 +316,12 @@
 - dotfiles `gui-startup` 不再调用 `window:gui_window()`（GUI 窗口此时尚未创建，会阻塞主线程、
   窗口永远不出现），首窗几何改经 `mux.spawn_window` 的 `width/height/position` 传入。
 - 命令面板在窗口很矮时计算可见行数会下溢。
+- Windows IME：窗口 resize / 切换焦点后候选框不再停在左上角（重放最近的光标矩形，
+  `WM_IME_STARTCOMPOSITION` 与获得焦点时再设一次）；提交结果时同时开始的新组字串不再丢失。
+- Windows 剪贴板被其他进程占用时复制不再静默失败（后台线程退避重试、失败记日志），读取不再
+  阻塞 GUI 线程。
+- Windows 滚轮行数改读系统设置并在 `WM_SETTINGCHANGE` 时刷新，「一次滚动一屏」不再反向滚一
+  行；累加计算改 i32 不再溢出。`WM_SETTINGCHANGE` 不再每次整份解析系统标题字体（改为按需）。
 
 
 ## 0.3.0(TBD)
