@@ -369,6 +369,11 @@
   已实现说明。
 - 终端鼠标上报的按钮码由 `i8` 改为 `u16`（`button_base_code`），能容纳 128 以上的按钮码；
   1005 UTF-8 鼠标模式下 ≥0x80 的按钮字节改为两字节 UTF-8 编码（此前原样输出单字节）。
+- Windows 拖动标题栏或拖边框缩放窗口时，持续输出的内容不再冻结（此前帧率掉到 0，松手才恢复——
+  高精度帧定时器只在主消息循环里被等待，`DefWindowProc` 的模态移动/缩放循环期间无人解除节流）：
+  `WM_ENTERSIZEMOVE` 起用 `WM_TIMER`（`SetCoalescableTimer` 不合并，周期为帧间隔向上取整毫秒、
+  下限 10ms）兜底，抽取 spawn 队列并按 max_fps 解除节流，`WM_EXITSIZEMOVE` 停止；`wm_paint` 遇到
+  已过期的节流 deadline 直接作画。实测拖动期间帧率回到与拖动前同量级。
 
 
 ## 0.3.0(TBD)

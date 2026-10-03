@@ -33,7 +33,13 @@
   max_fps_follows_display, monitor_refresh_hz)` 计算，创建失败回退 async-io
   定时器）；`Connection::create_new` 调 `timeBeginPeriod(1)`。
   `WindowInner.monitor_refresh_hz` 在创建、`WM_DISPLAYCHANGE`、换显示器时
-  刷新。`default_dpi` 取光标所在显示器（尊重 `dpi_by_screen`/`dpi`），
+  刷新。拖动/缩放窗口时 `DefWindowProc` 跑模态消息循环，`wait_message` 与帧定时器
+  都停摆：`WM_ENTERSIZEMOVE` 武装 `SIZE_MOVE_FRAME_TIMER_ID` 的 `WM_TIMER`
+  （`SetCoalescableTimer`，周期 = 帧间隔向上取整毫秒、下限 10ms，`WM_EXITSIZEMOVE`
+  时 `KillTimer`）；`wm_timer` 先抽 `SPAWN_QUEUE`（纯移动没有 `WM_SIZE` 驱动），再以
+  半个周期为容差调 `frame_timer_tick` 并补发 `InvalidateRect`；`wm_paint` 在节流中
+  先用当前时刻调一次 `frame_timer_tick`。任何新的模态循环入口（菜单、MessageBox）
+  都不能只靠 `wait_message` 解除节流。`default_dpi` 取光标所在显示器（尊重 `dpi_by_screen`/`dpi`），
   `WM_DPICHANGED` 采纳系统建议矩形。WGL `PixelFormatProfile::{Lean,Legacy}`
   先请求无 MSAA/深度/模板再回退，探测结果 thread_local 缓存、探测窗口销毁。
 - 混合显卡（fork）：`os/windows/mod.rs` 导出 `NvOptimusEnablement` /
