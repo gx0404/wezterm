@@ -65,6 +65,20 @@ enum ProcessState {
     Dead,
 }
 
+/// fork: whether the child is known to have exited: the pane is held open
+/// by exit_behavior (`DeadPendingClose`), it is `Dead`, or the waiter
+/// thread has already reported the exit status (or went away) and
+/// `is_dead` simply has not collected it yet.  Spawn failures report an
+/// immediate exit through the same waiter.
+fn process_has_exited(state: &ProcessState) -> bool {
+    match state {
+        ProcessState::Dead | ProcessState::DeadPendingClose { .. } => true,
+        ProcessState::Running { child_waiter, .. } => {
+            !child_waiter.is_empty() || child_waiter.is_closed()
+        }
+    }
+}
+
 struct CachedProcInfo {
     root: LocalProcessInfo,
     foreground: LocalProcessInfo,
@@ -678,6 +692,13 @@ impl Pane for LocalPane {
 
             !is_stateful
         } else {
+            // fork: a child that has already exited (the pane is held open
+            // by exit_behavior, or the spawn failed) has nothing left to
+            // lose, on any platform.
+            if process_has_exited(&self.process.lock()) {
+                return true;
+            }
+
             #[cfg(unix)]
             {
                 // If the process is dead but exit_behavior is holding the
@@ -1189,5 +1210,53 @@ impl Drop for LocalPane {
         if let ProcessState::Running { signaller, .. } = &mut *self.process.lock() {
             let _ = signaller.kill();
         }
+    }
+}
+
+// fork(PTY-03): 进程已退出（被 exit_behavior 保留或 spawn 失败）的窗格关闭时
+// 无需确认，且判定与平台无关。
+#[cfg(test)]
+mod process_exit_tests {
+    use super::*;
+    use crate::domain::FailedProcessSpawn;
+    use smol::channel::Sender;
+
+    fn running() -> (ProcessState, Sender<IoResult<ExitStatus>>) {
+        let (tx, rx) = bounded(1);
+        let state = ProcessState::Running {
+            child_waiter: rx,
+            pid: Some(1),
+            signaller: Box::new(FailedProcessSpawn {}),
+            killed: false,
+        };
+        (state, tx)
+    }
+
+    #[test]
+    fn dead_or_held_process_needs_no_close_prompt() {
+        assert!(process_has_exited(&ProcessState::Dead));
+        assert!(process_has_exited(&ProcessState::DeadPendingClose {
+            killed: false
+        }));
+        assert!(process_has_exited(&ProcessState::DeadPendingClose {
+            killed: true
+        }));
+    }
+
+    #[test]
+    fn running_process_is_alive_until_exit_is_reported() {
+        let (state, tx) = running();
+        assert!(!process_has_exited(&state));
+        // 等待线程已送达退出码、只是 is_dead 尚未把状态推进到 Dead*
+        tx.try_send(Ok(ExitStatus::with_exit_code(0))).unwrap();
+        assert!(process_has_exited(&state));
+    }
+
+    #[test]
+    fn lost_waiter_counts_as_exited() {
+        // 与 is_dead 一致：等待线程未送达就断开，按已退出处理
+        let (state, tx) = running();
+        drop(tx);
+        assert!(process_has_exited(&state));
     }
 }
