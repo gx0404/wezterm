@@ -11,9 +11,11 @@ use ntapi::ntwow64::RTL_USER_PROCESS_PARAMETERS32;
 use std::ffi::OsString;
 use std::mem::MaybeUninit;
 use std::os::windows::ffi::OsStringExt;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use winapi::shared::minwindef::{DWORD, FILETIME, LPVOID, MAX_PATH};
 use winapi::shared::ntdef::{FALSE, NT_SUCCESS};
-use winapi::um::handleapi::CloseHandle;
+use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
 use winapi::um::memoryapi::ReadProcessMemory;
 use winapi::um::processthreadsapi::{GetCurrentProcessId, GetProcessTimes, OpenProcess};
 use winapi::um::shellapi::CommandLineToArgvW;
@@ -27,7 +29,9 @@ struct Snapshot(HANDLE);
 impl Snapshot {
     pub fn new() -> Option<Self> {
         let handle = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-        if handle.is_null() {
+        // fork: CreateToolhelp32Snapshot reports failure as
+        // INVALID_HANDLE_VALUE, not NULL.
+        if handle.is_null() || handle == INVALID_HANDLE_VALUE {
             None
         } else {
             Some(Self(handle))
@@ -53,6 +57,90 @@ impl Drop for Snapshot {
     fn drop(&mut self) {
         unsafe { CloseHandle(self.0) };
     }
+}
+
+/// fork: how long a process snapshot may be shared between callers.
+/// Tab bar/title refreshes query every pane at (almost) the same time;
+/// a single Toolhelp32 snapshot of every process on the system serves
+/// them all instead of taking one snapshot per pane.
+const SNAPSHOT_TTL: Duration = Duration::from_millis(500);
+
+struct CachedSnapshot {
+    entries: Arc<Vec<PROCESSENTRY32W>>,
+    taken: Instant,
+}
+
+static SNAPSHOT_CACHE: Mutex<Option<CachedSnapshot>> = Mutex::new(None);
+
+/// fork: return the process-wide shared snapshot, taking a new one when
+/// it is older than `SNAPSHOT_TTL` or when `force` is set.  The lock is
+/// held while snapshotting so that concurrent callers wait for that one
+/// snapshot rather than each taking their own.  A failed (empty)
+/// snapshot is not cached.
+fn snapshot_entries(force: bool) -> Arc<Vec<PROCESSENTRY32W>> {
+    let mut cache = SNAPSHOT_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if !force {
+        if let Some(cached) = cache.as_ref() {
+            if cached.taken.elapsed() < SNAPSHOT_TTL {
+                return Arc::clone(&cached.entries);
+            }
+        }
+    }
+    let entries = Arc::new(Snapshot::entries());
+    if entries.is_empty() {
+        cache.take();
+    } else {
+        cache.replace(CachedSnapshot {
+            entries: Arc::clone(&entries),
+            taken: Instant::now(),
+        });
+    }
+    entries
+}
+
+/// fork: assemble the process tree rooted at `pid` from a snapshot.
+/// A `ppid -> children` index makes this O(n) in the snapshot size,
+/// rather than rescanning the whole snapshot for every tree node.
+/// `visited` guards against cycles produced by pid reuse (a parent
+/// that exited and whose pid was recycled by one of its descendants).
+/// `read` fills in the details of a single process; its `children`
+/// are replaced by the ones linked here.
+fn build_tree(
+    pid: u32,
+    procs: &[PROCESSENTRY32W],
+    read: &mut dyn FnMut(&PROCESSENTRY32W) -> LocalProcessInfo,
+) -> Option<LocalProcessInfo> {
+    let root = procs.iter().find(|info| info.th32ProcessID == pid)?;
+
+    let mut kids: HashMap<u32, Vec<&PROCESSENTRY32W>> = HashMap::new();
+    for info in procs {
+        kids.entry(info.th32ParentProcessID).or_default().push(info);
+    }
+
+    fn build(
+        info: &PROCESSENTRY32W,
+        kids: &HashMap<u32, Vec<&PROCESSENTRY32W>>,
+        visited: &mut HashSet<u32>,
+        read: &mut dyn FnMut(&PROCESSENTRY32W) -> LocalProcessInfo,
+    ) -> LocalProcessInfo {
+        let mut children = HashMap::new();
+        if let Some(list) = kids.get(&info.th32ProcessID) {
+            for kid in list {
+                if visited.insert(kid.th32ProcessID) {
+                    children.insert(kid.th32ProcessID, build(kid, kids, visited, read));
+                }
+            }
+        }
+        let mut proc = read(info);
+        proc.children = children;
+        proc
+    }
+
+    let mut visited = HashSet::new();
+    visited.insert(pid);
+    Some(build(root, &kids, &mut visited, read))
 }
 
 struct ProcIter<'a> {
@@ -359,25 +447,16 @@ impl LocalProcessInfo {
 
     pub fn with_root_pid(pid: u32) -> Option<Self> {
         log::trace!("LocalProcessInfo::with_root_pid({}), getting snapshot", pid);
-        let procs = Snapshot::entries();
+        // fork: share one snapshot between callers (see SNAPSHOT_TTL);
+        // a root that is missing from the shared snapshot may simply have
+        // been spawned after it was taken, so retry once with a fresh one.
+        let mut procs = snapshot_entries(false);
+        if !procs.iter().any(|info| info.th32ProcessID == pid) {
+            procs = snapshot_entries(true);
+        }
         log::trace!("Got snapshot");
 
-        fn build_proc(
-            info: &PROCESSENTRY32W,
-            procs: &[PROCESSENTRY32W],
-            visited: &mut HashSet<u32>,
-        ) -> LocalProcessInfo {
-            let mut children = HashMap::new();
-
-            for kid in procs {
-                if kid.th32ParentProcessID == info.th32ProcessID
-                    && !visited.contains(&kid.th32ProcessID)
-                {
-                    visited.insert(kid.th32ProcessID);
-                    children.insert(kid.th32ProcessID, build_proc(kid, procs, visited));
-                }
-            }
-
+        fn read_proc(info: &PROCESSENTRY32W) -> LocalProcessInfo {
             let mut executable = None;
             let mut start_time = 0;
             let mut cwd = PathBuf::new();
@@ -413,17 +492,125 @@ impl LocalProcessInfo {
                 argv,
                 start_time,
                 status: LocalProcessStatus::Run,
-                children,
+                children: HashMap::new(),
                 console,
             }
         }
 
-        if let Some(info) = procs.iter().find(|info| info.th32ProcessID == pid) {
-            let mut visited = HashSet::new();
-            visited.insert(pid);
-            Some(build_proc(info, &procs, &mut visited))
-        } else {
-            None
+        build_tree(pid, &procs, &mut read_proc)
+    }
+}
+
+// fork(A6-1): 进程级共享快照缓存与 O(n) 建树的单测。建树用合成快照项与
+// 假 reader 驱动；缓存与 cache-miss 回退用真实快照与子进程验证。
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+
+    fn entry(pid: u32, ppid: u32) -> PROCESSENTRY32W {
+        let mut e: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+        e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as _;
+        e.th32ProcessID = pid;
+        e.th32ParentProcessID = ppid;
+        e
+    }
+
+    fn fake_info(info: &PROCESSENTRY32W) -> LocalProcessInfo {
+        LocalProcessInfo {
+            pid: info.th32ProcessID,
+            ppid: info.th32ParentProcessID,
+            name: String::new(),
+            executable: PathBuf::new(),
+            argv: vec![],
+            cwd: PathBuf::new(),
+            status: LocalProcessStatus::Run,
+            start_time: 0,
+            console: 0,
+            children: HashMap::new(),
         }
+    }
+
+    fn child_pids(info: &LocalProcessInfo) -> Vec<u32> {
+        let mut pids: Vec<u32> = info.children.keys().copied().collect();
+        pids.sort_unstable();
+        pids
+    }
+
+    #[test]
+    fn build_tree_links_children_and_reads_each_entry_once() {
+        // 1 → {2, 3}；2 → 4；4 → 6；6 又被记成 1 的父进程（pid 复用造成的环）；
+        // 5 挂在无关父进程 99 下，不应进入子树。
+        let procs = vec![
+            entry(1, 6),
+            entry(2, 1),
+            entry(3, 1),
+            entry(4, 2),
+            entry(5, 99),
+            entry(6, 4),
+        ];
+        let mut reads: HashMap<u32, usize> = HashMap::new();
+        let tree = build_tree(1, &procs, &mut |info| {
+            *reads.entry(info.th32ProcessID).or_insert(0) += 1;
+            fake_info(info)
+        })
+        .expect("root present");
+
+        assert_eq!(tree.pid, 1);
+        assert_eq!(child_pids(&tree), vec![2, 3]);
+        assert_eq!(child_pids(&tree.children[&2]), vec![4]);
+        assert_eq!(child_pids(&tree.children[&2].children[&4]), vec![6]);
+        // 环被 visited 截断：6 之下不再出现 1
+        assert!(tree.children[&2].children[&4].children[&6]
+            .children
+            .is_empty());
+        assert!(tree.children[&3].children.is_empty());
+
+        let mut read_pids: Vec<u32> = reads.keys().copied().collect();
+        read_pids.sort_unstable();
+        assert_eq!(read_pids, vec![1, 2, 3, 4, 6]);
+        assert!(reads.values().all(|&n| n == 1), "{reads:?}");
+    }
+
+    #[test]
+    fn build_tree_returns_none_for_missing_root() {
+        let procs = vec![entry(1, 0), entry(2, 1)];
+        assert!(build_tree(42, &procs, &mut |info| fake_info(info)).is_none());
+    }
+
+    #[test]
+    fn snapshot_cache_is_shared_within_ttl() {
+        let first = snapshot_entries(false);
+        assert!(!first.is_empty(), "real snapshot should list processes");
+        let second = snapshot_entries(false);
+        assert!(Arc::ptr_eq(&first, &second), "within TTL must reuse");
+        let forced = snapshot_entries(true);
+        assert!(!Arc::ptr_eq(&first, &forced), "force must re-snapshot");
+    }
+
+    /// 起一个阻塞在 stdin 上的 cmd.exe，便于在其存活期间读取它的进程信息。
+    fn spawn_idle_cmd(extra: &str, cwd: &std::path::Path) -> std::process::Child {
+        Command::new("cmd.exe")
+            .raw_arg(format!("/D /Q /K rem {extra}"))
+            .current_dir(cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn cmd.exe")
+    }
+
+    #[test]
+    fn with_root_pid_resnapshots_when_root_missing_from_cache() {
+        // 先填充缓存，再起子进程：缓存里没有它的 pid，必须回退重拍快照
+        let _ = snapshot_entries(false);
+        let cwd = std::env::temp_dir();
+        let mut child = spawn_idle_cmd("cache-miss", &cwd);
+        let info = LocalProcessInfo::with_root_pid(child.id());
+        child.kill().ok();
+        child.wait().ok();
+        let info = info.expect("fresh child must be found");
+        assert_eq!(info.pid, child.id());
     }
 }
