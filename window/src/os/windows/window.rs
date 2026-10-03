@@ -2024,6 +2024,31 @@ unsafe fn wm_displaychange(
     None
 }
 
+/// fork: 睡眠唤醒后显示驱动可能已经重置（Optimus 切换、独显重上电、
+/// TDR），DWM 还在合成唤醒前的旧帧。主动失效窗口并派发 NeedRepaint，
+/// 让下一帧的 is_context_lost 检测与 gpu_recovery 重建尽早发生，而不是
+/// 等用户敲键才发现窗口黑掉。PBT_APMRESUMEAUTOMATIC 每次唤醒都发，
+/// PBT_APMRESUMESUSPEND 只在用户触发的唤醒时额外发一次，多画一帧无妨
+unsafe fn wm_powerbroadcast(
+    hwnd: HWND,
+    _msg: UINT,
+    wparam: WPARAM,
+    _lparam: LPARAM,
+) -> Option<LRESULT> {
+    if matches!(wparam, PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND) {
+        log::debug!("resumed from suspend (PBT {wparam:#x}); repainting");
+        InvalidateRect(hwnd, null(), 0);
+        if let Some(inner) = rc_from_hwnd(hwnd) {
+            // 广播消息可能在别的分支持有借用时同步送达，借不到就靠上面
+            // 的 InvalidateRect 产生的 WM_PAINT 兜底
+            if let Ok(mut inner) = inner.try_borrow_mut() {
+                inner.events.dispatch(WindowEvent::NeedRepaint);
+            }
+        }
+    }
+    None
+}
+
 /// 帧率上下限：0 会除零，超过 1000 已无意义且会让定时器空转
 const MIN_FPS: u64 = 1;
 const MAX_FPS: u64 = 1000;
@@ -3463,6 +3488,7 @@ unsafe fn do_wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> 
         }
         WM_SETTINGCHANGE | WM_DWMCOMPOSITIONCHANGED => apply_theme(hwnd),
         WM_DISPLAYCHANGE => wm_displaychange(hwnd, msg, wparam, lparam),
+        WM_POWERBROADCAST => wm_powerbroadcast(hwnd, msg, wparam, lparam),
         WM_DPICHANGED => wm_dpichanged(hwnd, msg, wparam, lparam),
         WM_IME_SETCONTEXT => ime_set_context(hwnd, msg, wparam, lparam),
         WM_IME_COMPOSITION => ime_composition(hwnd, msg, wparam, lparam),
