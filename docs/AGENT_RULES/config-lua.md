@@ -25,6 +25,10 @@
 - 句柄与重载：`config/src/lib.rs::ConfigHandle{config, generation}`；
   `reload()` 由 notify watcher（200ms 去抖）触发；监视集合 = 配置文件 +
   父目录（HOME 除外）+ `add_to_config_reload_watch_list` 登记。
+  锁纪律（fork）：`reload_lock` 串行化多个 reload，Lua 求值**不持**
+  `CONFIG` 锁，只在 `ConfigInner::apply_loaded` 写回时短暂持锁；通知与
+  错误窗在锁外；与直接写入竞争时按 generation 比较，陈旧求值整份丢弃；
+  `overridden_config` 锁外求值不与 reload 串行。
 - 配色数据：`config/src/scheme_data.rs::SCHEMES` 由 sync-color-schemes
   生成（见下方禁止项）；`build_default_schemes()` 消费。
 - derive：`config/derive` 的 `ConfigMeta`（文档/字段元信息，供

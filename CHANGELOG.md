@@ -182,6 +182,10 @@
   不再在 GUI 主线程同步做进程快照；500ms 内多个 pane 共享同一次快照，进程树组装由
   O(子树×N) 降为 O(n)；新建 tab/分屏的 openpty 与子进程创建移出 GUI 主线程；拖动改变
   窗口大小时行列不变不再调用 `ResizePseudoConsole`。
+- 性能（配置）：配置重载的 Lua 求值移出全局 `CONFIG` 锁——此前 reload 与带窗口覆盖的
+  `config_was_reloaded` 在整段 Lua 求值期间持锁，所有输出中的 pane 解析线程与 GUI 的
+  `configuration()` 调用被阻塞（输出停顿、界面卡顿）；现在由独立 `reload_lock` 串行化、
+  只在写回时短暂持锁，求值失败仍保留旧配置、并发写入下陈旧结果整份丢弃。
 - 性能（标题/标签栏）：终端重复设置相同标题不再通知 GUI；标题与进度 Alert 只让 pane 所在
   窗口重算；短时间内多次标题刷新（含 TabResized）合并为一次（约 40ms）；
   `format-tab-title`/`format-window-title` 回调共用一份 tabs/panes/config 参数表（config 表
