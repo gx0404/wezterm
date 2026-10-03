@@ -20,10 +20,22 @@ require('events.tab-title').setup({ hide_active_tab_unseen = true, unseen_icon =
 require('events.new-tab-button').setup()
 require('events.gui-startup').setup()
 
-return Config:init()
+local options = Config:init()
    :append(require('config.appearance'))
    :append(require('config.bindings'))
    :append(require('config.domains'))
    :append(require('config.fonts'))
    :append(require('config.general'))
    :append(require('config.launch')).options
+
+-- 本分支（gx0404/wezterm）新增的配置键只有新构建认得，旧二进制遇到会弹 Configuration
+-- Error。它们集中在 config/fluent.lua，逐键探测认得才写入；模块本身缺失（升级迁移时被
+-- 挡住）同样只记日志，不影响启动。
+local fluent_ok, fluent = pcall(require, 'config.fluent')
+if fluent_ok then
+   fluent.apply(options)
+else
+   wezterm.log_warn('config.fluent 未加载，跳过 fork 新增配置键: ', fluent)
+end
+
+return options

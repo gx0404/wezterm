@@ -928,6 +928,91 @@ do
    check('startup.fit_untouched', #calls, 2)
 end
 
+-- 帧率与动画（utils/display.lua、config/appearance.lua）：max_fps 60 兜底、活动屏幕刷新率
+-- 更高时跟随；动画帧率 60，光标与闪烁文字缓动都是 Constant（空闲零重绘）。
+do
+   local max_fps = require('utils.display').max_fps
+   local function reads(value)
+      return function()
+         return value
+      end
+   end
+   check('display.follows_higher', max_fps(60, reads(165)), 165)
+   check('display.equal_base', max_fps(60, reads(60)), 60)
+   check('display.below_base', max_fps(60, reads(30)), 60)
+   check('display.unknown_rate', max_fps(60, reads(nil)), 60)
+   check('display.not_a_number', max_fps(60, reads('144')), 60)
+   check('display.read_error', max_fps(60, error), 60)
+   check('display.nan', max_fps(60, reads(0 / 0)), 60)
+   check('display.float_floored', max_fps(60, reads(143.9)), 143)
+   -- 超过 Rust 侧 validate_max_fps 的上限 1000 会让整份配置报错
+   check('display.clamped', max_fps(60, reads(5000)), 1000)
+   check('display.infinite_clamped', max_fps(60, reads(math.huge)), 1000)
+
+   local appearance = require('config.appearance')
+   -- 测试环境读不到屏幕（或屏幕刷新率不高于 60），退回 60 兜底
+   check('appearance.max_fps_floor', appearance.max_fps >= 60, true)
+   check('appearance.animation_fps', appearance.animation_fps, 60)
+   for _, key in ipairs({
+      'cursor_blink_ease_in',
+      'cursor_blink_ease_out',
+      'text_blink_ease_in',
+      'text_blink_ease_out',
+      'text_blink_rapid_ease_in',
+      'text_blink_rapid_ease_out',
+   }) do
+      check('appearance.' .. key, appearance[key], 'Constant')
+   end
+end
+
+-- fork 新增配置键（config/fluent.lua）：逐键探测当前二进制认不认得，认得才写入；
+-- 顶层键已被设置时不覆盖。键名与值类型的严格校验只在认得新键的构建上做（旧二进制跳过）。
+do
+   local fluent = require('config.fluent')
+   local function accept_all()
+      return true
+   end
+   local function reject_all()
+      return false
+   end
+
+   local out = fluent.apply({ max_fps = 60 }, { supports = accept_all, is_win = true })
+   check('fluent.win_follows_display', out.max_fps_follows_display, true)
+   check('fluent.keeps_existing_keys', out.max_fps, 60)
+   out = fluent.apply({}, { supports = accept_all, is_win = false })
+   check('fluent.non_win_no_follows_display', out.max_fps_follows_display, nil)
+   out = fluent.apply({}, { supports = reject_all, is_win = true })
+   check('fluent.rejected_is_skipped', out.max_fps_follows_display, nil)
+   out = fluent.apply({ max_fps_follows_display = false }, { supports = accept_all, is_win = true })
+   check('fluent.no_override', out.max_fps_follows_display, false)
+
+   -- 真实探测：老键认得，未知键与类型不符不认得
+   check('fluent.probe.known_key', fluent.supported('max_fps', 60), true)
+   check('fluent.probe.unknown_key', fluent.supported('no_such_config_key', true), false)
+   check('fluent.probe.bad_type', fluent.supported('max_fps', 'fast'), false)
+
+   -- 哨兵键：认得它就是本分支的新构建，登记的键必须全部合法
+   local new_build = fluent.supported('max_fps_follows_display', true)
+   if new_build then
+      for key, value in pairs(fluent.declared(true).top) do
+         check('fluent.declared.top.' .. key, fluent.supported(key, value), true)
+      end
+      for key, value in pairs(fluent.declared(true).colors) do
+         check(
+            'fluent.declared.colors.' .. key,
+            fluent.supported('colors', { [key] = value }),
+            true
+         )
+      end
+   else
+      print(
+         'PURE_FN_TEST NOTE: 二进制不认得 fork 新增配置键，跳过 fluent 键名校验（需新构建复核）'
+      )
+   end
+   out = fluent.apply({}, { is_win = true })
+   check('fluent.apply_matches_binary', out.max_fps_follows_display, new_build or nil)
+end
+
 -- 键位：Windows 与 Linux 同一套（除 Linux 专属的截图/AI 图片粘贴），不占裸 Alt，
 -- 不绑 Ctrl+B/C/V，翻页要 Shift。
 do

@@ -3,6 +3,7 @@ local platform = require('utils.platform')
 local backdrops = require('utils.backdrops')
 local colors = require('colors.custom')
 local font_files = require('utils.font-files')
+local display = require('utils.display')
 
 -- 各平台的渲染后端只在这里调整。GNOME X11 下优先稳定性；Windows 未经实机 A/B
 -- （paint 日志）前同样保持 OpenGL。WebGPU 仅在隔离配置中做 A/B 测试。
@@ -22,15 +23,25 @@ if platform.is_win then
 end
 
 local options = {
-   max_fps = 60,
+   -- 帧率上限：60 兜底，活动屏幕刷新率更高时跟随它。首次加载配置时 GUI 还没起来、读不到
+   -- 屏幕，配置重载后才生效；Windows 上另由 config/fluent.lua 的 max_fps_follows_display
+   -- 让每个窗口按自己所在显示器的刷新率限速，这里的值只是读不到刷新率时的兜底。
+   max_fps = display.max_fps(60, function()
+      return wezterm.gui.screens().active.max_fps
+   end),
    front_end = front_end[platform.os],
    underline_thickness = '1.5pt',
 
-   -- cursor：非 Constant 的闪烁缓动会让空闲窗口按 animation_fps 持续重绘，
-   -- Constant 只在亮灭切换时各画一帧。
-   animation_fps = 10,
+   -- animation_fps 是动画（视觉铃声淡入淡出等）的帧率。光标与闪烁文字的缓动都用 Constant：
+   -- 非 Constant 的缓动会让空闲窗口按 animation_fps 持续重绘，Constant 只在亮灭切换时
+   -- 各画一帧，所以把动画帧率提到 60 不增加空闲重绘。
+   animation_fps = 60,
    cursor_blink_ease_in = 'Constant',
    cursor_blink_ease_out = 'Constant',
+   text_blink_ease_in = 'Constant',
+   text_blink_ease_out = 'Constant',
+   text_blink_rapid_ease_in = 'Constant',
+   text_blink_rapid_ease_out = 'Constant',
    default_cursor_style = 'BlinkingBlock',
    cursor_blink_rate = 650,
 
