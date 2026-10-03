@@ -101,7 +101,20 @@ lazy_static! {
             true
         }
     };
-    static ref TITLE_FONT: Mutex<Option<parameters::FontAndSize>> = Mutex::new(None);
+    static ref TITLE_FONT: Mutex<TitleFontCache> = Mutex::new(TitleFontCache {
+        font: None,
+        stale: true,
+    });
+}
+
+/// fork: the system caption font, resolved lazily. Resolving it copies and
+/// parses the whole font file, and WM_SETTINGCHANGE (which every top-level
+/// window receives, often in bursts) used to do that each time even though
+/// nothing consumed the result. Settings changes now only mark it stale and
+/// get_os_parameters re-resolves it on demand.
+struct TitleFontCache {
+    font: Option<parameters::FontAndSize>,
+    stale: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -1285,8 +1298,14 @@ impl WindowOps for Window {
         let is_resize = config.window_decorations == WindowDecorations::RESIZE;
 
         let title_font = {
-            let font = TITLE_FONT.lock().expect("locking title_font");
-            (*font).clone()
+            let mut cache = TITLE_FONT.lock().expect("locking title_font");
+            if cache.stale {
+                cache.stale = false;
+                if let Some(font) = unsafe { load_title_font(hwnd) } {
+                    cache.font = Some(font);
+                }
+            }
+            cache.font.clone()
         };
 
         Ok(Some(Parameters {
@@ -1504,18 +1523,22 @@ unsafe fn get_title_log_font(hwnd: HWND, hdc: HDC) -> Option<LOGFONTW> {
     }
 }
 
-unsafe fn update_title_font(hwnd: HWND) {
+unsafe fn load_title_font(hwnd: HWND) -> Option<parameters::FontAndSize> {
     let hdc = GetDC(hwnd);
     if hdc.is_null() {
-        return;
+        return None;
     }
 
-    let mut font = TITLE_FONT.lock().expect("locking title_font");
-    if let Some(lf) = get_title_log_font(hwnd, hdc) {
-        *font = wezterm_font::locator::gdi::parse_log_font(&lf, hdc).ok();
-    }
+    let font = get_title_log_font(hwnd, hdc)
+        .and_then(|lf| wezterm_font::locator::gdi::parse_log_font(&lf, hdc).ok());
 
     ReleaseDC(hwnd, hdc);
+    font
+}
+
+/// fork: see TitleFontCache
+fn mark_title_font_stale() {
+    TITLE_FONT.lock().expect("locking title_font").stale = true;
 }
 
 /// Set up bidirectional pointers:
@@ -1826,7 +1849,7 @@ fn apply_theme(hwnd: HWND) -> Option<LRESULT> {
     }
 
     unsafe {
-        update_title_font(hwnd);
+        mark_title_font_stale();
 
         let appearance = get_appearance();
         let theme_string = if appearance == Appearance::Dark {
