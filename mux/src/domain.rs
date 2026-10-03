@@ -307,8 +307,10 @@ impl LocalDomain {
                 }
             }
 
-            // TODO: process env list and update WLSENV so that they
-            // get passed through
+            // fork: list the env vars that this spawn sets (WEZTERM_PANE,
+            // WEZTERM_UNIX_SOCKET, set_environment_variables, ...) in
+            // WSLENV so that they get passed through.
+            propagate_extra_env_to_wsl(cmd);
 
             cmd.clear_cwd();
             *cmd.get_argv_mut() = argv;
@@ -487,6 +489,88 @@ impl LocalDomain {
         }
         self.fixup_command(&mut cmd).await?;
         Ok(cmd)
+    }
+}
+
+/// fork: env vars holding a single Win32 path; WSL translates them with
+/// the `/p` WSLENV flag.
+const WSLENV_PATH_VARS: &[&str] = &[
+    "WEZTERM_UNIX_SOCKET",
+    "WEZTERM_CONFIG_FILE",
+    "WEZTERM_CONFIG_DIR",
+    "WEZTERM_EXECUTABLE",
+    "WEZTERM_EXECUTABLE_DIR",
+];
+
+/// fork: env vars that must not cross into WSL: WSLENV itself; PATH,
+/// which WSL builds on its own and a Win32 value would clobber; and
+/// SSH_AUTH_SOCK, whose Win32 agent socket is unusable inside WSL and
+/// would shadow any agent setup done there.
+const WSLENV_SKIP_VARS: &[&str] = &["WSLENV", "PATH", "SSH_AUTH_SOCK"];
+
+/// fork: compute the WSLENV value that additionally lists `keys`, keeping
+/// the existing entries (and their flags) as they are.  Path variables
+/// get `/p`, everything else `/u` (only from Win32 into WSL).  Returns
+/// `None` when nothing needs to be added.
+fn wslenv_with_extra_env<'a>(
+    existing: Option<&str>,
+    keys: impl IntoIterator<Item = &'a str>,
+) -> Option<String> {
+    let mut value = existing.unwrap_or("").to_string();
+    // Win32 environment names are case insensitive.
+    let mut listed: std::collections::HashSet<String> = value
+        .split(':')
+        .filter_map(|entry| entry.split('/').next())
+        .filter(|name| !name.is_empty())
+        .map(str::to_ascii_uppercase)
+        .collect();
+    let mut changed = false;
+
+    for key in keys {
+        let upper = key.to_ascii_uppercase();
+        if key.is_empty()
+            || key.contains(|c| c == ':' || c == '/')
+            || WSLENV_SKIP_VARS.contains(&upper.as_str())
+            || !listed.insert(upper.clone())
+        {
+            continue;
+        }
+        let flag = if WSLENV_PATH_VARS.contains(&upper.as_str()) {
+            "/p"
+        } else {
+            "/u"
+        };
+        if !value.is_empty() && !value.ends_with(':') {
+            value.push(':');
+        }
+        value.push_str(key);
+        value.push_str(flag);
+        changed = true;
+    }
+
+    changed.then_some(value)
+}
+
+/// fork: register the env vars that were set on `cmd` itself (as opposed
+/// to inherited from our own environment) in its WSLENV, so that wsl.exe
+/// passes them through to the shell in the distribution.
+fn propagate_extra_env_to_wsl(cmd: &mut CommandBuilder) {
+    let existing = match cmd.get_env("WSLENV") {
+        Some(value) => match value.to_str() {
+            Some(value) => Some(value.to_string()),
+            // Leave a WSLENV that we cannot parse alone.
+            None => return,
+        },
+        None => None,
+    };
+    let keys: Vec<String> = cmd
+        .iter_extra_env_as_str()
+        .map(|(key, _)| key.to_string())
+        .collect();
+    if let Some(wslenv) =
+        wslenv_with_extra_env(existing.as_deref(), keys.iter().map(String::as_str))
+    {
+        cmd.env("WSLENV", wslenv);
     }
 }
 
@@ -740,5 +824,76 @@ impl Domain for LocalDomain {
 
     fn state(&self) -> DomainState {
         DomainState::Attached
+    }
+}
+
+// fork(PTY-09): WSL 域把本次 spawn 额外设置的环境变量登记进 WSLENV。
+#[cfg(test)]
+mod wslenv_tests {
+    use super::*;
+
+    #[test]
+    fn nothing_to_add_leaves_wslenv_alone() {
+        assert_eq!(wslenv_with_extra_env(None, []), None);
+        assert_eq!(wslenv_with_extra_env(Some("TERM"), ["TERM"]), None);
+    }
+
+    #[test]
+    fn appends_keys_with_direction_and_path_flags() {
+        assert_eq!(
+            wslenv_with_extra_env(None, ["WEZTERM_PANE", "WEZTERM_UNIX_SOCKET"]).as_deref(),
+            Some("WEZTERM_PANE/u:WEZTERM_UNIX_SOCKET/p")
+        );
+        // 保留已有值（含其 flag），空段与结尾冒号不产生空项
+        assert_eq!(
+            wslenv_with_extra_env(Some("FOO/l:"), ["BAR"]).as_deref(),
+            Some("FOO/l:BAR/u")
+        );
+        assert_eq!(
+            wslenv_with_extra_env(Some(""), ["BAR"]).as_deref(),
+            Some("BAR/u")
+        );
+    }
+
+    #[test]
+    fn listed_keys_are_not_duplicated_case_insensitively() {
+        // Windows 环境变量名不分大小写；已登记的不改其 flag
+        assert_eq!(wslenv_with_extra_env(Some("foo/p"), ["FOO"]), None);
+        assert_eq!(
+            wslenv_with_extra_env(None, ["FOO", "foo"]).as_deref(),
+            Some("FOO/u")
+        );
+    }
+
+    #[test]
+    fn unsafe_keys_are_not_forwarded() {
+        // WSLENV 自身、会覆盖 WSL 侧 PATH 的 PATH、WSL 内不可用的 Win32
+        // agent socket，以及会破坏 WSLENV 语法的键名
+        assert_eq!(
+            wslenv_with_extra_env(
+                None,
+                ["WSLENV", "PATH", "Path", "SSH_AUTH_SOCK", "A:B", "C/D", ""]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn extra_env_of_command_is_registered() {
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.env_clear();
+        cmd.env("WSLENV", "TERM:COLORTERM");
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("WEZTERM_PANE", "3");
+        cmd.env(
+            "WEZTERM_UNIX_SOCKET",
+            r"C:\Users\me\.local\share\wezterm\gui-sock-1",
+        );
+        cmd.env("SSH_AUTH_SOCK", r"C:\Users\me\agent.1");
+        propagate_extra_env_to_wsl(&mut cmd);
+        assert_eq!(
+            cmd.get_env("WSLENV").and_then(|v| v.to_str()),
+            Some("TERM:COLORTERM:WEZTERM_PANE/u:WEZTERM_UNIX_SOCKET/p")
+        );
     }
 }
