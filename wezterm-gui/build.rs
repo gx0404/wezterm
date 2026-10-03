@@ -150,6 +150,36 @@ END
             }
         }
         embed_resource::compile(rcfile_name);
+
+        // fork: export the hybrid-GPU hint DWORDs defined in
+        // window/src/os/windows/mod.rs from the executable. NVIDIA Optimus and
+        // AMD switchable-graphics drivers only look at the export table of the
+        // .exe, so the symbols must be exported by name with DATA linkage.
+        const HYBRID_GPU_EXPORTS: &[&str] = &[
+            "NvOptimusEnablement",
+            "AmdPowerXpressRequestHighPerformance",
+        ];
+        match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
+            Ok("msvc") => {
+                for name in HYBRID_GPU_EXPORTS {
+                    println!("cargo:rustc-link-arg-bins=/EXPORT:{name},DATA");
+                }
+            }
+            Ok("gnu") => {
+                // Both GNU ld and lld (MinGW driver) accept a module
+                // definition file as a regular linker input.
+                let def_name = Path::new(&std::env::var_os("OUT_DIR").unwrap()).join("exports.def");
+                let mut def = String::from("EXPORTS\n");
+                for name in HYBRID_GPU_EXPORTS {
+                    def.push_str(&format!("    {name} DATA\n"));
+                }
+                std::fs::write(&def_name, def)
+                    .context(format!("write {}", def_name.display()))
+                    .unwrap();
+                println!("cargo:rustc-link-arg-bins={}", def_name.display());
+            }
+            _ => {}
+        }
     }
 
     #[cfg(target_os = "macos")]

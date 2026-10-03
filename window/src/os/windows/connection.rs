@@ -253,6 +253,14 @@ impl Connection {
                 "timeBeginPeriod(1) was rejected; timer resolution stays at the system default"
             );
         }
+        // fork: referencing the hybrid-GPU export statics keeps them in the
+        // final executable (see os/windows/mod.rs)
+        let (nv_optimus, amd_power_xpress) = super::hybrid_gpu_hints();
+        log::debug!(
+            "hybrid GPU hints: NvOptimusEnablement={} AmdPowerXpressRequestHighPerformance={}",
+            nv_optimus,
+            amd_power_xpress
+        );
         Ok(Self {
             event_handle,
             frame_timer: FrameTimer::new(),

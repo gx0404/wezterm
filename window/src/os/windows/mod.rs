@@ -9,6 +9,36 @@ pub use self::window::*;
 pub use connection::*;
 pub use event::*;
 
+// fork: hybrid-graphics drivers (NVIDIA Optimus, AMD PowerXpress /
+// switchable graphics) look these DWORDs up in the *executable's* export
+// table at process start; a non-zero value asks the driver to run the
+// process on the discrete GPU instead of the integrated one. Machines with a
+// single GPU ignore them. The statics live in this rlib, so
+// wezterm-gui/build.rs adds the export directives for the final binary, and
+// Connection::create_new reads them via hybrid_gpu_hints() so the object
+// that defines them is always part of the link.
+#[allow(non_upper_case_globals)]
+#[no_mangle]
+#[used]
+pub static NvOptimusEnablement: u32 = 1;
+
+#[allow(non_upper_case_globals)]
+#[no_mangle]
+#[used]
+pub static AmdPowerXpressRequestHighPerformance: u32 = 1;
+
+/// fork: returns `(NvOptimusEnablement, AmdPowerXpressRequestHighPerformance)`.
+/// The volatile reads stop the optimizer from constant-folding the statics,
+/// which keeps a real reference to their symbols in the final link.
+pub fn hybrid_gpu_hints() -> (u32, u32) {
+    unsafe {
+        (
+            std::ptr::read_volatile(&NvOptimusEnablement),
+            std::ptr::read_volatile(&AmdPowerXpressRequestHighPerformance),
+        )
+    }
+}
+
 /// Convert a rust string to a windows wide string
 pub fn wide_string(s: &str) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
