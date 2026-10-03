@@ -13,7 +13,7 @@ use std::mem::MaybeUninit;
 use std::os::windows::ffi::OsStringExt;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use winapi::shared::minwindef::{DWORD, FILETIME, LPVOID, MAX_PATH};
+use winapi::shared::minwindef::{DWORD, FILETIME, LPVOID};
 use winapi::shared::ntdef::{FALSE, NT_SUCCESS};
 use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
 use winapi::um::memoryapi::ReadProcessMemory;
@@ -180,9 +180,23 @@ fn wstr_to_string(slice: &[u16]) -> String {
     wstr_to_path(slice).to_string_lossy().into_owned()
 }
 
+/// fork: UNICODE_STRING lengths are u16 byte counts, so a command line
+/// is at most 65534 bytes.  Upstream capped every read at MAX_PATH * 4
+/// bytes (520 UTF-16 units) and, for any longer command line, gave up on
+/// the whole parameter block, losing the cwd that new tabs and splits
+/// inherit along with it.
+const MAX_CMDLINE_BYTES: usize = 65534;
+/// fork: extended-length paths are limited to 32767 UTF-16 units.
+const MAX_CWD_BYTES: usize = 32767 * 2;
+/// fork: buffer size, in UTF-16 units, for QueryFullProcessImageNameW,
+/// which fails outright rather than truncating when it is too small.
+const MAX_IMAGE_NAME_CHARS: usize = 32768;
+
+/// fork: argv and cwd are read independently so that failing to read
+/// one of them does not discard the other.
 struct ProcParams {
-    argv: Vec<String>,
-    cwd: PathBuf,
+    argv: Option<Vec<String>>,
+    cwd: Option<PathBuf>,
     console: HANDLE,
 }
 
@@ -211,13 +225,14 @@ impl ProcHandle {
 
     /// Returns the executable image for the process
     pub fn executable(&self) -> Option<PathBuf> {
-        let mut buf = [0u16; MAX_PATH + 1];
+        let mut buf = vec![0u16; MAX_IMAGE_NAME_CHARS];
         let mut len = buf.len() as DWORD;
         let res = unsafe { QueryFullProcessImageNameW(self.proc, 0, buf.as_mut_ptr(), &mut len) };
         if res == 0 {
             None
         } else {
-            Some(wstr_to_path(&buf))
+            let len = (len as usize).min(buf.len());
+            Some(wstr_to_path(&buf[..len]))
         }
     }
 
@@ -300,15 +315,17 @@ impl ProcHandle {
         let cmdline = self.read_process_wchar(
             params.CommandLine.Buffer as _,
             params.CommandLine.Length as _,
-        )?;
+            MAX_CMDLINE_BYTES,
+        );
         let cwd = self.read_process_wchar(
             params.CurrentDirectory.DosPath.Buffer as _,
             params.CurrentDirectory.DosPath.Length as _,
-        )?;
+            MAX_CWD_BYTES,
+        );
 
         Some(ProcParams {
-            argv: cmd_line_to_argv(&cmdline),
-            cwd: wstr_to_path(&cwd),
+            argv: cmdline.map(|cmdline| cmd_line_to_argv(&cmdline)),
+            cwd: cwd.map(|cwd| wstr_to_path(&cwd)),
             console: params.ConsoleHandle,
         })
     }
@@ -324,22 +341,29 @@ impl ProcHandle {
         let cmdline = self.read_process_wchar(
             params.CommandLine.Buffer as _,
             params.CommandLine.Length as _,
-        )?;
+            MAX_CMDLINE_BYTES,
+        );
         let cwd = self.read_process_wchar(
             params.CurrentDirectory.DosPath.Buffer as _,
             params.CurrentDirectory.DosPath.Length as _,
-        )?;
+            MAX_CWD_BYTES,
+        );
 
         Some(ProcParams {
-            argv: cmd_line_to_argv(&cmdline),
-            cwd: wstr_to_path(&cwd),
+            argv: cmdline.map(|cmdline| cmd_line_to_argv(&cmdline)),
+            cwd: cwd.map(|cwd| wstr_to_path(&cwd)),
             console: params.ConsoleHandle as _,
         })
     }
 
     /// Copies a sized WSTR from the address in the process
-    fn read_process_wchar(&self, ptr: LPVOID, byte_size: usize) -> Option<Vec<u16>> {
-        if byte_size > MAX_PATH * 4 {
+    fn read_process_wchar(
+        &self,
+        ptr: LPVOID,
+        byte_size: usize,
+        max_bytes: usize,
+    ) -> Option<Vec<u16>> {
+        if byte_size > max_bytes {
             // Defend against implausibly large paths, just in
             // case we're reading the wrong offset into a kernel struct
             return None;
@@ -348,12 +372,14 @@ impl ProcHandle {
         let mut buf = vec![0u16; byte_size / 2];
         let mut bytes_read = 0;
 
+        // fork: read whole UTF-16 units only; an odd (corrupt) byte_size
+        // must not overrun `buf`.
         let res = unsafe {
             ReadProcessMemory(
                 self.proc,
                 ptr as _,
                 buf.as_mut_ptr() as _,
-                byte_size,
+                buf.len() * 2,
                 &mut bytes_read,
             )
         };
@@ -436,7 +462,7 @@ impl LocalProcessInfo {
         log::trace!("current_working_dir({})", pid);
         let proc = ProcHandle::new(pid)?;
         let params = proc.get_params()?;
-        Some(params.cwd)
+        params.cwd
     }
 
     pub fn executable_path(pid: u32) -> Option<PathBuf> {
@@ -468,8 +494,12 @@ impl LocalProcessInfo {
                     executable.replace(exe);
                 }
                 if let Some(params) = proc.get_params() {
-                    cwd = params.cwd;
-                    argv = params.argv;
+                    if let Some(dir) = params.cwd {
+                        cwd = dir;
+                    }
+                    if let Some(args) = params.argv {
+                        argv = args;
+                    }
                     console = params.console as _;
                 }
                 if let Some(start) = proc.start_time() {
@@ -612,5 +642,44 @@ mod tests {
         child.wait().ok();
         let info = info.expect("fresh child must be found");
         assert_eq!(info.pid, child.id());
+    }
+
+    #[test]
+    fn long_command_line_keeps_argv_and_cwd() {
+        // 命令行超过 520 个 UTF-16 字符时，旧实现整体放弃读取，连 cwd 一起丢
+        let cwd = std::env::temp_dir();
+        let long_arg = "x".repeat(2000);
+        let mut child = spawn_idle_cmd(&long_arg, &cwd);
+        let pid = child.id();
+        let info = LocalProcessInfo::with_root_pid(pid);
+        let cwd_only = LocalProcessInfo::current_working_dir(pid);
+        child.kill().ok();
+        child.wait().ok();
+
+        let info = info.expect("child must be found");
+        assert!(
+            info.argv.iter().any(|arg| arg == &long_arg),
+            "argv lost: {:?}",
+            info.argv.iter().map(String::len).collect::<Vec<_>>()
+        );
+        let canon = |p: &std::path::Path| std::fs::canonicalize(p).expect("canonicalize");
+        assert_eq!(canon(&info.cwd), canon(&cwd));
+        assert_eq!(canon(&cwd_only.expect("cwd")), canon(&cwd));
+    }
+
+    #[test]
+    fn executable_path_resolves() {
+        let cwd = std::env::temp_dir();
+        let mut child = spawn_idle_cmd("exe", &cwd);
+        let exe = LocalProcessInfo::executable_path(child.id());
+        child.kill().ok();
+        child.wait().ok();
+        let exe = exe.expect("executable path");
+        assert!(
+            exe.file_name()
+                .map(|n| n.eq_ignore_ascii_case("cmd.exe"))
+                .unwrap_or(false),
+            "{exe:?}"
+        );
     }
 }
