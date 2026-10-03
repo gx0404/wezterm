@@ -1,7 +1,10 @@
 // fork(zh): 配置加载与热重载的线程模型：Lua Send 但 !Sync，只允许主线程
 // 引用；fs-watch 线程经 `LuaPipe` 把新 Lua 上下文运回主线程。重载失败
 // 保留旧配置、仅更新错误消息；`ConfigHandle::generation` 随每次变更递增，
-// 供终端/字体缓存刷新。详见 docs/AGENT_RULES/config-lua.md。
+// 供终端/字体缓存刷新。锁纪律：`Configuration::reload_lock` 串行化 reload，
+// Lua 求值只在它之下、不持 CONFIG 内锁；写回短暂持内锁，若期间 generation
+// 已被直接写入推进则整份丢弃；订阅者通知在释放内锁后发出。
+// 详见 docs/AGENT_RULES/config-lua.md。
 //! Configuration for the gui portion of the terminal
 
 use anyhow::{anyhow, bail, Context, Error};
@@ -593,7 +596,15 @@ struct ConfigInner {
     warnings: Vec<String>,
     generation: usize,
     watcher: Option<notify::RecommendedWatcher>,
-    subscribers: HashMap<usize, Box<dyn Fn() -> bool + Send>>,
+}
+
+// fork: what `ConfigInner::apply_loaded` hands back to run outside the
+// config lock: the error popup and the teardown of a discarded lua
+// context must not happen while `inner` is held.
+struct ApplyOutcome {
+    applied: bool,
+    error_to_show: Option<String>,
+    discarded_lua: Option<mlua::Lua>,
 }
 
 impl ConfigInner {
@@ -604,26 +615,7 @@ impl ConfigInner {
             warnings: vec![],
             generation: 0,
             watcher: None,
-            subscribers: HashMap::new(),
         }
-    }
-
-    fn subscribe<F>(&mut self, subscriber: F) -> usize
-    where
-        F: Fn() -> bool + 'static + Send,
-    {
-        static SUB_ID: AtomicUsize = AtomicUsize::new(0);
-        let sub_id = SUB_ID.fetch_add(1, Ordering::Relaxed);
-        self.subscribers.insert(sub_id, Box::new(subscriber));
-        sub_id
-    }
-
-    fn unsub(&mut self, sub_id: usize) {
-        self.subscribers.remove(&sub_id);
-    }
-
-    fn notify(&mut self) {
-        self.subscribers.retain(|_, notify| notify());
     }
 
     fn watch_path(&mut self, path: PathBuf) {
@@ -690,25 +682,14 @@ impl ConfigInner {
         }
     }
 
-    /// Attempt to load the user's configuration.
-    /// On success, clear any error and replace the current
-    /// configuration.
-    /// On failure, retain the existing configuration but
-    /// replace any captured error message.
-    fn reload(&mut self) {
-        let LoadedConfig {
-            config,
-            file_name,
-            lua,
-            warnings,
-        } = Config::load();
-
-        self.warnings = warnings;
-
+    // fork: the paths to watch for a freshly loaded config. This reads the
+    // lua registry, so it runs on the loading thread, before the lua
+    // context is handed to LUA_PIPE, and needs no config lock.
+    fn watch_paths_for(loaded: &LoadedConfig) -> Vec<PathBuf> {
         // Before we process the success/failure, extract and update
         // any paths that we should be watching
         let mut watch_paths = vec![];
-        if let Some(path) = file_name {
+        if let Some(path) = &loaded.file_name {
             // Let's also watch the parent directory for folks that do
             // things with symlinks:
             if let Some(parent) = path.parent() {
@@ -720,12 +701,53 @@ impl ConfigInner {
                     watch_paths.push(parent.to_path_buf());
                 }
             }
-            watch_paths.push(path);
+            watch_paths.push(path.clone());
         }
-        if let Some(lua) = &lua {
+        if let Some(lua) = &loaded.lua {
             ConfigInner::accumulate_watch_paths(lua, &mut watch_paths);
         }
+        watch_paths
+    }
 
+    /// Apply the result of loading the user's configuration.
+    /// On success, clear any error and replace the current
+    /// configuration.
+    /// On failure, retain the existing configuration but
+    /// replace any captured error message.
+    // fork: the load itself ran without the config lock (see
+    // `Configuration::reload`). `expected_generation` is the generation
+    // observed before that evaluation started; if it moved meanwhile a
+    // newer configuration was installed directly and this older result
+    // is discarded as a whole, error included.
+    fn apply_loaded(
+        &mut self,
+        loaded: LoadedConfig,
+        expected_generation: usize,
+        watch_paths: Vec<PathBuf>,
+    ) -> ApplyOutcome {
+        let LoadedConfig {
+            config,
+            file_name: _,
+            lua,
+            warnings,
+        } = loaded;
+
+        if self.generation != expected_generation {
+            log::debug!(
+                "discarding stale config evaluation: generation moved from {} to {}",
+                expected_generation,
+                self.generation
+            );
+            return ApplyOutcome {
+                applied: false,
+                error_to_show: None,
+                discarded_lua: lua,
+            };
+        }
+
+        self.warnings = warnings;
+
+        let mut error_to_show = None;
         match config {
             Ok(config) => {
                 self.config = Arc::new(config);
@@ -746,17 +768,22 @@ impl ConfigInner {
                 let err = format!("{:#}", err);
                 if self.generation > 0 {
                     // Only generate the message for an actual reload
-                    show_error(&err);
+                    error_to_show = Some(err.clone());
                 }
                 self.error.replace(err);
             }
         }
 
-        self.notify();
         if self.config.automatically_reload_config {
             for path in watch_paths {
                 self.watch_path(path);
             }
+        }
+
+        ApplyOutcome {
+            applied: true,
+            error_to_show,
+            discarded_lua: None,
         }
     }
 
@@ -773,14 +800,6 @@ impl ConfigInner {
         self.config = Arc::new(cfg);
         self.error.take();
         self.generation += 1;
-    }
-
-    fn overridden(&mut self, overrides: &wezterm_dynamic::Value) -> Result<ConfigHandle, Error> {
-        let config = Config::load_with_overrides(overrides);
-        Ok(ConfigHandle {
-            config: Arc::new(config.config?),
-            generation: self.generation,
-        })
     }
 
     fn use_test(&mut self) {
@@ -807,12 +826,24 @@ impl ConfigInner {
 
 pub struct Configuration {
     inner: Mutex<ConfigInner>,
+    // fork: serializes concurrent reloads. The Lua evaluation runs while
+    // holding only this lock, never `inner`, so `configuration()` stays
+    // responsive on the pane parser and GUI threads during a reload.
+    // Lock order is reload_lock -> inner; `inner` is never held while
+    // taking reload_lock.
+    reload_lock: Mutex<()>,
+    // fork: subscribers live outside `inner` and are notified after it
+    // has been released, so a callback may call `configuration()`
+    // without deadlocking. Never taken while `inner` is held.
+    subscribers: Mutex<HashMap<usize, Box<dyn Fn() -> bool + Send>>>,
 }
 
 impl Configuration {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(ConfigInner::new()),
+            reload_lock: Mutex::new(()),
+            subscribers: Mutex::new(HashMap::new()),
         }
     }
 
@@ -830,13 +861,24 @@ impl Configuration {
     where
         F: Fn() -> bool + 'static + Send,
     {
-        let mut inner = self.inner.lock().unwrap();
-        inner.subscribe(subscriber)
+        static SUB_ID: AtomicUsize = AtomicUsize::new(0);
+        let sub_id = SUB_ID.fetch_add(1, Ordering::Relaxed);
+        self.subscribers
+            .lock()
+            .unwrap()
+            .insert(sub_id, Box::new(subscriber));
+        sub_id
     }
 
     fn unsub(&self, sub_id: usize) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.unsub(sub_id);
+        self.subscribers.lock().unwrap().remove(&sub_id);
+    }
+
+    fn notify(&self) {
+        self.subscribers
+            .lock()
+            .unwrap()
+            .retain(|_, notify| notify());
     }
 
     /// Reset the configuration to defaults
@@ -851,8 +893,16 @@ impl Configuration {
     }
 
     fn overridden(&self, overrides: &wezterm_dynamic::Value) -> Result<ConfigHandle, Error> {
-        let mut inner = self.inner.lock().unwrap();
-        inner.overridden(overrides)
+        // fork: only the generation is read under the lock; the
+        // evaluation below must not block `configuration()` elsewhere.
+        // Nothing is written back: the handle just reports the
+        // generation this override was derived from.
+        let generation = self.inner.lock().unwrap().generation;
+        let config = Config::load_with_overrides(overrides);
+        Ok(ConfigHandle {
+            config: Arc::new(config.config?),
+            generation,
+        })
     }
 
     /// Use a config that doesn't depend on the user's
@@ -864,8 +914,35 @@ impl Configuration {
 
     /// Reload the configuration
     pub fn reload(&self) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.reload();
+        let outcome = {
+            // fork: one reload at a time; `inner` is only taken for the
+            // generation snapshot and for the write-back, never across
+            // `Config::load()`.
+            let _serialized = self.reload_lock.lock().unwrap();
+            let expected_generation = self.inner.lock().unwrap().generation;
+
+            let loaded = Config::load();
+            let watch_paths = ConfigInner::watch_paths_for(&loaded);
+
+            self.inner
+                .lock()
+                .unwrap()
+                .apply_loaded(loaded, expected_generation, watch_paths)
+        };
+
+        let ApplyOutcome {
+            applied,
+            error_to_show,
+            discarded_lua,
+        } = outcome;
+        if let Some(err) = &error_to_show {
+            show_error(err);
+        }
+        if applied {
+            self.notify();
+        }
+        // A discarded lua context is torn down here, outside every lock.
+        drop(discarded_lua);
     }
 
     /// Returns a copy of any captured error message.
@@ -1029,5 +1106,229 @@ mod sync_output_timeout_tests {
         )
         .expect("config with explicit timeout");
         assert_eq!(cfg.mux_synchronized_output_timeout_ms, 0);
+    }
+}
+
+// fork: 全局 CONFIG 锁与 Lua 求值解耦的护栏（MUX-07）：reload /
+// overridden 在求值期间不得持有 CONFIG 锁，否则 pane 解析线程与 GUI 线程的
+// `configuration()` 会被整段 Lua 求值阻塞。这些测试依赖 nextest 的每测试
+// 一进程（`set_config_file_override` 与 CONFIG 都是进程级状态），同进程
+// 并行时再由 TEST_LOCK 串行兜底。
+#[cfg(test)]
+mod reload_lock_tests {
+    use super::*;
+    use std::time::Instant;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// 单次慢求值的忙等时长；非阻塞阈值取远小于它的值，机器负载只会
+    /// 拉长忙等（把差距拉大），不会制造假阳性
+    const SLOW_EVAL_SECS: f64 = 0.6;
+    const NOT_BLOCKED_LIMIT: Duration = Duration::from_millis(250);
+    const WAIT_LIMIT: Duration = Duration::from_secs(30);
+
+    struct Fixture {
+        dir: PathBuf,
+        marker: PathBuf,
+        overlap: PathBuf,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let dir = std::env::temp_dir().join(format!(
+                "wezterm-config-reload-{}-{name}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self {
+                marker: dir.join("in-eval"),
+                overlap: dir.join("overlap"),
+                dir,
+                _guard: guard,
+            }
+        }
+
+        fn config_path(&self) -> PathBuf {
+            self.dir.join("wezterm.lua")
+        }
+
+        /// 写入配置文件并把全局配置文件覆盖指向它
+        fn install(&self, body: &str) {
+            std::fs::write(self.config_path(), body).unwrap();
+            set_config_file_override(&self.config_path());
+        }
+
+        fn fast_config(font_size: u32) -> String {
+            format!("return {{ font_size = {font_size}, automatically_reload_config = false }}\n")
+        }
+
+        /// 求值期间在磁盘留下 in-eval 哨兵；进入时哨兵已存在说明与另一次
+        /// 求值重叠，再额外落 overlap 文件
+        fn slow_config(&self, font_size: u32) -> String {
+            format!(
+                r#"
+local marker = [[{marker}]]
+local overlap = [[{overlap}]]
+local existing = io.open(marker, "r")
+if existing then
+  existing:close()
+  local o = io.open(overlap, "w")
+  o:close()
+end
+local m = io.open(marker, "w")
+m:close()
+local started = os.clock()
+while os.clock() - started < {secs} do end
+os.remove(marker)
+return {{ font_size = {font_size}, automatically_reload_config = false }}
+"#,
+                marker = self.marker.display(),
+                overlap = self.overlap.display(),
+                secs = SLOW_EVAL_SECS,
+            )
+        }
+
+        /// 等到慢求值真正进入 Lua 脚本（哨兵出现）
+        fn wait_for_eval_to_start(&self) {
+            let start = Instant::now();
+            while !self.marker.exists() {
+                assert!(start.elapsed() < WAIT_LIMIT, "慢求值未在期限内开始");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn timed<R>(f: impl FnOnce() -> R) -> (R, Duration) {
+        let start = Instant::now();
+        let r = f();
+        (r, start.elapsed())
+    }
+
+    #[test]
+    fn configuration_is_not_blocked_while_reload_evaluates_lua() {
+        let fx = Fixture::new("not-blocked");
+        fx.install(&fx.slow_config(21));
+        let before = configuration().generation();
+
+        let worker = std::thread::spawn(reload);
+        fx.wait_for_eval_to_start();
+        let (handle, elapsed) = timed(configuration);
+        worker.join().unwrap();
+
+        assert!(
+            elapsed < NOT_BLOCKED_LIMIT,
+            "configuration() 在 Lua 求值期间被阻塞了 {:?}",
+            elapsed
+        );
+        // 求值中读到的仍是旧配置
+        assert_eq!(handle.generation(), before);
+        let after = configuration();
+        assert_eq!(after.generation(), before + 1);
+        assert_eq!(after.font_size, 21.0);
+        assert!(configuration_result().is_ok());
+    }
+
+    #[test]
+    fn overridden_config_does_not_hold_the_config_lock_while_evaluating() {
+        let fx = Fixture::new("overridden");
+        fx.install(&fx.slow_config(21));
+        let before = configuration().generation();
+
+        let worker = std::thread::spawn(|| {
+            let mut obj = BTreeMap::new();
+            obj.insert(
+                Value::String("font_size".into()),
+                Value::F64(ordered_float::OrderedFloat(33.0)),
+            );
+            overridden_config(&Value::Object(obj.into()))
+        });
+        fx.wait_for_eval_to_start();
+        let (_, elapsed) = timed(configuration);
+        let overridden = worker.join().unwrap().expect("overridden config loads");
+
+        assert!(
+            elapsed < NOT_BLOCKED_LIMIT,
+            "configuration() 在 overridden 求值期间被阻塞了 {:?}",
+            elapsed
+        );
+        assert_eq!(overridden.font_size, 33.0);
+        // 带覆盖的求值不写回全局配置，也不推进 generation
+        assert_eq!(overridden.generation(), before);
+        assert_eq!(configuration().generation(), before);
+    }
+
+    #[test]
+    fn concurrent_reloads_are_serialized() {
+        let fx = Fixture::new("serialized");
+        fx.install(&fx.slow_config(21));
+        let before = configuration().generation();
+
+        let a = std::thread::spawn(reload);
+        let b = std::thread::spawn(reload);
+        a.join().unwrap();
+        b.join().unwrap();
+
+        assert!(!fx.overlap.exists(), "两次 reload 的 Lua 求值发生了重叠");
+        assert_eq!(configuration().generation(), before + 2);
+        assert_eq!(configuration().font_size, 21.0);
+    }
+
+    #[test]
+    fn failed_reload_keeps_old_config_and_only_updates_error() {
+        let fx = Fixture::new("failure");
+        fx.install(&Fixture::fast_config(17));
+        reload();
+        let good = configuration();
+        assert_eq!(good.font_size, 17.0);
+        assert!(configuration_result().is_ok());
+
+        fx.install("return { font_size = }\n");
+        reload();
+        let after_failure = configuration();
+        assert_eq!(after_failure.generation(), good.generation());
+        assert_eq!(after_failure.font_size, 17.0);
+        assert!(configuration_result().is_err());
+        assert!(!configuration_warnings_and_errors().is_empty());
+
+        fx.install(&Fixture::fast_config(18));
+        reload();
+        let recovered = configuration();
+        assert_eq!(recovered.generation(), good.generation() + 1);
+        assert_eq!(recovered.font_size, 18.0);
+        assert!(configuration_result().is_ok());
+    }
+
+    #[test]
+    fn stale_reload_result_is_discarded_after_a_newer_direct_write() {
+        let fx = Fixture::new("stale");
+        fx.install(&fx.slow_config(21));
+
+        let worker = std::thread::spawn(reload);
+        fx.wait_for_eval_to_start();
+        let mut newer = Config::default_config();
+        newer.font_size = 99.0;
+        let (_, elapsed) = timed(|| use_this_configuration(newer));
+        let after_direct_write = configuration().generation();
+        worker.join().unwrap();
+
+        assert!(
+            elapsed < NOT_BLOCKED_LIMIT,
+            "use_this_configuration 在 Lua 求值期间被阻塞了 {:?}",
+            elapsed
+        );
+        // 求值开始于直接写入之前，结果已陈旧：整份丢弃，不覆盖更新的配置
+        let latest = configuration();
+        assert_eq!(latest.font_size, 99.0);
+        assert_eq!(latest.generation(), after_direct_write);
+        assert!(configuration_result().is_ok());
     }
 }
