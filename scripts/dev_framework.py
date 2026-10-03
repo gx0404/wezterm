@@ -105,7 +105,38 @@ def command(argv: list[str]) -> list[str]:
     return argv
 
 
-def run(data: dict, target: str) -> int:
+# 个别命令在 Windows 上换成专用入口：原 .sh 依赖 Xvfb/xwd/ffmpeg，Windows 没有。
+WINDOWS_ENTRIES = {"ui-smoke": "scripts/ui_smoke_windows.ps1"}
+
+
+def windows_powershell() -> str:
+    for name in ("pwsh", "powershell"):
+        found = shutil.which(name)
+        if found:
+            return found
+    raise ValueError("Windows 上运行 ui-smoke 需要 PATH 中有 pwsh 或 powershell")
+
+
+def entry(data: dict, target: str, argv: list[str], out: str | None = None) -> list[str]:
+    """命令名换成实际 argv：ui-smoke 在 Windows 上走 PowerShell 入口，其余沿用 command()。
+
+    out 是批次目录（仓库相对路径），只对 ui-smoke 透传；缺省时 Windows 入口按
+    ui_smoke.sh 的约定落到 <evidence_root>/smoke/<UTC 时间戳>-<pid>。
+    """
+    script = WINDOWS_ENTRIES.get(target) if os.name == "nt" else None
+    if script:
+        if out is None:
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            out = f"{data['evidence_root']}/smoke/{stamp}-{os.getpid()}"
+        return [windows_powershell(), "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", script, "-Out", out]
+    argv = command(argv)
+    if target == "ui-smoke" and out is not None:
+        argv = [*argv, "--out", out]
+    return argv
+
+
+def run(data: dict, target: str, out: str | None = None) -> int:
     if target not in data["commands"]:
         raise ValueError(f"未知命令：{target}")
     item = data["commands"][target]
@@ -114,8 +145,13 @@ def run(data: dict, target: str) -> int:
     if item["status"] == "not-applicable":
         print(f"N/A {target}: {item['reason']}")
         return 0
+    if out is not None:
+        root = data["evidence_root"]
+        if target != "ui-smoke" or not (out == root or out.startswith(root + "/")):
+            raise ValueError(f"--out 只用于 ui-smoke，且必须是 {root}/ 下的批次目录")
+        within(out)
     # 仅显式 run/ci 执行已审阅命令；不使用 shell 拼接和自动重试。
-    return subprocess.run(command(item["argv"]), cwd=within(item.get("cwd", "."), allow_root=True),
+    return subprocess.run(entry(data, target, item["argv"], out), cwd=within(item.get("cwd", "."), allow_root=True),
                           check=False).returncode
 
 
@@ -175,9 +211,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["help", "check", "ready", "run", "ci", "doctor", "evidence"])
     parser.add_argument("target", nargs="?")
+    parser.add_argument("--out", help="run ui-smoke：批次目录（evidence_root 下的仓库相对路径）")
     args = parser.parse_args()
     try:
         data = config()
+        if args.out is not None and args.action != "run":
+            raise ValueError("--out 只能配合 run ui-smoke 使用")
         if args.action == "help":
             print("make framework-check / framework-ready / ai-doctor / ci-check")
             print("make version / version-check / version-write / evidence")
@@ -197,7 +236,7 @@ def main() -> int:
             ready(data)
             print("PASS 配置完整；实际命令结果须另行验证")
         elif args.action == "run":
-            return run(data, args.target or "")
+            return run(data, args.target or "", args.out)
         elif args.action == "ci":
             ready(data)
             for argv in ([sys.executable, str(ROOT / "scripts/resolve_agent_rules.py"), "--check"],
@@ -217,11 +256,15 @@ def main() -> int:
                 state = item["status"]
                 if state == "configured":
                     cwd = within(item.get("cwd", "."), allow_root=True)
-                    executable = item["argv"][0]
-                    found = os.access(cwd / executable, os.X_OK) if "/" in executable else bool(shutil.which(executable))
+                    windows_script = WINDOWS_ENTRIES.get(name) if os.name == "nt" else None
+                    executable = windows_script or item["argv"][0]
+                    if windows_script:
+                        found = (cwd / windows_script).is_file()  # .ps1 靠解释器执行，无可执行位
+                    else:
+                        found = os.access(cwd / executable, os.X_OK) if "/" in executable else bool(shutil.which(executable))
                     detail = "可执行文件；未运行"
                     try:
-                        command(item["argv"])  # 与 run 同一解析：Windows 的 .sh 入口还须找到 bash
+                        entry(data, name, item["argv"])  # 与 run 同一解析：Windows 的 .sh 入口还须找到 bash
                     except ValueError as exc:
                         found, detail = False, f"{exc}；未运行"
                     print(f"{'FOUND' if found else 'MISSING'} {name}: {detail}")

@@ -14,7 +14,7 @@
 | heavy（CI 形态） | `make test-heavy` | 同上 | 全量+失败不中断收集完整信号 / 不是更高覆盖 |
 | 生成物 freshness | `make generated-check` | 二进制链需 target/debug/wezterm | 派生文件与生成器一致 / 不能证生成器正确 |
 | 图谱/KB freshness | `make graph-check / kb-check` | 无 | 产物与源码指纹一致 / 不能证内容质量 |
-| UI 冒烟 | `make ui-smoke` | target/debug/wezterm-gui、Xvfb、xwd、ffmpeg | 窗口可起、标记文本渲染 / 不能证交互细节 |
+| UI 冒烟 | `make ui-smoke`（Windows 分派到 `scripts/ui_smoke_windows.ps1`） | Linux：target/debug/wezterm-gui、Xvfb、xwd、ffmpeg；Windows：target/release/wezterm-gui.exe（或 `-Exe`）、pwsh/powershell、交互式桌面 | 窗口可起、标记文本渲染、浮层可打开 / 不能证交互细节 |
 | 实机平台 | NixOS VM（上游流程） | nix | GNOME/KDE 下真实桌面行为 / 人工流程 |
 | 框架自身 | `make framework-test` | 无 | resolver/hooks/KB 契约 / 不测产品代码 |
 
@@ -72,6 +72,21 @@ cargo nextest run --locked -p wezterm-escape-parser
    Xvfb 显示（占用即失败）→ 启动 wezterm-gui → 渲染标记文本 → xwd 抓屏
    → ffmpeg 转 `before.png` → 写初始 result.json（status=CAPTURED，
    images_reviewed=false）。
+   Windows 分支（`os.name == 'nt'` 时 `make ui-smoke` / `python3
+   scripts/dev_framework.py run ui-smoke [--out <批次目录>]` 自动转到
+   `scripts/ui_smoke_windows.ps1`，用 pwsh、找不到再用 powershell）：真实桌面
+   窗口，没有 Xvfb 隔离；`PrintWindow(PW_RENDERFULLCONTENT)` 抓图，黑图再临时
+   `TOPMOST|NOACTIVATE` + `CopyFromScreen`，全程不 `SetForegroundWindow`。
+   `--out` 必须是证据根下的仓库相对路径，缺省为 `.ui-evidence/smoke/<时间戳>-<pid>`。
+   要选浮层/配置/可执行文件时直接调脚本：`pwsh -File scripts/ui_smoke_windows.ps1
+   -Out <批次目录> [-Exe ..] [-ConfigFile ..|-NoConfig] [-Overlay
+   none|palette|settings|keybinds|menu|wallpaper|context-menu|confirm] [-Label ..]`，
+   输出 `<Label>[-<overlay>].png`，result.json 的 `captures`（抓图方式、键位表、
+   抓图时是否前台）与 `skipped`（浮层在该配置下不可达，不算失败）逐项登记。
+   键盘浮层只在前台窗口属于被测 wezterm 时发键，否则记 skipped、不向别的程序发键；
+   键位表按配置推断（默认键 / GX 配置的 leader 层），本机 leader 被别的程序占作
+   全局热键时用 `-LeaderKey F13..F20` 替换；输入法处于中文模式会吞掉 leader 层的
+   字母键，脚本发键前把窗口输入法切到字母数字、抓图后还原（`-KeepIme` 关闭）。
 3. **读回图片**：执行者必须实际查看 before.png，核对标记文本
    `WEZTERM-UI-SMOKE-OK-…` 与基本布局（有字、有色、无花屏）。
 4. 判定：核对通过→ result.json 改 `status: PASS, images_reviewed: true`；

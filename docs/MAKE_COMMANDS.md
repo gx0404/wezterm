@@ -33,7 +33,7 @@
 | `make test-heavy` | nextest --all --no-fail-fast（CI 形态） | 同 make test |
 | `make generated-check` | 派生文件只读比对（补全/键表/docs 索引） | 二进制链需 target/debug/wezterm，缺则跳过该段并注明 |
 | `make generated-write` | = scripts/generated_write.sh（上游 update-derived-files.sh + 键表 stylua 格式化） | **改文件**；需 target/debug/wezterm、钉版 stylua |
-| `make ui-smoke` | Xvfb 隔离显示截图冒烟 | 需 target/debug/wezterm-gui、Xvfb、xwd、ffmpeg |
+| `make ui-smoke` | Linux：Xvfb 隔离显示截图冒烟；Windows：真实桌面窗口截图（`scripts/ui_smoke_windows.ps1`） | Linux 需 target/debug/wezterm-gui、Xvfb、xwd、ffmpeg；Windows 需 target/release/wezterm-gui.exe 与 pwsh/powershell；`dev_framework.py run ui-smoke --out <批次目录>` 可指定证据目录 |
 | `make graph` / `make graph-check` | 重建/校验代码图谱 | graph 需 venv（make setup） |
 | `make kb` / `make kb-check` | 重建/校验知识库 | kb 写盘，kb-check 只读 |
 | `make gx-bundle` | docker ubuntu:20.04 容器构建 release 四件套并组装离线安装包 `dist/*.tar.xz`（有 Windows 包时顺带产出 zip） | 需 docker（或 `GX_USE_LOCAL=1` 本机构建，产物标注 glibc）；联网装依赖，耗时 |

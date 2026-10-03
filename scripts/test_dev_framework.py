@@ -162,5 +162,89 @@ class WindowsShellDispatchTests(unittest.TestCase):
                 self.assertEqual(self.doctor(platform, *entries), (0, "FOUND setup: 可执行文件；未运行"))
 
 
+class UiSmokeDispatchTests(unittest.TestCase):
+    """ui-smoke 在 Windows 上换成 PowerShell 入口（Xvfb/xwd/ffmpeg 版 .sh 在 Windows 不可用），其余平台不变。"""
+
+    OUT = ".ui-evidence/feature%2Fx/ui/20260101T000000Z-abcd1234"
+    DATA = {"evidence_root": ".ui-evidence",
+            "commands": {"ui-smoke": {"status": "configured", "argv": ["scripts/ui_smoke.sh"], "cwd": "."},
+                         "graph-check": {"status": "configured", "argv": ["scripts/graphify.sh", "check"],
+                                         "cwd": "."}}}
+
+    @contextlib.contextmanager
+    def simulate(self, platform, found=()):
+        """found 是 PATH 上能找到的命令名到路径的映射；其余查找一律返回 None。"""
+        with patch.object(framework, "os", platform), \
+                patch.object(framework.shutil, "which", side_effect=lambda name: dict(found).get(name)):
+            yield
+
+    def test_posix_keeps_shell_entry_and_never_looks_for_powershell(self):
+        with patch.object(framework, "os", POSIX), \
+                patch.object(framework.shutil, "which", side_effect=AssertionError("不应查找 PowerShell")):
+            self.assertEqual(framework.entry(self.DATA, "ui-smoke", ["scripts/ui_smoke.sh"]),
+                             ["scripts/ui_smoke.sh"])
+            self.assertEqual(framework.entry(self.DATA, "ui-smoke", ["scripts/ui_smoke.sh"], self.OUT),
+                             ["scripts/ui_smoke.sh", "--out", self.OUT])
+
+    def test_windows_runs_powershell_script_with_out(self):
+        with self.simulate(WINDOWS, {"pwsh": r"C:\pwsh\pwsh.exe", "powershell": r"C:\ps\powershell.exe"}):
+            self.assertEqual(framework.entry(self.DATA, "ui-smoke", ["scripts/ui_smoke.sh"], self.OUT),
+                             [r"C:\pwsh\pwsh.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                              "-File", "scripts/ui_smoke_windows.ps1", "-Out", self.OUT])
+
+    def test_windows_falls_back_to_powershell_then_fails_without_either(self):
+        with self.simulate(WINDOWS, {"powershell": r"C:\ps\powershell.exe"}):
+            self.assertEqual(framework.entry(self.DATA, "ui-smoke", ["scripts/ui_smoke.sh"], self.OUT)[0],
+                             r"C:\ps\powershell.exe")
+        with self.simulate(WINDOWS), self.assertRaisesRegex(ValueError, "pwsh"):
+            framework.entry(self.DATA, "ui-smoke", ["scripts/ui_smoke.sh"], self.OUT)
+
+    def test_windows_default_out_follows_smoke_directory_convention(self):
+        with self.simulate(WINDOWS, {"pwsh": r"C:\pwsh\pwsh.exe"}):
+            argv = framework.entry(self.DATA, "ui-smoke", ["scripts/ui_smoke.sh"])
+        self.assertEqual(argv[-2], "-Out")
+        self.assertRegex(argv[argv.index("-Out") + 1], r"^\.ui-evidence/smoke/\d{8}T\d{6}Z-\d+$")
+
+    def test_windows_leaves_other_targets_on_the_bash_path(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "bash.exe").write_bytes(b"MZ")
+            with self.simulate(WINDOWS, {"pwsh": r"C:\pwsh\pwsh.exe"}), \
+                    patch.dict(os.environ, {"PATH": folder, "SYSTEMROOT": r"C:\Windows"}):
+                self.assertEqual(framework.entry(self.DATA, "graph-check", ["scripts/graphify.sh", "check"]),
+                                 [str(Path(folder) / "bash.exe"), "scripts/graphify.sh", "check"])
+
+    def test_run_spawns_the_resolved_entry_from_the_repo_root(self):
+        with self.simulate(WINDOWS, {"pwsh": r"C:\pwsh\pwsh.exe"}), \
+                patch.object(framework.subprocess, "run", return_value=SimpleNamespace(returncode=5)) as spawn:
+            self.assertEqual(framework.run(self.DATA, "ui-smoke", self.OUT), 5)
+        spawn.assert_called_once_with(
+            [r"C:\pwsh\pwsh.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", "scripts/ui_smoke_windows.ps1", "-Out", self.OUT], cwd=framework.ROOT, check=False)
+
+    def test_run_rejects_out_for_other_targets_or_outside_evidence_root(self):
+        with patch.object(framework.subprocess, "run") as spawn:
+            for target, out in (("graph-check", self.OUT), ("ui-smoke", "docs/evidence"),
+                                ("ui-smoke", ".ui-evidence-evil/x"), ("ui-smoke", ".ui-evidence/../x")):
+                with self.subTest(target=target, out=out), self.assertRaises(ValueError):
+                    framework.run(self.DATA, target, out)
+        spawn.assert_not_called()
+
+    def doctor(self, platform, found=()):
+        output = io.StringIO()
+        with self.simulate(platform, found), patch.object(framework, "config", return_value=self.DATA), \
+                patch.object(framework.sys, "argv", ["dev_framework.py", "doctor"]), \
+                contextlib.redirect_stdout(output):
+            code = framework.main()
+        return code, [line for line in output.getvalue().splitlines() if "ui-smoke" in line]
+
+    def test_doctor_checks_the_windows_script_and_shell_not_bash(self):
+        # PATH 上没有 bash：.sh 入口会 MISSING，而 ui-smoke 走 PowerShell 入口应 FOUND。
+        code, lines = self.doctor(WINDOWS, {"pwsh": r"C:\pwsh\pwsh.exe"})
+        self.assertEqual(lines, ["FOUND ui-smoke: 可执行文件；未运行"])
+        code, lines = self.doctor(WINDOWS)
+        self.assertEqual(code, 1)
+        self.assertRegex(lines[0], r"^MISSING ui-smoke: .*pwsh.*；未运行$")
+
+
 if __name__ == "__main__":
     unittest.main()
