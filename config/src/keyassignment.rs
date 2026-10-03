@@ -511,12 +511,44 @@ fn default_num_alphabet() -> String {
     "1234567890abcdefghilmnopqrstuvwxyz".to_string()
 }
 
+// fork: the English defaults double as i18n lookup keys. They are
+// translated when the overlay renders (see `InputSelector::localized_*`)
+// rather than when the action is parsed, so the interface language that
+// applies is the one in effect at display time.
+pub const INPUT_SELECTOR_DEFAULT_DESCRIPTION: &str =
+    "Select an item and press Enter = accept,  Esc = cancel,  / = filter";
+pub const INPUT_SELECTOR_DEFAULT_FUZZY_DESCRIPTION: &str = "Fuzzy matching: ";
+
 fn default_description() -> String {
-    "Select an item and press Enter = accept,  Esc = cancel,  / = filter".to_string()
+    INPUT_SELECTOR_DEFAULT_DESCRIPTION.to_string()
 }
 
 fn default_fuzzy_description() -> String {
-    "Fuzzy matching: ".to_string()
+    INPUT_SELECTOR_DEFAULT_FUZZY_DESCRIPTION.to_string()
+}
+
+impl InputSelector {
+    /// fork: the description to display; the built-in default follows
+    /// the interface language, a user-provided text is shown verbatim.
+    pub fn localized_description(&self) -> std::borrow::Cow<'_, str> {
+        localize_default(&self.description, INPUT_SELECTOR_DEFAULT_DESCRIPTION)
+    }
+
+    /// fork: like `localized_description`, for `fuzzy_description`.
+    pub fn localized_fuzzy_description(&self) -> std::borrow::Cow<'_, str> {
+        localize_default(
+            &self.fuzzy_description,
+            INPUT_SELECTOR_DEFAULT_FUZZY_DESCRIPTION,
+        )
+    }
+}
+
+fn localize_default<'a>(value: &'a str, default: &'static str) -> std::borrow::Cow<'a, str> {
+    if value == default {
+        crate::i18n::tr(default)
+    } else {
+        std::borrow::Cow::Borrowed(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, FromDynamic, ToDynamic)]

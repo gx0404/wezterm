@@ -116,7 +116,7 @@ impl SelectorState {
             },
         ];
         changes.extend(style.header(
-            &truncate_right(&self.args.description, max_width),
+            &truncate_right(&self.args.localized_description(), max_width),
             size.cols,
         ));
 
@@ -169,7 +169,11 @@ impl SelectorState {
 
         if self.filtering || !self.filter_term.is_empty() {
             changes.extend(style.prompt_line(&truncate_right(
-                &format!("{}{}", self.args.fuzzy_description, self.filter_term),
+                &format!(
+                    "{}{}",
+                    self.args.localized_fuzzy_description(),
+                    self.filter_term
+                ),
                 max_width,
             )));
         }

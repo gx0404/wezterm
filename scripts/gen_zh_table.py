@@ -716,6 +716,11 @@ PAIRS = [
     ("Tab Navigator", "标签页导航器"),
     ("Select an item and press Enter=launch  Esc=cancel  /=filter", "选择条目后 Enter=启动  Esc=取消  /=过滤"),
     ("Fuzzy matching: ", "模糊匹配："),
+    # ---- InputSelector 默认说明（渲染时按界面语言翻译）----
+    (
+        "Select an item and press Enter = accept,  Esc = cancel,  / = filter",
+        "选择条目后 Enter=确认  Esc=取消  /=过滤",
+    ),
     ("(default shell)", "（默认 shell）"),
     ("domain `{name}`", "域 `{name}`"),
     ("domain `{name}` - {label}", "域 `{name}` - {label}"),

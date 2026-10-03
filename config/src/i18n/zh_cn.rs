@@ -327,6 +327,7 @@ pub(crate) static ZH_CN: &[(&str, &str)] = &[
     ("Select Pane", "选择窗格"),
     ("Select Tab", "选择标签页"),
     ("Select Window", "选择窗口"),
+    ("Select an item and press Enter = accept,  Esc = cancel,  / = filter", "选择条目后 Enter=确认  Esc=取消  /=过滤"),
     ("Select an item and press Enter=launch  Esc=cancel  /=filter", "选择条目后 Enter=启动  Esc=取消  /=过滤"),
     ("Select: {input}  (type highlighted prefix to {action}, uppercase pastes, ESC to cancel)", "选择：{input}（输入高亮前缀即可{action}，大写前缀直接粘贴，ESC 取消）"),
     ("Selects text at the mouse cursor location using {mode}", "以 {mode} 方式选择鼠标位置处的文本"),

@@ -252,6 +252,43 @@ mod tests {
     }
 
     #[test]
+    fn input_selector_defaults_follow_ui_language() {
+        use crate::keyassignment::{
+            InputSelector, KeyAssignment, INPUT_SELECTOR_DEFAULT_DESCRIPTION,
+            INPUT_SELECTOR_DEFAULT_FUZZY_DESCRIPTION,
+        };
+        assert!(has_translation(INPUT_SELECTOR_DEFAULT_DESCRIPTION));
+        assert!(has_translation(INPUT_SELECTOR_DEFAULT_FUZZY_DESCRIPTION));
+
+        let mut selector = InputSelector {
+            action: Box::new(KeyAssignment::Nop),
+            title: String::new(),
+            choices: vec![],
+            fuzzy: false,
+            alphabet: String::new(),
+            description: INPUT_SELECTOR_DEFAULT_DESCRIPTION.to_string(),
+            fuzzy_description: INPUT_SELECTOR_DEFAULT_FUZZY_DESCRIPTION.to_string(),
+        };
+        set_lang(UiLanguage::ZhCn);
+        assert_eq!(
+            selector.localized_description(),
+            "选择条目后 Enter=确认  Esc=取消  /=过滤"
+        );
+        assert_eq!(selector.localized_fuzzy_description(), "模糊匹配：");
+
+        set_lang(UiLanguage::En);
+        assert_eq!(
+            selector.localized_description(),
+            INPUT_SELECTOR_DEFAULT_DESCRIPTION
+        );
+
+        // User-provided text is never translated
+        set_lang(UiLanguage::ZhCn);
+        selector.description = "Pick a workspace".to_string();
+        assert_eq!(selector.localized_description(), "Pick a workspace");
+    }
+
+    #[test]
     fn tr_falls_back_to_key() {
         // With an (initially) sparse table, unknown keys must fall back
         set_lang(UiLanguage::ZhCn);
