@@ -51,7 +51,10 @@ return {
       bottom = 8,
    },
    adjust_window_size_when_changing_font_size = false,
-   window_close_confirmation = 'NeverPrompt',
+   -- 关闭窗口先确认：点 X / Alt+F4 不再直接杀掉运行中的 herdr、agent 或编译。
+   -- 只剩空闲 Shell 的窗口仍一键关闭，名单见 config/general.lua 的
+   -- skip_close_confirmation_for_processes_named。
+   window_close_confirmation = 'AlwaysPrompt',
    window_frame = {
       active_titlebar_bg = '#090909',
       -- font = fonts.font,
