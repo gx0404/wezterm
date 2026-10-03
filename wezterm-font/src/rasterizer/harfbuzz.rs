@@ -14,6 +14,11 @@ use image::GenericImageView;
 
 pub struct HarfbuzzRasterizer {
     font: Font,
+    // fork: the per-font `scale` from the config, taken the same way as
+    // FreeTypeRasterizer and the shaper. COLRv1 glyphs (e.g. Win11 Segoe UI
+    // Emoji) rasterized here must honour it or they disagree with the shaped
+    // metrics and emoji drift/overflow.
+    scale: f64,
 }
 
 impl HarfbuzzRasterizer {
@@ -28,7 +33,10 @@ impl HarfbuzzRasterizer {
             font.set_synthetic_bold(0.02, 0.02, false);
         }
 
-        Ok(Self { font })
+        Ok(Self {
+            font,
+            scale: parsed.scale.unwrap_or(1.),
+        })
     }
 }
 
@@ -39,7 +47,11 @@ impl FontRasterizer for HarfbuzzRasterizer {
         size: f64,
         dpi: u32,
     ) -> anyhow::Result<RasterizedGlyph> {
-        let pixel_size = (size * dpi as f64 / 72.) as u32;
+        // fork: apply the per-font scale first and round the pixel size
+        // instead of truncating, closer to the fractional 26.6 size the
+        // FreeType path uses.
+        let size = size * self.scale;
+        let pixel_size = (size * dpi as f64 / 72.).round() as u32;
 
         let scale = pixel_size as i32 * 64;
         let ppem = pixel_size;
