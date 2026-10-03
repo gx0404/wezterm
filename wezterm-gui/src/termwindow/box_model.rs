@@ -1015,26 +1015,16 @@ impl super::TermWindow {
         layers: &mut TripleLayerQuadAllocator,
         inherited_colors: Option<&ElementColors>,
     ) -> anyhow::Result<()> {
-        let mut top_left_width = 0.;
-        let mut top_left_height = 0.;
-        let mut top_right_width = 0.;
-        let mut top_right_height = 0.;
-
-        let mut bottom_left_width = 0.;
-        let mut bottom_left_height = 0.;
-        let mut bottom_right_width = 0.;
-        let mut bottom_right_height = 0.;
-
         if let Some(c) = &element.border_corners {
-            top_left_width = c.top_left.width;
-            top_left_height = c.top_left.height;
-            top_right_width = c.top_right.width;
-            top_right_height = c.top_right.height;
+            let top_left_width = c.top_left.width;
+            let top_left_height = c.top_left.height;
+            let top_right_width = c.top_right.width;
+            let top_right_height = c.top_right.height;
 
-            bottom_left_width = c.bottom_left.width;
-            bottom_left_height = c.bottom_left.height;
-            bottom_right_width = c.bottom_right.width;
-            bottom_right_height = c.bottom_right.height;
+            let bottom_left_width = c.bottom_left.width;
+            let bottom_left_height = c.bottom_left.height;
+            let bottom_right_width = c.bottom_right.width;
+            let bottom_right_height = c.bottom_right.height;
 
             if top_left_width > 0. && top_left_height > 0. {
                 self.poly_quad(
@@ -1188,59 +1178,134 @@ impl super::TermWindow {
             return Ok(());
         }
 
+        // fork: the straight runs are computed by a pure helper so the
+        // per-edge width (notably `border.right`, which upstream read
+        // from `border.left`) is unit tested.
+        let edges = border_edge_rects(
+            element.border_rect,
+            &element.border,
+            &element.border_corners.unwrap_or_default(),
+        );
         if element.border.top > 0. && colors.border.top != LinearRgba::TRANSPARENT {
-            self.filled_rectangle(
-                layers,
-                0,
-                euclid::rect(
-                    element.border_rect.min_x() + top_left_width as f32,
-                    element.border_rect.min_y(),
-                    element.border_rect.width() - (top_left_width + top_right_width) as f32,
-                    element.border.top,
-                ),
-                colors.border.top,
-            )?;
+            self.filled_rectangle(layers, 0, edges.top, colors.border.top)?;
         }
         if element.border.bottom > 0. && colors.border.bottom != LinearRgba::TRANSPARENT {
-            self.filled_rectangle(
-                layers,
-                0,
-                euclid::rect(
-                    element.border_rect.min_x() + bottom_left_width as f32,
-                    element.border_rect.max_y() - element.border.bottom,
-                    element.border_rect.width() - (bottom_left_width + bottom_right_width) as f32,
-                    element.border.bottom,
-                ),
-                colors.border.bottom,
-            )?;
+            self.filled_rectangle(layers, 0, edges.bottom, colors.border.bottom)?;
         }
         if element.border.left > 0. && colors.border.left != LinearRgba::TRANSPARENT {
-            self.filled_rectangle(
-                layers,
-                0,
-                euclid::rect(
-                    element.border_rect.min_x(),
-                    element.border_rect.min_y() + top_left_height as f32,
-                    element.border.left,
-                    element.border_rect.height() - (top_left_height + bottom_left_height) as f32,
-                ),
-                colors.border.left,
-            )?;
+            self.filled_rectangle(layers, 0, edges.left, colors.border.left)?;
         }
         if element.border.right > 0. && colors.border.right != LinearRgba::TRANSPARENT {
-            self.filled_rectangle(
-                layers,
-                0,
-                euclid::rect(
-                    element.border_rect.max_x() - element.border.right,
-                    element.border_rect.min_y() + top_right_height as f32,
-                    element.border.left,
-                    element.border_rect.height() - (top_right_height + bottom_right_height) as f32,
-                ),
-                colors.border.right,
-            )?;
+            self.filled_rectangle(layers, 0, edges.right, colors.border.right)?;
         }
 
         Ok(())
+    }
+}
+
+/// The four straight border runs of an element, each trimmed by the
+/// corner pieces that sit at its two ends.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BorderEdgeRects {
+    pub top: RectF,
+    pub bottom: RectF,
+    pub left: RectF,
+    pub right: RectF,
+}
+
+/// Compute the straight border runs for `border_rect`.
+///
+/// Each run is as thick as its own side of `border` and is shortened
+/// at both ends by the size of the adjacent corner pieces so that it
+/// does not overdraw the corner graphics. Zero-sized corners (the
+/// default when an element has no `border_corners`) make the runs
+/// span the full edge.
+pub fn border_edge_rects(
+    border_rect: RectF,
+    border: &PixelDimension,
+    corners: &PixelCorners,
+) -> BorderEdgeRects {
+    BorderEdgeRects {
+        top: euclid::rect(
+            border_rect.min_x() + corners.top_left.width,
+            border_rect.min_y(),
+            border_rect.width() - (corners.top_left.width + corners.top_right.width),
+            border.top,
+        ),
+        bottom: euclid::rect(
+            border_rect.min_x() + corners.bottom_left.width,
+            border_rect.max_y() - border.bottom,
+            border_rect.width() - (corners.bottom_left.width + corners.bottom_right.width),
+            border.bottom,
+        ),
+        left: euclid::rect(
+            border_rect.min_x(),
+            border_rect.min_y() + corners.top_left.height,
+            border.left,
+            border_rect.height() - (corners.top_left.height + corners.bottom_left.height),
+        ),
+        right: euclid::rect(
+            border_rect.max_x() - border.right,
+            border_rect.min_y() + corners.top_right.height,
+            border.right,
+            border_rect.height() - (corners.top_right.height + corners.bottom_right.height),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod border_edge_tests {
+    use super::*;
+
+    fn corners(w: f32, h: f32) -> PixelCorners {
+        let piece = PixelSizedPoly {
+            poly: &[],
+            width: w,
+            height: h,
+        };
+        PixelCorners {
+            top_left: piece,
+            top_right: piece,
+            bottom_left: piece,
+            bottom_right: piece,
+        }
+    }
+
+    #[test]
+    fn each_run_uses_its_own_side_width() {
+        // 上游右边框误用 border.left；四边宽度各不相同时必须各取各的
+        let border = PixelDimension {
+            left: 1.,
+            top: 2.,
+            right: 3.,
+            bottom: 4.,
+        };
+        let rect: RectF = euclid::rect(10., 20., 100., 50.);
+        let edges = border_edge_rects(rect, &border, &PixelCorners::default());
+
+        assert_eq!(edges.top, euclid::rect(10., 20., 100., 2.));
+        assert_eq!(edges.bottom, euclid::rect(10., 66., 100., 4.));
+        assert_eq!(edges.left, euclid::rect(10., 20., 1., 50.));
+        assert_eq!(edges.right, euclid::rect(107., 20., 3., 50.));
+        assert_eq!(edges.right.width(), border.right);
+        assert_eq!(edges.right.max_x(), rect.max_x());
+    }
+
+    #[test]
+    fn runs_are_trimmed_by_corner_pieces() {
+        let border = PixelDimension {
+            left: 1.,
+            top: 1.,
+            right: 1.,
+            bottom: 1.,
+        };
+        let rect: RectF = euclid::rect(0., 0., 100., 50.);
+        let edges = border_edge_rects(rect, &border, &corners(8., 6.));
+
+        // 横向直边扣掉两角的宽，纵向直边扣掉两角的高
+        assert_eq!(edges.top, euclid::rect(8., 0., 84., 1.));
+        assert_eq!(edges.bottom, euclid::rect(8., 49., 84., 1.));
+        assert_eq!(edges.left, euclid::rect(0., 6., 1., 38.));
+        assert_eq!(edges.right, euclid::rect(99., 6., 1., 38.));
     }
 }
