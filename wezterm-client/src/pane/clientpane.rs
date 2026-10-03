@@ -522,6 +522,13 @@ impl Pane for ClientPane {
     }
 
     fn mouse_event(&self, event: MouseEvent) -> anyhow::Result<()> {
+        // fork: the side buttons are newer MouseButton variants that a
+        // server speaking the same codec version but built from upstream
+        // cannot decode; sending one would break the session. Bindings on
+        // them still work locally, they just are not reported remotely.
+        if !remote_mouse_button(event.button) {
+            return Ok(());
+        }
         self.mouse.lock().append(event);
         if MouseState::next(Arc::clone(&self.mouse)) {
             self.renderable.lock().inner.borrow_mut().update_last_send();
@@ -658,5 +665,37 @@ impl std::io::Write for PaneWriter {
 
     fn flush(&mut self) -> Result<(), std::io::Error> {
         Ok(())
+    }
+}
+
+/// fork: whether a mouse button may be sent to the remote mux; see
+/// `ClientPane::mouse_event`.
+fn remote_mouse_button(button: wezterm_term::MouseButton) -> bool {
+    use wezterm_term::MouseButton;
+    !matches!(button, MouseButton::X1 | MouseButton::X2)
+}
+
+// fork: covers remote_mouse_button
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wezterm_term::MouseButton;
+
+    #[test]
+    fn side_buttons_stay_local() {
+        assert!(!remote_mouse_button(MouseButton::X1));
+        assert!(!remote_mouse_button(MouseButton::X2));
+        for button in [
+            MouseButton::Left,
+            MouseButton::Middle,
+            MouseButton::Right,
+            MouseButton::WheelUp(1),
+            MouseButton::WheelDown(1),
+            MouseButton::WheelLeft(1),
+            MouseButton::WheelRight(1),
+            MouseButton::None,
+        ] {
+            assert!(remote_mouse_button(button), "{:?}", button);
+        }
     }
 }

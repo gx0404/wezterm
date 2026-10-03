@@ -20,6 +20,14 @@ pub enum MouseButton {
     WheelLeft(usize),
     WheelRight(usize),
     None,
+    // fork: the extended buttons are appended after `None` on purpose.
+    // The mux codec serializes this enum with bincode by variant index
+    // and `None` accompanies every mouse move, so existing indices must
+    // stay put for peers speaking the same CODEC_VERSION.
+    /// The first extended ("back") button, reported as xterm button 8
+    X1,
+    /// The second extended ("forward") button, reported as xterm button 9
+    X2,
 }
 
 #[cfg_attr(feature = "use_serde", derive(Deserialize, Serialize))]

@@ -232,6 +232,11 @@ impl Pane for TermWizTerminalPane {
     }
 
     fn mouse_event(&self, event: MouseEvent) -> anyhow::Result<()> {
+        // fork: termwiz has no side buttons; forwarding their press or
+        // release would reach the overlay as a buttonless move.
+        if is_side_button_click(&event) {
+            return Ok(());
+        }
         let event = InputEvent::Mouse(TermWizMouseEvent {
             x: event.x as u16,
             y: event.y as u16,
@@ -317,7 +322,17 @@ fn termwiz_mouse_buttons(event: &MouseEvent) -> termwiz::input::MouseButtons {
         MouseButton::WheelLeft(_) => Buttons::HORZ_WHEEL | Buttons::WHEEL_POSITIVE,
         MouseButton::WheelRight(_) => Buttons::HORZ_WHEEL,
         MouseButton::None => Buttons::NONE,
+        // fork: termwiz has no bits for the side buttons
+        MouseButton::X1 | MouseButton::X2 => Buttons::NONE,
     }
+}
+
+/// fork: a press or release of a side button, which overlays drop
+fn is_side_button_click(event: &MouseEvent) -> bool {
+    use wezterm_term::input::{MouseButton, MouseEventKind};
+
+    matches!(event.kind, MouseEventKind::Press | MouseEventKind::Release)
+        && matches!(event.button, MouseButton::X1 | MouseButton::X2)
 }
 
 pub struct TermWizTerminal {
@@ -646,6 +661,38 @@ mod tests {
             termwiz_mouse_buttons(&event(MouseEventKind::Move, MouseButton::None)),
             Buttons::NONE
         );
+    }
+
+    #[test]
+    fn side_buttons_have_no_termwiz_bits() {
+        for button in [MouseButton::X1, MouseButton::X2] {
+            for kind in [
+                MouseEventKind::Press,
+                MouseEventKind::Release,
+                MouseEventKind::Move,
+            ] {
+                assert_eq!(termwiz_mouse_buttons(&event(kind, button)), Buttons::NONE);
+            }
+        }
+    }
+
+    #[test]
+    fn side_button_clicks_are_dropped_by_overlays() {
+        for button in [MouseButton::X1, MouseButton::X2] {
+            assert!(is_side_button_click(&event(MouseEventKind::Press, button)));
+            assert!(is_side_button_click(&event(
+                MouseEventKind::Release,
+                button
+            )));
+        }
+        assert!(!is_side_button_click(&event(
+            MouseEventKind::Press,
+            MouseButton::Left
+        )));
+        assert!(!is_side_button_click(&event(
+            MouseEventKind::Move,
+            MouseButton::None
+        )));
     }
 
     #[test]

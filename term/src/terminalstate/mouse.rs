@@ -4,12 +4,35 @@ use crate::TerminalState;
 use anyhow::bail;
 use std::io::Write;
 
+/// fork: the xterm button number before modifier and motion bits are
+/// added. The extended buttons X1/X2 (xterm buttons 8/9) live in the
+/// 128+ range, which is why the reported code no longer fits an `i8`.
+fn button_base_code(button: MouseButton) -> u16 {
+    match button {
+        MouseButton::None => 3,
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+        MouseButton::WheelUp(_) => 64,
+        MouseButton::WheelDown(_) => 65,
+        MouseButton::WheelLeft(_) => 66,
+        MouseButton::WheelRight(_) => 67,
+        MouseButton::X1 => 128,
+        MouseButton::X2 => 129,
+    }
+}
+
 impl TerminalState {
     /// Encode a coordinate value using X10 encoding or Utf8 encoding.
     /// Out of bounds coords are reported as the 0 byte value.
     fn encode_coord(&self, value: i64, dest: &mut Vec<u8>) {
         // Convert to 1-based and offset into the printable character range
-        let value = value + 1 + 32;
+        self.encode_x10_value(value + 1 + 32, dest);
+    }
+
+    /// fork: shared by coordinates and the button byte so that button
+    /// codes >= 0x80 (X1/X2) are UTF-8 encoded in mode 1005, as xterm does.
+    fn encode_x10_value(&self, value: i64, dest: &mut Vec<u8>) {
         if self.mouse_encoding == MouseEncoding::Utf8 {
             if value < 0x800 {
                 let mut utf8 = [0; 2];
@@ -30,8 +53,9 @@ impl TerminalState {
         }
     }
 
-    fn encode_x10_or_utf8(&mut self, event: MouseEvent, button: i8) -> anyhow::Result<()> {
-        let mut buf = vec![b'\x1b', b'[', b'M', (32 + button) as u8];
+    fn encode_x10_or_utf8(&mut self, event: MouseEvent, button: u16) -> anyhow::Result<()> {
+        let mut buf = vec![b'\x1b', b'[', b'M'];
+        self.encode_x10_value(32 + i64::from(button), &mut buf);
         self.encode_coord(event.x as i64, &mut buf);
         self.encode_coord(event.y, &mut buf);
         log::trace!("{event:?} {buf:?}");
@@ -40,7 +64,7 @@ impl TerminalState {
         Ok(())
     }
 
-    fn mouse_report_button_number(&self, event: &MouseEvent) -> (i8, MouseButton) {
+    fn mouse_report_button_number(&self, event: &MouseEvent) -> (u16, MouseButton) {
         let button = match event.button {
             MouseButton::None => self
                 .current_mouse_buttons
@@ -49,16 +73,7 @@ impl TerminalState {
                 .unwrap_or(MouseButton::None),
             b => b,
         };
-        let mut code = match button {
-            MouseButton::None => 3,
-            MouseButton::Left => 0,
-            MouseButton::Middle => 1,
-            MouseButton::Right => 2,
-            MouseButton::WheelUp(_) => 64,
-            MouseButton::WheelDown(_) => 65,
-            MouseButton::WheelLeft(_) => 66,
-            MouseButton::WheelRight(_) => 67,
-        };
+        let mut code = button_base_code(button);
 
         if event.modifiers.contains(KeyModifiers::SHIFT) {
             code += 4;
@@ -359,6 +374,31 @@ impl TerminalState {
                 kind: MouseEventKind::Move,
                 ..
             } => self.mouse_move(event),
+        }
+    }
+}
+
+// fork: pins the xterm button code table, including X1/X2 (8/9)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn button_base_codes_follow_xterm() {
+        let table = [
+            (MouseButton::Left, 0),
+            (MouseButton::Middle, 1),
+            (MouseButton::Right, 2),
+            (MouseButton::None, 3),
+            (MouseButton::WheelUp(1), 64),
+            (MouseButton::WheelDown(1), 65),
+            (MouseButton::WheelLeft(1), 66),
+            (MouseButton::WheelRight(1), 67),
+            (MouseButton::X1, 128),
+            (MouseButton::X2, 129),
+        ];
+        for (button, code) in table {
+            assert_eq!(button_base_code(button), code, "{button:?}");
         }
     }
 }
