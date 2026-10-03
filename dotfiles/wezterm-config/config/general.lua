@@ -3,12 +3,16 @@ local platform = require('utils.platform')
 -- 空闲 shell 窗格关闭时不弹确认；窗格里的每个进程都在名单内才算空闲。Windows 进程名带
 -- .exe，上游默认名单（zsh、bash……）匹配不到，这里补上；MSYS2 的 env.exe 会作为 bash
 -- 的父进程留在窗格里；GX Zsh 的 Powerlevel10k 在 zsh 下常驻 gitstatusd（安装包
--- lib/gitstatus 里的文件没有扩展名）。herdr 等其他进程仍需确认。
+-- lib/gitstatus 里的文件没有扩展名）；WSL 窗格里 wsl.exe 与 wslhost.exe 只是桥接进程，
+-- 里面跑什么由 WSL 侧决定，空闲时同样算空闲。herdr 等其他进程仍需确认。
+--
+-- 关于 prefer_egl：Windows 默认 false（WGL，缩放更顺滑），本配置不设置它；
+-- true（EGL/ANGLE）只用于渲染问题的 A/B 实验，不要写进这里。
 local skip_close_confirmation = nil
 if platform.is_win then
    skip_close_confirmation = {
       'bash', 'sh', 'zsh', 'fish', 'tmux', 'nu', 'nu.exe', 'cmd.exe', 'pwsh.exe', 'powershell.exe',
-      'zsh.exe', 'bash.exe', 'sh.exe', 'fish.exe', 'gx-zsh.exe', 'env.exe',
+      'zsh.exe', 'bash.exe', 'sh.exe', 'fish.exe', 'gx-zsh.exe', 'env.exe', 'wsl.exe', 'wslhost.exe',
       'gitstatusd-msys_nt-10.0-x86_64', 'gitstatusd-msys_nt-10.0-x86_64.exe',
    }
 end

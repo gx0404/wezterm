@@ -466,6 +466,8 @@ do
    local expected = {
       'bash', 'sh', 'zsh', 'fish', 'tmux', 'nu', 'nu.exe', 'cmd.exe', 'pwsh.exe', 'powershell.exe',
       'zsh.exe', 'bash.exe', 'sh.exe', 'fish.exe', 'gx-zsh.exe', 'env.exe',
+      -- WSL 桥接进程：窗格里只剩它们时视为空闲
+      'wsl.exe', 'wslhost.exe',
       -- GX Zsh 的 Powerlevel10k 在 zsh 下常驻（安装包 lib/gitstatus 里的文件名，无扩展名）
       'gitstatusd-msys_nt-10.0-x86_64',
    }
