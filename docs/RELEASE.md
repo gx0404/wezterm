@@ -57,7 +57,10 @@ checkout 并递归初始化子模块，再调用此入口。脏检查只统计�
 不可用 GX Shell 的版本替代。集成侧分别记录两仓身份，并校验 `source_dirty=false`、
 `platform`、`architecture`、`product_version`、`resource_version`、`binaries`；
 deb 另外消费 `deb_depends` 与 `linux_compatibility`。原有 stage 布局保持不变。
-Windows 需要 MSVC、Perl、Rust >= 1.89、Inno Setup >= 7.1（长插件路径支持）；可用
+Windows 需要 MSVC、Rust >= 1.89、Inno Setup >= 7.1（长插件路径支持）；NASM 3.02 与
+Strawberry Perl 经 `make setup` 钉版装进仓内 `.local/tools/`（`scripts\gx_msvc_env.cmd`
+只认仓内工具），且仓库路径必须纯 ASCII（非 ASCII 路径会让 Perl/nmake 把 OpenSSL
+产物写进乱码目录）。Inno 编译器可用
 `winget install --id JRSoftware.InnoSetup.7 --exact --version 7.1.0 --scope user`
 安装编译器，非标准位置通过 `ISCC` 指定。Linux 原生构建基线固定 Ubuntu 20.04
 amd64，先安装 Rust，再执行根 `get-deps`；打包还需 pkg-config、binutils。

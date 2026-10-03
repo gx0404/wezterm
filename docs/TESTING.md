@@ -21,17 +21,19 @@
 ## Windows 本地验收前置
 
 在 Visual Studio 的 x64 Native Tools 命令提示符中运行，确保 `cl`、`nmake`、
-SDK、Strawberry Perl 和 nextest 可用。也可以从任意 shell 用
-`scripts\gx_msvc_env.cmd <命令>` 进入同一环境（自动把 Git for Windows、
+SDK、Strawberry Perl、NASM 和 nextest 可用。NASM 与 Strawberry Perl 由
+`make setup`（`scripts/setup_env.sh`）钉版装进仓内 `.local/tools/`，不使用系统级
+安装；Build Tools 2022、SDK 与 Inno Setup 7.1 仍需人工安装。也可以从任意 shell 用
+`scripts\gx_msvc_env.cmd <命令>` 进入同一环境（自动把 Git for Windows 与仓内
 NASM 3.02、Strawberry Perl 排到 MSYS2 之前，产物目录固定 `target-gx-msvc/`）：
+该脚本只认仓内 `.local/tools/` 下的 NASM/Perl，缺失时提示先运行 `make setup`。
 MSYS2 的 `git` 若排在前面，`gx_package.py` 会因 POSIX 路径误报
-「must be an independent Git checkout」。本机实测缺的只有 NASM 与 Strawberry Perl，
-可 `winget install NASM.NASM` / `winget install StrawberryPerl.StrawberryPerl`
-补齐（Build Tools 2022、SDK 10.0.26100、Inno Setup 7.1 已就位）。Rust 版本以 `scripts/gx_package.py` 为准，
+「must be an independent Git checkout」。仓库路径必须纯 ASCII：非 ASCII 路径会让
+Perl/nmake 把 OpenSSL 产物写进乱码目录（2026-10-03 实测）。Rust 版本以 `scripts/gx_package.py` 为准，
 nextest 版本以 `scripts/setup_env.sh` 为准；只通过当前进程环境选择工具，不修改
 用户全局默认工具链。
 
-中文仓库路径配合非 UTF-8 系统代码页时，还需要：
+纯 ASCII 路径是硬前提；以下两项只是针对非 UTF-8 系统代码页的双保险：
 
 - C/C++ 编译参数追加 `/utf-8`，否则 OpenSSL 头文件预处理输出的路径可能不是
   UTF-8，导致 `openssl-sys` 解析失败；这与 RC 模板中的 UTF-8 声明是不同层。
