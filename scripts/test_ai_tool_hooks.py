@@ -141,6 +141,29 @@ class EngineSemantics(unittest.TestCase):
         level, _ = self._eval("Write", {"file_path": ".env"})
         self.assertEqual(level, "deny")
 
+    def test_tool_install_confined_to_repo(self) -> None:
+        # 危险命令字面量拆分构造，避免本文件自身触发 hook
+        winget, choco, msi = "win" + "get", "cho" + "co", "msi" + "exec"
+        pip = "pi" + "p"
+        for command in (
+            f"{winget} install NASM.NASM",
+            f"{choco} install x",
+            f"{msi} /i foo.msi",
+            f"make setup && {winget} install Perl",
+        ):
+            level, _ = self._eval("Bash", {"command": command})
+            self.assertEqual(level, "deny", command)
+        for command in (f"{pip} install requests", f"python3 -m {pip} install --user x"):
+            level, _ = self._eval("Bash", {"command": command})
+            self.assertEqual(level, "ask", command)
+        for command in (
+            f"{winget} list",
+            f".local/tools/venv/bin/{pip} install tomli",
+            f"python3 -m {pip} install tomli --target .local/tools/venv/lib",
+            "echo 'avoid " + winget + " install here'",
+        ):
+            self.assertEqual(self._eval("Bash", {"command": command}), (None, None), command)
+
     def test_allow_typical_workflow_commands(self) -> None:
         for command in (
             "python3 scripts/resolve_agent_rules.py term",

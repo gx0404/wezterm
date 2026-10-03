@@ -40,6 +40,14 @@
   也不得依赖指向仓外的外部环境变量默认值；不经 make 直接调用 cargo/脚本构建
   的会话同样受此约束。用户级共享层（rustup 工具链本体、`~/.cargo` 依赖源
   缓存）不是构建产物，不在此列。
+- **工具安装仓内封闭**：agent 为本仓安装的任何工具（汇编器、Perl、格式化器、
+  测试运行器、解释器等）只能经 `scripts/setup_env.sh` 钉版（URL + sha256）装进
+  `.local/tools/`；禁止用 winget/choco/scoop/msiexec/`pip --user` 等装到系统级
+  或用户级的仓外路径（hook 在 `dangerous_patterns.conf` 拦截）。VS Build Tools、
+  Windows SDK、Inno Setup 这类无法仓内化的系统组件由人类安装，并在
+  `docs/MAKE_COMMANDS.md`/`docs/TESTING.md`/`docs/RELEASE.md` 登记。仓库路径必须
+  纯 ASCII：Windows 原生构建链（Strawberry Perl/nmake 等）对非 ASCII 路径有
+  编码问题。
 - **并行会话防双写**：写入仓库前复查并行信号（untracked/修改清单短间隔
   增长、出现非本轮新建的产物目录）；发现并行推进即转只读验收 + 逐项声明
   的外科修复，不双写。判定进度用 ctime 或文件清单快照，不信 mtime

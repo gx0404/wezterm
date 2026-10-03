@@ -119,6 +119,8 @@ python3 scripts/resolve_agent_rules.py --check                   # 闭集/体积
 - **依赖纪律**：新依赖必须走根 `Cargo.toml` 的 `[workspace.dependencies]` 并
   过 `deny.toml` 许可检查；生成数据表只能经各自 codegen/同步工具重建，不手改
   （build-ci-release.md、code-comments.md）。
+- **工具安装纪律**：工具只许经 `scripts/setup_env.sh` 钉版装进 `.local/tools/`，
+  禁止 winget/choco/scoop 等系统级安装；仓库路径须纯 ASCII（development.md）。
 - **生成物纪律**：受控产物（shell 补全、键表 markdown、docs 索引、图谱、KB）
   默认只检查（`make generated-check / graph-check / kb-check`），有意变更才
   重建并审 diff（development.md）。
