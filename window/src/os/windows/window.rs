@@ -275,6 +275,9 @@ pub(crate) struct WindowInner {
     next_paint_deadline: Option<Instant>,
     /// 回退路径的代数计数，让过期的 async_io 回调不会提前结束新一轮节流
     throttle_generation: u64,
+    /// fork: period of the WM_TIMER that stands in for the frame timer while
+    /// DefWindowProc runs the modal move/size loop; None when not armed
+    size_move_timer_ms: Option<u32>,
     /// fork: 首帧 present 之前不执行 ShowWindow，避免 DWM 合成未初始化的
     /// 表面产生白帧；挂起的 show 命令存在 pending_show，兜底定时器由
     /// show_fallback_armed 保证只装一次
@@ -523,6 +526,9 @@ impl WindowInner {
 
     /// fork: 帧定时器到期时由 Connection 在主线程调用。`cutoff` 之前到期的
     /// 窗口结束节流并报告是否需要补发重绘；未到期的交回 deadline 供重设
+    // fork: also called from wm_paint and from the modal-loop WM_TIMER, as
+    // the frame timer is not serviced while DefWindowProc runs a move/size
+    // loop. Releasing an already released throttle is a no-op (Idle).
     pub(crate) fn frame_timer_tick(&mut self, cutoff: Instant) -> FrameTick {
         match self.next_paint_deadline {
             None => FrameTick::Idle,
@@ -533,6 +539,44 @@ impl WindowInner {
                 FrameTick::Expired {
                     invalidate: self.invalidated,
                 }
+            }
+        }
+    }
+
+    /// fork: (re)arm the WM_TIMER that paces frames during the modal
+    /// move/size loop. Calling SetTimer again with the same id only resets
+    /// the period, which is how a max_fps reload or a move to a monitor with
+    /// another refresh rate takes effect mid-drag.
+    fn arm_size_move_timer(&mut self) {
+        let elapse = size_move_timer_elapse_ms(self.frame_interval());
+        if self.size_move_timer_ms == Some(elapse) {
+            return;
+        }
+        let ok = unsafe {
+            SetCoalescableTimer(
+                self.hwnd.0,
+                SIZE_MOVE_FRAME_TIMER_ID,
+                elapse,
+                None,
+                TIMERV_NO_COALESCING,
+            )
+        };
+        if ok == 0 {
+            log::warn!(
+                "SetCoalescableTimer failed: {}; output may not refresh while \
+                 the window is being moved or sized",
+                IoError::last_os_error()
+            );
+            self.size_move_timer_ms = None;
+            return;
+        }
+        self.size_move_timer_ms = Some(elapse);
+    }
+
+    fn disarm_size_move_timer(&mut self) {
+        if self.size_move_timer_ms.take().is_some() {
+            unsafe {
+                KillTimer(self.hwnd.0, SIZE_MOVE_FRAME_TIMER_ID);
             }
         }
     }
@@ -836,6 +880,7 @@ impl Window {
             frame_start: Instant::now(),
             next_paint_deadline: None,
             throttle_generation: 0,
+            size_move_timer_ms: None,
             first_frame_presented: false,
             pending_show: None,
             show_fallback_armed: false,
@@ -2521,12 +2566,62 @@ unsafe fn wm_enter_exit_size_move(
         let mut inner = inner.borrow_mut();
         inner.in_size_move = msg == WM_ENTERSIZEMOVE;
         should_size = !inner.in_size_move;
+        // fork: the modal loop starves Connection::wait_message, and with it
+        // the frame timer; see wm_timer
+        if inner.in_size_move {
+            inner.arm_size_move_timer();
+        } else {
+            inner.disarm_size_move_timer();
+        }
     }
 
     if should_size {
         wm_size(hwnd, 0, 0, 0)?;
     }
 
+    Some(0)
+}
+
+/// fork: DefWindowProc runs its own message loop while the window is being
+/// moved or sized, so Connection::wait_message, and the frame timer it
+/// waits on, stop running and the max_fps throttle is never released.
+/// This WM_TIMER, armed only for the duration of that loop, stands in for
+/// it: pump the spawn queue (a pure move produces no WM_SIZING/WM_SIZE that
+/// would otherwise do so, leaving pane output undelivered) and release the
+/// throttle once it is due. Once the loop exits, wait_message takes over
+/// again; the frame timer stays signaled until then.
+unsafe fn wm_timer(hwnd: HWND, _msg: UINT, wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
+    if wparam != SIZE_MOVE_FRAME_TIMER_ID {
+        return None;
+    }
+    let inner = rc_from_hwnd(hwnd)?;
+    let in_size_move = match inner.try_borrow() {
+        Ok(inner) => inner.in_size_move,
+        // busy: try again on the next tick
+        Err(_) => return Some(0),
+    };
+    if !in_size_move {
+        // KillTimer does not remove a WM_TIMER that was already posted
+        return Some(0);
+    }
+
+    crate::spawn::SPAWN_QUEUE.run();
+
+    let invalidate = match inner.try_borrow_mut() {
+        Ok(mut inner) => {
+            inner.arm_size_move_timer();
+            let elapse = inner.size_move_timer_ms.unwrap_or(USER_TIMER_MINIMUM);
+            let cutoff = size_move_tick_cutoff(Instant::now(), elapse);
+            matches!(
+                inner.frame_timer_tick(cutoff),
+                FrameTick::Expired { invalidate: true }
+            )
+        }
+        Err(_) => false,
+    };
+    if invalidate {
+        InvalidateRect(hwnd, null(), 0);
+    }
     Some(0)
 }
 
@@ -2762,6 +2857,97 @@ pub(crate) fn effective_frame_interval(
     std::time::Duration::from_secs_f64(1.0 / fps as f64)
 }
 
+/// fork: WM_TIMER id of the modal move/size loop frame pacer (see wm_timer)
+const SIZE_MOVE_FRAME_TIMER_ID: usize = 0x6672_6d74;
+
+/// fork: WM_TIMER period that paces frames inside the modal move/size loop:
+/// the frame interval rounded up to whole milliseconds, so that one frame
+/// per tick never exceeds max_fps, clamped to the range SetTimer honors
+/// (it silently raises anything below USER_TIMER_MINIMUM to 10ms).
+fn size_move_timer_elapse_ms(interval: std::time::Duration) -> u32 {
+    let ms = interval.as_nanos().div_ceil(1_000_000);
+    ms.clamp(USER_TIMER_MINIMUM as u128, USER_TIMER_MAXIMUM as u128) as u32
+}
+
+/// fork: a modal-loop tick releases the throttle when the deadline is
+/// nearer to this tick than to the next one; otherwise a deadline that
+/// trails a tick by a fraction of a millisecond (the paint itself starts a
+/// little after the tick) would slip a whole period and halve the frame
+/// rate.
+fn size_move_tick_cutoff(now: Instant, elapse_ms: u32) -> Instant {
+    now + std::time::Duration::from_millis(u64::from(elapse_ms)) / 2
+}
+
+#[cfg(test)]
+mod size_move_timer_tests {
+    use super::{effective_frame_interval, size_move_tick_cutoff, size_move_timer_elapse_ms};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn elapse_rounds_up_to_whole_milliseconds() {
+        assert_eq!(
+            size_move_timer_elapse_ms(Duration::from_secs_f64(1.0 / 60.0)),
+            17
+        );
+        assert_eq!(
+            size_move_timer_elapse_ms(Duration::from_secs_f64(1.0 / 30.0)),
+            34
+        );
+        assert_eq!(size_move_timer_elapse_ms(Duration::from_millis(20)), 20);
+        assert_eq!(size_move_timer_elapse_ms(Duration::from_secs(1)), 1000);
+    }
+
+    #[test]
+    fn elapse_is_clamped_to_user_timer_range() {
+        // 144fps (6.9ms) and the 1ms floor of effective_frame_interval are
+        // below USER_TIMER_MINIMUM
+        assert_eq!(
+            size_move_timer_elapse_ms(Duration::from_secs_f64(1.0 / 144.0)),
+            10
+        );
+        assert_eq!(size_move_timer_elapse_ms(Duration::from_millis(1)), 10);
+        assert_eq!(size_move_timer_elapse_ms(Duration::ZERO), 10);
+        assert_eq!(size_move_timer_elapse_ms(Duration::MAX), 0x7FFF_FFFF);
+    }
+
+    #[test]
+    fn steady_ticks_release_one_frame_per_tick_without_exceeding_max_fps() {
+        let t0 = Instant::now();
+        for fps in [1, 24, 30, 60, 75, 120, 144, 165, 240, 1000] {
+            let interval = effective_frame_interval(fps, false, None);
+            let elapse = size_move_timer_elapse_ms(interval);
+            // one frame per tick is never faster than max_fps
+            assert!(
+                Duration::from_millis(u64::from(elapse)) >= interval,
+                "max_fps={}",
+                fps
+            );
+            // a frame painted shortly after a tick is due by the next tick
+            let paint_start = t0 + Duration::from_micros(500);
+            let deadline = paint_start + interval;
+            let next_tick = t0 + Duration::from_millis(u64::from(elapse));
+            assert!(
+                deadline <= size_move_tick_cutoff(next_tick, elapse),
+                "max_fps={}",
+                fps
+            );
+        }
+    }
+
+    #[test]
+    fn tick_never_releases_more_than_half_a_period_early() {
+        let now = Instant::now();
+        assert_eq!(
+            size_move_tick_cutoff(now, 17) - now,
+            Duration::from_micros(8500)
+        );
+        assert_eq!(
+            size_move_tick_cutoff(now, 10) - now,
+            Duration::from_millis(5)
+        );
+    }
+}
+
 #[cfg(test)]
 mod frame_interval_tests {
     use super::effective_frame_interval;
@@ -2830,6 +3016,13 @@ mod frame_interval_tests {
 unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
     let inner = rc_from_hwnd(hwnd)?;
     let mut inner = inner.borrow_mut();
+
+    if inner.paint_throttled {
+        // fork: a deadline that has already passed may simply not have been
+        // serviced yet (always the case inside the modal move/size loop);
+        // release it here instead of swallowing a paint that is due
+        inner.frame_timer_tick(Instant::now());
+    }
 
     if inner.paint_throttled {
         // fork: 节流期间必须把更新区域验证掉，否则 Win32 会在消息队列
@@ -4555,6 +4748,7 @@ unsafe fn do_wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> 
         WM_NCHITTEST => wm_nchittest(hwnd, msg, wparam, lparam),
         WM_PAINT => wm_paint(hwnd, msg, wparam, lparam),
         WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE => wm_enter_exit_size_move(hwnd, msg, wparam, lparam),
+        WM_TIMER => wm_timer(hwnd, msg, wparam, lparam),
         WM_WINDOWPOSCHANGED => wm_windowposchanged(hwnd, msg, wparam, lparam),
         WM_SETFOCUS => wm_set_focus(hwnd, msg, wparam, lparam),
         WM_KILLFOCUS => wm_kill_focus(hwnd, msg, wparam, lparam),
