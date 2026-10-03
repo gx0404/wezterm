@@ -17,4 +17,4 @@ This option controls whether wezterm should attempt to use
 | macOS       | Use [MetalANGLE](https://github.com/kakashidinho/metalangle) libEGL.dylib if installed alongside the `wezterm-gui` executable.  Some versions of wezterm shipped with this configuration which translated OpenGL calls to [Metal](https://en.wikipedia.org/wiki/Metal_%28API%29) | Use Core OpenGL API (CGL).  Since BigSur, CGL uses Metal APIs. |
 | Windows     | Use [ANGLE](https://chromium.googlesource.com/angle/angle) to translate OpenGL calls to Direct3D, which makes wezterm more robust if you upgrade your graphics card drivers. | Use the OpenGL implementation provided by your graphics card vendor |
 
-The default is `true`.
+The default is `false` on Windows and `true` on other platforms.

@@ -561,6 +561,7 @@ pub struct Config {
     /// EGL on Windows has jankier resize behavior than WGL (which
     /// is used if EGL is unavailable), but EGL survives graphics
     /// driver updates without breaking and losing your work.
+    /// Defaults to `false` on Windows and `true` on other platforms.
     #[dynamic(default = "default_prefer_egl")]
     pub prefer_egl: bool,
 
@@ -896,8 +897,9 @@ pub struct Config {
 
     /// If enabled, a bell (BEL) received while the window is unfocused
     /// asks the window manager / operating system to draw attention to
-    /// the window (the X11 urgency hint, taskbar flashing, or a dock
-    /// bounce). Defaults to `false`.
+    /// the window (the X11 urgency hint or a dock bounce; Windows taskbar
+    /// flashing is planned but not implemented yet, and Wayland has no
+    /// standard mechanism). Defaults to `false`.
     #[dynamic(default)]
     pub bell_requests_attention: bool,
 
