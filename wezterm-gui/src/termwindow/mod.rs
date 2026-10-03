@@ -92,6 +92,7 @@ mod mouseevent;
 pub mod palette;
 pub mod paneselect;
 mod prevcursor;
+mod quit_confirm;
 pub mod render;
 pub mod resize;
 mod selection;
@@ -3302,24 +3303,36 @@ impl TermWindow {
                 let config = &self.config;
                 log::info!("QuitApplication over here (window)");
 
-                match config.window_close_confirmation {
-                    WindowCloseConfirmation::NeverPrompt => {
-                        let con = Connection::get().expect("call on gui thread");
-                        con.terminate_message_loop();
-                    }
-                    WindowCloseConfirmation::AlwaysPrompt => {
-                        let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
-                            Some(tab) => tab,
-                            None => anyhow::bail!("no active tab!?"),
-                        };
+                // fork: like close_requested, skip the confirmation when
+                // every pane in every mux window is an idle shell
+                // (skip_close_confirmation_for_processes_named); see
+                // quit_confirm.rs. The iterator is lazy: NeverPrompt never
+                // probes process lists and AlwaysPrompt stops at the first
+                // stateful window.
+                let windows_can_close = mux.iter_windows().into_iter().map(|window_id| {
+                    mux.get_window(window_id)
+                        .map_or(true, |w| w.can_close_without_prompting())
+                });
+                let needs_confirmation = quit_confirm::quit_needs_confirmation(
+                    config.window_close_confirmation,
+                    windows_can_close,
+                );
 
-                        let window = self.window.clone().unwrap();
-                        let (overlay, future) = start_overlay(self, &tab, move |tab_id, term| {
-                            confirm_quit_program(term, window, tab_id)
-                        });
-                        self.assign_overlay(tab.tab_id(), overlay);
-                        promise::spawn::spawn(future).detach();
-                    }
+                if !needs_confirmation {
+                    let con = Connection::get().expect("call on gui thread");
+                    con.terminate_message_loop();
+                } else {
+                    let tab = match mux.get_active_tab_for_window(self.mux_window_id) {
+                        Some(tab) => tab,
+                        None => anyhow::bail!("no active tab!?"),
+                    };
+
+                    let window = self.window.clone().unwrap();
+                    let (overlay, future) = start_overlay(self, &tab, move |tab_id, term| {
+                        confirm_quit_program(term, window, tab_id)
+                    });
+                    self.assign_overlay(tab.tab_id(), overlay);
+                    promise::spawn::spawn(future).detach();
                 }
             }
             SelectTextAtMouseCursor(mode) => self.select_text_at_mouse_cursor(*mode, pane),
