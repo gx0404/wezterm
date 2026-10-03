@@ -683,6 +683,14 @@ pub struct Config {
     #[dynamic(default = "default_win32_acrylic_accent_color")]
     pub win32_acrylic_accent_color: RgbaColor,
 
+    /// fork: when enabled on Windows 11 (build 22000+), DWM paints the
+    /// native title bar, its text and the window border with the
+    /// `window_frame` colors (active/inactive titlebar bg/fg and
+    /// `border_top_color`), and windows without a native title bar ask for
+    /// rounded corners. No effect on Windows 10 or other platforms.
+    #[dynamic(default)]
+    pub win32_frame_follow_colors: bool,
+
     /// Specifies the alpha value to use when rendering the background
     /// of the window.  The background is taken either from the
     /// window_background_image, or if there is none, the background
@@ -2726,6 +2734,50 @@ mod fps_validation_tests {
     fn max_fps_follows_display_round_trips() {
         let cfg = config_with("max_fps_follows_display", Value::Bool(true)).unwrap();
         assert!(cfg.max_fps_follows_display);
+    }
+}
+
+// fork: `win32_frame_follow_colors` defaults to off and only accepts booleans
+#[cfg(test)]
+mod win32_frame_follow_colors_tests {
+    use super::*;
+    use wezterm_dynamic::{FromDynamicOptions, UnknownFieldAction, Value};
+
+    fn config_with(value: Value) -> Result<Config, wezterm_dynamic::Error> {
+        let mut obj = std::collections::BTreeMap::new();
+        obj.insert(Value::String("win32_frame_follow_colors".into()), value);
+        Config::from_dynamic(
+            &Value::Object(obj.into()),
+            FromDynamicOptions {
+                unknown_fields: UnknownFieldAction::Deny,
+                deprecated_fields: UnknownFieldAction::Warn,
+            },
+        )
+    }
+
+    #[test]
+    fn defaults_to_off() {
+        assert!(!Config::default_config().win32_frame_follow_colors);
+    }
+
+    #[test]
+    fn accepts_booleans() {
+        assert!(
+            config_with(Value::Bool(true))
+                .unwrap()
+                .win32_frame_follow_colors
+        );
+        assert!(
+            !config_with(Value::Bool(false))
+                .unwrap()
+                .win32_frame_follow_colors
+        );
+    }
+
+    #[test]
+    fn rejects_non_booleans() {
+        assert!(config_with(Value::String("yes".into())).is_err());
+        assert!(config_with(Value::U64(1)).is_err());
     }
 }
 

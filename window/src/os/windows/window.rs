@@ -179,6 +179,10 @@ pub(crate) struct WindowInner {
     /// the candidate window could stay at (0,0) or at another window's spot
     /// (all windows of the thread share the default input context).
     last_ime_rect: Option<Rect>,
+    /// fork: whether win32_frame_follow_colors has set DWM frame attributes
+    /// on this window, so turning the option off restores the defaults once
+    /// and windows that never used it are left untouched
+    frame_colors_applied: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -728,6 +732,7 @@ impl Window {
             pending_show: None,
             show_fallback_armed: false,
             last_ime_rect: None,
+            frame_colors_applied: false,
         }));
 
         // Careful: `raw` owns a ref to inner, but there is no Drop impl
@@ -1992,6 +1997,210 @@ fn enable_blur_behind(hwnd: HWND) {
     }
 }
 
+// fork: DWM attributes used by win32_frame_follow_colors (Windows 11 build
+// 22000+; winapi 0.3 predates them)
+const DWMWA_WINDOW_CORNER_PREFERENCE: DWORD = 33;
+const DWMWA_BORDER_COLOR: DWORD = 34;
+const DWMWA_CAPTION_COLOR: DWORD = 35;
+const DWMWA_TEXT_COLOR: DWORD = 36;
+/// Value for the color attributes that restores the system color
+const DWMWA_COLOR_DEFAULT: u32 = 0xFFFF_FFFF;
+const DWMWCP_DEFAULT: u32 = 0;
+const DWMWCP_ROUND: u32 = 2;
+
+/// fork: COLORREF is 0x00BBGGRR; DWM ignores alpha
+fn rgba_to_colorref(color: SrgbaTuple) -> u32 {
+    let (r, g, b, _) = color.as_rgba_u8();
+    u32::from(r) | (u32::from(g) << 8) | (u32::from(b) << 16)
+}
+
+/// fork: perceived brightness in 0.0..=1.0 (Rec. 709 luma of the gamma
+/// encoded sRGB components)
+fn srgb_luma(color: SrgbaTuple) -> f32 {
+    0.2126 * color.0 + 0.7152 * color.1 + 0.0722 * color.2
+}
+
+/// fork: whether win32_frame_follow_colors is on and DWM supports it here
+fn frame_follows_colors(config: &ConfigHandle) -> bool {
+    config.win32_frame_follow_colors && !*IS_WIN10
+}
+
+/// fork: the caption is painted with active_titlebar_bg, so a dark one gets
+/// the dark (light glyph) caption buttons, whatever the system theme
+fn frame_is_dark(config: &ConfigHandle) -> bool {
+    srgb_luma(config.window_frame.active_titlebar_bg.into()) < 0.5
+}
+
+/// fork: rounded corners for windows that lack a native title bar; DWM
+/// leaves popup (NONE) windows square otherwise
+fn wants_round_corners(decorations: WindowDecorations) -> bool {
+    decorations == WindowDecorations::NONE || no_native_title_bar(decorations)
+}
+
+/// fork: DWM attribute values for win32_frame_follow_colors
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FrameColors {
+    caption: u32,
+    text: u32,
+    border: u32,
+    corner: u32,
+}
+
+impl FrameColors {
+    fn system_default() -> Self {
+        Self {
+            caption: DWMWA_COLOR_DEFAULT,
+            text: DWMWA_COLOR_DEFAULT,
+            border: DWMWA_COLOR_DEFAULT,
+            corner: DWMWCP_DEFAULT,
+        }
+    }
+
+    fn from_config(config: &config::Config, active: bool) -> Self {
+        let frame = &config.window_frame;
+        let (caption, text) = if active {
+            (frame.active_titlebar_bg, frame.active_titlebar_fg)
+        } else {
+            (frame.inactive_titlebar_bg, frame.inactive_titlebar_fg)
+        };
+        Self {
+            caption: rgba_to_colorref(caption.into()),
+            text: rgba_to_colorref(text.into()),
+            border: frame
+                .border_top_color
+                .map(|color| rgba_to_colorref(color.into()))
+                .unwrap_or(DWMWA_COLOR_DEFAULT),
+            corner: if wants_round_corners(config.window_decorations) {
+                DWMWCP_ROUND
+            } else {
+                DWMWCP_DEFAULT
+            },
+        }
+    }
+}
+
+/// fork: push (or, once the option is turned off, reset) the
+/// win32_frame_follow_colors attributes. Windows 10 never gets here with
+/// the option on and silently skips.
+fn apply_frame_colors(hwnd: HWND, config: &ConfigHandle, active: bool, applied: &mut bool) {
+    use winapi::um::dwmapi::DwmSetWindowAttribute;
+
+    let colors = if frame_follows_colors(config) {
+        *applied = true;
+        FrameColors::from_config(config, active)
+    } else if *applied {
+        *applied = false;
+        FrameColors::system_default()
+    } else {
+        return;
+    };
+
+    for (attribute, value) in [
+        (DWMWA_CAPTION_COLOR, colors.caption),
+        (DWMWA_TEXT_COLOR, colors.text),
+        (DWMWA_BORDER_COLOR, colors.border),
+        (DWMWA_WINDOW_CORNER_PREFERENCE, colors.corner),
+    ] {
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute,
+                &value as *const u32 as *const _,
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+    }
+}
+
+impl WindowInner {
+    /// fork: switch the caption between the active and inactive
+    /// window_frame colors
+    fn update_frame_colors(&mut self, active: bool) {
+        let config = self.config.clone();
+        apply_frame_colors(self.hwnd.0, &config, active, &mut self.frame_colors_applied);
+    }
+}
+
+#[cfg(test)]
+mod frame_color_tests {
+    use super::*;
+
+    #[test]
+    fn colorref_is_bgr() {
+        assert_eq!(
+            rgba_to_colorref(SrgbaTuple(1.0, 0.0, 0.0, 1.0)),
+            0x0000_00FF
+        );
+        assert_eq!(
+            rgba_to_colorref(SrgbaTuple(0.0, 1.0, 0.0, 0.5)),
+            0x0000_FF00
+        );
+        assert_eq!(
+            rgba_to_colorref(SrgbaTuple(0.0, 0.0, 1.0, 0.0)),
+            0x00FF_0000
+        );
+        // #1e1e2e
+        assert_eq!(
+            rgba_to_colorref(SrgbaTuple(
+                0x1e as f32 / 255.0,
+                0x1e as f32 / 255.0,
+                0x2e as f32 / 255.0,
+                1.0
+            )),
+            0x002E_1E1E
+        );
+    }
+
+    #[test]
+    fn colorref_never_collides_with_the_default_sentinel() {
+        assert_ne!(
+            rgba_to_colorref(SrgbaTuple(1.0, 1.0, 1.0, 1.0)),
+            DWMWA_COLOR_DEFAULT
+        );
+    }
+
+    #[test]
+    fn luma_splits_dark_from_light() {
+        assert!(srgb_luma(SrgbaTuple(0.0, 0.0, 0.0, 1.0)) < 0.5);
+        assert!(srgb_luma(SrgbaTuple(0.2, 0.2, 0.2, 1.0)) < 0.5);
+        assert!(srgb_luma(SrgbaTuple(0.9, 0.9, 0.9, 1.0)) >= 0.5);
+        assert!(srgb_luma(SrgbaTuple(1.0, 1.0, 1.0, 1.0)) >= 0.5);
+    }
+
+    #[test]
+    fn round_corners_only_without_native_title_bar() {
+        assert!(wants_round_corners(WindowDecorations::NONE));
+        assert!(wants_round_corners(WindowDecorations::RESIZE));
+        assert!(wants_round_corners(
+            WindowDecorations::INTEGRATED_BUTTONS | WindowDecorations::RESIZE
+        ));
+        assert!(!wants_round_corners(
+            WindowDecorations::TITLE | WindowDecorations::RESIZE
+        ));
+        assert!(!wants_round_corners(WindowDecorations::TITLE));
+    }
+
+    #[test]
+    fn frame_colors_follow_focus_and_border_falls_back_to_default() {
+        let mut config = config::Config::default_config();
+        config.window_decorations = WindowDecorations::RESIZE;
+        config.window_frame.active_titlebar_bg = SrgbaTuple(1.0, 0.0, 0.0, 1.0).into();
+        config.window_frame.inactive_titlebar_bg = SrgbaTuple(0.0, 0.0, 1.0, 1.0).into();
+        config.window_frame.border_top_color = None;
+
+        let active = FrameColors::from_config(&config, true);
+        assert_eq!(active.caption, 0x0000_00FF);
+        assert_eq!(active.border, DWMWA_COLOR_DEFAULT);
+        assert_eq!(active.corner, DWMWCP_ROUND);
+
+        let inactive = FrameColors::from_config(&config, false);
+        assert_eq!(inactive.caption, 0x00FF_0000);
+
+        config.window_frame.border_top_color = Some(SrgbaTuple(0.0, 1.0, 0.0, 1.0).into());
+        assert_eq!(FrameColors::from_config(&config, true).border, 0x0000_FF00);
+    }
+}
+
 fn apply_theme(hwnd: HWND) -> Option<LRESULT> {
     // Check for OS app theme, and set window attributes accordingly.
     // Note that the MS terminal app uses the logic found here for this stuff:
@@ -2053,11 +2262,17 @@ fn apply_theme(hwnd: HWND) -> Option<LRESULT> {
         mark_title_font_stale();
 
         let appearance = get_appearance();
-        let theme_string = if appearance == Appearance::Dark {
-            "DarkMode_Explorer"
-        } else {
-            ""
+        // fork: with win32_frame_follow_colors the light/dark style of the
+        // frame follows the configured caption color instead of the system
+        // theme. `appearance` itself (reported to the GUI) is unchanged.
+        let follow_colors_config = rc_from_hwnd(hwnd)
+            .and_then(|inner| inner.try_borrow().ok().map(|inner| inner.config.clone()))
+            .filter(frame_follows_colors);
+        let dark_frame = match &follow_colors_config {
+            Some(config) => frame_is_dark(config),
+            None => appearance == Appearance::Dark,
         };
+        let theme_string = if dark_frame { "DarkMode_Explorer" } else { "" };
 
         SetWindowTheme(
             hwnd as _,
@@ -2065,7 +2280,7 @@ fn apply_theme(hwnd: HWND) -> Option<LRESULT> {
             std::ptr::null_mut(),
         );
 
-        let mut enabled: BOOL = if appearance == Appearance::Dark { 1 } else { 0 };
+        let mut enabled: BOOL = if dark_frame { 1 } else { 0 };
         DwmSetWindowAttribute(
             hwnd as _,
             DWMWA_USE_IMMERSIVE_DARK_MODE,
@@ -2169,6 +2384,12 @@ fn apply_theme(hwnd: HWND) -> Option<LRESULT> {
                 }
             }
 
+            // fork: covers creation, WM_SETTINGCHANGE and config reloads
+            // (config_did_change -> apply_decoration -> apply_theme)
+            let config = inner.config.clone();
+            let active = GetForegroundWindow() == hwnd;
+            apply_frame_colors(hwnd, &config, active, &mut inner.frame_colors_applied);
+
             if appearance != inner.appearance {
                 inner.appearance = appearance;
                 inner
@@ -2246,6 +2467,7 @@ unsafe fn wm_set_focus(
     // fork: another window of this thread may have moved the shared input
     // context while we were in the background
     inner.replay_ime_window_position();
+    inner.update_frame_colors(true);
     inner.events.dispatch(WindowEvent::FocusChanged(true));
     None
 }
@@ -2256,10 +2478,10 @@ unsafe fn wm_kill_focus(
     _wparam: WPARAM,
     _lparam: LPARAM,
 ) -> Option<LRESULT> {
-    rc_from_hwnd(hwnd)?
-        .borrow_mut()
-        .events
-        .dispatch(WindowEvent::FocusChanged(false));
+    let inner = rc_from_hwnd(hwnd)?;
+    let mut inner = inner.borrow_mut();
+    inner.update_frame_colors(false);
+    inner.events.dispatch(WindowEvent::FocusChanged(false));
     None
 }
 
