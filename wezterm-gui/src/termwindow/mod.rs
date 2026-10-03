@@ -101,7 +101,10 @@ pub mod webgpu;
 use crate::spawn::SpawnWhere;
 use prevcursor::PrevCursorPos;
 
-const ATLAS_SIZE: usize = 128;
+/// fork: was 128. Even a plain session needs more than that for its glyphs,
+/// and every growth step re-renders the frame from scratch, so start at a
+/// size that a typical window with a modest wallpaper fits in.
+const ATLAS_SIZE: usize = 1024;
 
 /// fork: minimum spacing between two full preview-palette flushes. Each
 /// flush ages out the colour-derived caches and rebuilds the tab bar, so
