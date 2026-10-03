@@ -1,6 +1,7 @@
 local wezterm = require('wezterm')
 local colors = require('colors.custom')
 local gui_settings = require('utils.gui-settings')
+local platform = require('utils.platform')
 
 -- Seeding random numbers before generating for use
 -- Known issue with lua math library
@@ -11,6 +12,34 @@ math.random()
 math.random()
 
 local GLOB_PATTERN = '*.{jpg,jpeg,png,gif,bmp,ico,tiff,pnm,dds,tga}'
+
+-- 设置浮层「外观」里的窗口材质（gui-settings.json 的 window_material 键）：
+--   wallpaper  壁纸 + 遮罩（默认）
+--   solid      纯色背景
+--   mica       云母：只放一层半透明的方案底色，透出系统 Mica 材质（Windows 11）
+--   acrylic    亚克力：同上，透出系统 Acrylic 模糊（Windows）
+local MATERIALS = { wallpaper = true, solid = true, mica = true, acrylic = true }
+local DEFAULT_MATERIAL = 'wallpaper'
+
+-- 系统材质要窗口本身半透明才看得见：云母底色层不透明度 0.3，亚克力 0.75（亚克力自带模糊，
+-- 可以更实一些）。
+local MATERIAL_OPACITY = { mica = 0.3, acrylic = 0.75 }
+local MATERIAL_BACKDROP = { mica = 'Mica', acrylic = 'Acrylic' }
+
+---整窗的纯色层。尺寸偏移留着 120% 的余量：壁纸遮罩层沿用同一写法，保证盖住整窗。
+---@param color string
+---@param opacity number
+---@return table
+local function color_layer(color, opacity)
+   return {
+      source = { Color = color },
+      height = '120%',
+      width = '120%',
+      vertical_offset = '-10%',
+      horizontal_offset = '-10%',
+      opacity = opacity,
+   }
+end
 
 ---读 gui-settings.json 原文；文件不存在或读不了返回 nil。
 ---@return string?
@@ -44,6 +73,7 @@ end
 ---@field mask_color string color of the mask layer above the image. Default is the background of the effective color scheme
 ---@field focus_color string background color when in focus mode. Default is the background of the effective color scheme
 ---@field focus_on boolean focus mode on or off
+---@field material 'wallpaper'|'solid'|'mica'|'acrylic' window material, from `window_material` in gui-settings.json
 local BackDrops = {}
 BackDrops.__index = BackDrops
 
@@ -66,10 +96,72 @@ function BackDrops.scheme_background(settings_text, lookup)
    return colors.scheme.background
 end
 
+---窗口材质取自 gui-settings.json 的 window_material 键（轻量提取，同壁纸键）；没有该键、
+---值不在 wallpaper|solid|mica|acrylic 内都按 wallpaper。纯函数，便于单测。
+---@param settings_text string? gui-settings.json 原文，读不到传 nil
+---@return 'wallpaper'|'solid'|'mica'|'acrylic'
+function BackDrops.material_from_settings(settings_text)
+   local name = settings_text and settings_text:match('"window_material"%s*:%s*"([^"]*)"')
+   if name and MATERIALS[name] then
+      return name
+   end
+   return DEFAULT_MATERIAL
+end
+
+---云母/亚克力只在 Windows 上有系统材质：其他平台把它们降级成壁纸，免得得到一个没有
+---模糊底的半透明窗口。Windows 10/11 对材质的支持差异由 wezterm 本体按系统版本处理，
+---Lua 不判断系统版本。纯函数。
+---@param material string
+---@param is_win boolean
+---@return 'wallpaper'|'solid'|'mica'|'acrylic'
+function BackDrops.effective_material(material, is_win)
+   if not is_win and MATERIAL_OPACITY[material] then
+      return DEFAULT_MATERIAL
+   end
+   if MATERIALS[material] then
+      return material
+   end
+   return DEFAULT_MATERIAL
+end
+
+---按窗口材质生成 `background` 层栈，以及材质要求一起设置的窗口配置键。纯函数。
+---  wallpaper  壁纸层 + 方案底色遮罩（0.92）；没有壁纸文件时退化成一层纯色
+---  solid      一层不透明的方案底色
+---  mica       一层 0.3 不透明度的方案底色；附加 win32_system_backdrop = 'Mica'、
+---             window_background_opacity = 0.3
+---  acrylic    同上，不透明度 0.75；win32_system_backdrop = 'Acrylic'
+---附加键必须和层栈一起生效（系统材质要窗口半透明才露得出来），由 config/appearance.lua
+---在 Windows 上合并进配置。
+---@param material string wallpaper|solid|mica|acrylic，其他值按 wallpaper
+---@param color string 方案底色（遮罩层/纯色层的颜色）
+---@param image_path string? 当前壁纸文件；nil 表示没有壁纸
+---@return table layers
+---@return table extra 需要一起设置的窗口配置键，没有时为空表
+function BackDrops.material_layers(material, color, image_path)
+   local opacity = MATERIAL_OPACITY[material]
+   if opacity then
+      return { color_layer(color, opacity) }, {
+         win32_system_backdrop = MATERIAL_BACKDROP[material],
+         window_background_opacity = opacity,
+      }
+   end
+   if material == 'solid' or not image_path then
+      return { color_layer(color, 1) }, {}
+   end
+   return {
+      {
+         source = { File = image_path },
+         horizontal_align = 'Center',
+      },
+      color_layer(color, 0.92),
+   }, {}
+end
+
 --- Initialise backdrop controller
 ---@private
 function BackDrops:init()
-   local mask_color = BackDrops.scheme_background(read_sidecar(), builtin_background)
+   local settings_text = read_sidecar()
+   local mask_color = BackDrops.scheme_background(settings_text, builtin_background)
    local inital = {
       current_idx = 1,
       images = {},
@@ -77,6 +169,10 @@ function BackDrops:init()
       mask_color = mask_color,
       focus_color = mask_color,
       focus_on = false,
+      material = BackDrops.effective_material(
+         BackDrops.material_from_settings(settings_text),
+         platform.is_win
+      ),
    }
    local backdrops = setmetatable(inital, self)
    return backdrops
@@ -158,39 +254,28 @@ end
 ---@return table
 function BackDrops:_create_opts()
    -- fork（WEZ-CFG-03）：壁纸目录为空时回退纯色遮罩，不产生 File=nil 层
-   if #self.images == 0 then
+   if #self.images == 0 and self.material == 'wallpaper' then
       return self:_create_focus_opts()
    end
-   return {
-      {
-         source = { File = self.images[self.current_idx] },
-         horizontal_align = 'Center',
-      },
-      {
-         source = { Color = self.mask_color },
-         height = '120%',
-         width = '120%',
-         vertical_offset = '-10%',
-         horizontal_offset = '-10%',
-         opacity = 0.92,
-      },
-   }
+   local layers =
+      BackDrops.material_layers(self.material, self.mask_color, self.images[self.current_idx])
+   return layers
+end
+
+---当前窗口材质要求一起设置的窗口配置键（云母/亚克力：win32_system_backdrop 与
+---window_background_opacity；壁纸/纯色为空表）。config/appearance.lua 在 Windows 上
+---把它们合并进配置；非 Windows 上云母/亚克力在 init 时已降级成壁纸，这里为空。
+---@return table
+function BackDrops:window_options()
+   local _, extra = BackDrops.material_layers(self.material, self.mask_color, nil)
+   return extra
 end
 
 ---Create the `background` options for focus mode
 ---@private
 ---@return table
 function BackDrops:_create_focus_opts()
-   return {
-      {
-         source = { Color = self.focus_color },
-         height = '120%',
-         width = '120%',
-         vertical_offset = '-10%',
-         horizontal_offset = '-10%',
-         opacity = 1,
-      },
-   }
+   return { color_layer(self.focus_color, 1) }
 end
 
 ---Set the initial options for `background`
@@ -223,16 +308,7 @@ end
 ---@param window any WezTerm Window see: https://wezfurlong.org/wezterm/config/lua/window/index.html
 function BackDrops:_set_focus_opt(window)
    local opts = {
-      background = {
-         {
-            source = { Color = self.focus_color },
-            height = '120%',
-            width = '120%',
-            vertical_offset = '-10%',
-            horizontal_offset = '-10%',
-            opacity = 1,
-         },
-      },
+      background = self:_create_focus_opts(),
       enable_tab_bar = window:effective_config().enable_tab_bar,
    }
    window:set_config_overrides(opts)

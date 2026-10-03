@@ -143,6 +143,15 @@ if ui_font then
    options.pane_select_font = ui_font
 end
 
+-- 窗口材质（gui-settings.json 的 window_material，见 utils/backdrops.lua）：云母/亚克力要
+-- 系统背景材质与半透明窗口一起设置，只在 Windows 上写入；其他平台云母/亚克力已降级成壁纸，
+-- 不产生半透明窗口。
+if platform.is_win then
+   for key, value in pairs(backdrops:window_options()) do
+      options[key] = value
+   end
+end
+
 -- Windows：集成标题栏按钮（最小化/最大化/关闭画在标签栏右上角，Windows 11 Fluent 风）。
 -- 没有系统标题栏，标签栏就是标题栏，所以 herdr 应用模式与手动切换都不能隐藏它
 -- （events/status.lua、events/tab-title.lua）。按钮外观以及 Windows 10/11 的差异由 wezterm

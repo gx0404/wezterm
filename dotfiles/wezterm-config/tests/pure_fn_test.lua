@@ -1246,6 +1246,120 @@ do
    check('appearance_fonts.none_palette_font', ui.command_palette_font, nil)
 end
 
+-- 窗口材质（utils/backdrops.lua）：gui-settings.json 的 window_material 取值
+-- wallpaper|solid|mica|acrylic；云母/亚克力只放一层半透明方案底色，并带回需要一起设置的窗口键。
+do
+   local backdrops = require('utils.backdrops')
+   local bg = require('colors.custom').scheme.background
+
+   local material_cases = {
+      { 'no_sidecar', nil, 'wallpaper' },
+      { 'no_key', '{"wallpaper": "a.png"}', 'wallpaper' },
+      { 'wallpaper', '{"window_material": "wallpaper"}', 'wallpaper' },
+      { 'mica', '{"window_material": "mica"}', 'mica' },
+      { 'acrylic', '{"window_material":"acrylic"}', 'acrylic' },
+      { 'solid', '{\n  "wallpaper": "a.png",\n  "window_material": "solid"\n}', 'solid' },
+      { 'unknown', '{"window_material": "glass"}', 'wallpaper' },
+      { 'empty', '{"window_material": ""}', 'wallpaper' },
+      { 'not_string', '{"window_material": 3}', 'wallpaper' },
+      { 'case_sensitive', '{"window_material": "Mica"}', 'wallpaper' },
+   }
+   for _, case in ipairs(material_cases) do
+      check(
+         'material.from_settings.' .. case[1],
+         backdrops.material_from_settings(case[2]),
+         case[3]
+      )
+   end
+
+   -- 云母/亚克力只在 Windows 有系统材质，其他平台降级成壁纸
+   local effective = backdrops.effective_material
+   check('material.effective.mica_win', effective('mica', true), 'mica')
+   check('material.effective.acrylic_win', effective('acrylic', true), 'acrylic')
+   check('material.effective.mica_other', effective('mica', false), 'wallpaper')
+   check('material.effective.acrylic_other', effective('acrylic', false), 'wallpaper')
+   check('material.effective.solid_other', effective('solid', false), 'solid')
+   check('material.effective.wallpaper', effective('wallpaper', true), 'wallpaper')
+   check('material.effective.unknown', effective('glass', true), 'wallpaper')
+
+   -- 四种材质的层栈与附加键
+   local layers, extra = backdrops.material_layers('wallpaper', bg, 'wall.png')
+   check('material.wallpaper.count', #layers, 2)
+   check('material.wallpaper.image', layers[1].source.File, 'wall.png')
+   check('material.wallpaper.mask_color', layers[2].source.Color, bg)
+   check('material.wallpaper.mask_opacity', layers[2].opacity, 0.92)
+   check('material.wallpaper.no_extra', next(extra), nil)
+
+   layers, extra = backdrops.material_layers('wallpaper', bg, nil)
+   check('material.wallpaper_no_image.count', #layers, 1)
+   check('material.wallpaper_no_image.color', layers[1].source.Color, bg)
+   check('material.wallpaper_no_image.opacity', layers[1].opacity, 1)
+   check('material.wallpaper_no_image.no_extra', next(extra), nil)
+
+   layers, extra = backdrops.material_layers('solid', bg, 'wall.png')
+   check('material.solid.count', #layers, 1)
+   check('material.solid.color', layers[1].source.Color, bg)
+   check('material.solid.no_image', layers[1].source.File, nil)
+   check('material.solid.opacity', layers[1].opacity, 1)
+   check('material.solid.no_extra', next(extra), nil)
+
+   layers, extra = backdrops.material_layers('mica', bg, 'wall.png')
+   check('material.mica.count', #layers, 1)
+   check('material.mica.color', layers[1].source.Color, bg)
+   check('material.mica.no_image', layers[1].source.File, nil)
+   check('material.mica.opacity', layers[1].opacity, 0.3)
+   check('material.mica.backdrop', extra.win32_system_backdrop, 'Mica')
+   check('material.mica.window_opacity', extra.window_background_opacity, 0.3)
+
+   layers, extra = backdrops.material_layers('acrylic', bg, 'wall.png')
+   check('material.acrylic.count', #layers, 1)
+   check('material.acrylic.color', layers[1].source.Color, bg)
+   check('material.acrylic.no_image', layers[1].source.File, nil)
+   check('material.acrylic.opacity', layers[1].opacity, 0.75)
+   check('material.acrylic.backdrop', extra.win32_system_backdrop, 'Acrylic')
+   check('material.acrylic.window_opacity', extra.window_background_opacity, 0.75)
+
+   -- 未知材质按壁纸处理；附加键每次新建，调用方改动不影响下一次
+   layers = backdrops.material_layers('glass', bg, 'wall.png')
+   check('material.unknown.is_wallpaper', #layers == 2 and layers[1].source.File, 'wall.png')
+   local _, first = backdrops.material_layers('mica', bg, nil)
+   first.window_background_opacity = 1
+   local _, second = backdrops.material_layers('mica', bg, nil)
+   check('material.extra_is_fresh', second.window_background_opacity, 0.3)
+
+   -- 实例：测试环境的配置目录旁没有 gui-settings.json，默认壁纸；材质决定 _create_opts 与 window_options
+   local saved_material, saved_images = backdrops.material, backdrops.images
+   check('material.instance_default', saved_material, 'wallpaper')
+   backdrops.images = { 'wall.png' }
+   backdrops.material = 'mica'
+   local opts = backdrops:_create_opts()
+   check('material.instance.mica_layers', #opts, 1)
+   check('material.instance.mica_opacity', opts[1].opacity, 0.3)
+   check('material.instance.mica_options', backdrops:window_options().win32_system_backdrop, 'Mica')
+   backdrops.material = 'solid'
+   opts = backdrops:_create_opts()
+   check('material.instance.solid_layers', #opts, 1)
+   check('material.instance.solid_opacity', opts[1].opacity, 1)
+   check('material.instance.solid_options', next(backdrops:window_options()), nil)
+   -- 没有壁纸文件：壁纸材质退化成纯色遮罩，云母/亚克力不依赖壁纸文件
+   backdrops.images = {}
+   backdrops.material = 'wallpaper'
+   opts = backdrops:_create_opts()
+   check(
+      'material.instance.no_images_wallpaper',
+      #opts == 1 and opts[1].source.Color,
+      backdrops.focus_color
+   )
+   backdrops.material = 'acrylic'
+   opts = backdrops:_create_opts()
+   check('material.instance.no_images_acrylic', #opts == 1 and opts[1].opacity, 0.75)
+   -- 专注模式始终是不透明纯色层
+   local focus = backdrops:_create_focus_opts()
+   check('material.instance.focus_opacity', #focus == 1 and focus[1].opacity, 1)
+   check('material.instance.focus_color', focus[1].source.Color, backdrops.focus_color)
+   backdrops.material, backdrops.images = saved_material, saved_images
+end
+
 -- 窗口外观（config/appearance.lua）：Windows 用集成标题栏按钮 + fancy tab bar，标题栏/标签栏
 -- 底色与细边框取 Mocha；其他平台保持系统装饰。
 do
@@ -1307,6 +1421,32 @@ do
          check('window_chrome.' .. key, frame[key], mocha.surface1)
       end
    end
+
+   -- 窗口材质：云母/亚克力要系统背景与半透明窗口一起设置，只在 Windows 合并进配置；壁纸/纯色
+   -- 不带这些键，也不会写在静态表里。（实例的材质在 init 时已按平台降级，这里直接改字段，
+   -- 只验证 appearance 的 Windows 门。）
+   local backdrops = require('utils.backdrops')
+   local saved_material = backdrops.material
+   check('window_material.default_no_backdrop', win.win32_system_backdrop, nil)
+   check('window_material.default_no_opacity', win.window_background_opacity, nil)
+   backdrops.material = 'mica'
+   local mica_win = load_appearance('windows')
+   check('window_material.mica.backdrop', mica_win.win32_system_backdrop, 'Mica')
+   check('window_material.mica.opacity', mica_win.window_background_opacity, 0.3)
+   check('window_material.mica.layer', mica_win.background[1].opacity, 0.3)
+   local mica_linux = load_appearance('linux')
+   check('window_material.linux_ignores_backdrop', mica_linux.win32_system_backdrop, nil)
+   check('window_material.linux_ignores_opacity', mica_linux.window_background_opacity, nil)
+   backdrops.material = 'acrylic'
+   local acrylic_win = load_appearance('windows')
+   check('window_material.acrylic.backdrop', acrylic_win.win32_system_backdrop, 'Acrylic')
+   check('window_material.acrylic.opacity', acrylic_win.window_background_opacity, 0.75)
+   backdrops.material = 'solid'
+   local solid_win = load_appearance('windows')
+   check('window_material.solid.no_backdrop', solid_win.win32_system_backdrop, nil)
+   check('window_material.solid.no_opacity', solid_win.window_background_opacity, nil)
+   check('window_material.solid.layer', solid_win.background[1].opacity, 1)
+   backdrops.material = saved_material
 end
 
 -- 首窗按屏幕自适应（events/gui-startup.lua）：约 80% 并居中；屏幕信息不可用时保持默认大小。
