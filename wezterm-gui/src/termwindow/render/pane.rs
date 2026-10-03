@@ -241,7 +241,6 @@ impl crate::TermWindow {
             );
             let abs_thumb_top = thumb_y_offset + info.top;
             let thumb_size = info.height;
-            let color = palette.scrollbar_thumb.to_linear();
 
             // Adjust the scrollbar thumb position
             let config = &self.config;
@@ -275,18 +274,17 @@ impl crate::TermWindow {
                 item_type: UIItemType::BelowScrollThumb,
             });
 
-            self.filled_rectangle(
+            // fork: a slim, right-aligned thumb with rounded ends; the hit
+            // areas registered above still span the whole padding
+            self.paint_scroll_thumb(
                 layers,
-                2,
-                euclid::rect(
-                    thumb_x as f32,
-                    abs_thumb_top as f32,
-                    padding,
-                    thumb_size as f32,
-                ),
-                color,
+                thumb_x as f32,
+                padding,
+                abs_thumb_top as f32,
+                thumb_size as f32,
+                palette.scrollbar_thumb,
             )
-            .context("filled_rectangle")?;
+            .context("paint_scroll_thumb")?;
         }
 
         let (selrange, rectangular) = {

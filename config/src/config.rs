@@ -552,6 +552,18 @@ pub struct Config {
     #[dynamic(try_from = "crate::units::PixelUnit", default = "default_half_cell")]
     pub min_scroll_bar_height: Dimension,
 
+    /// fork: width of the scroll bar thumb, drawn as a slim bar with
+    /// rounded ends near the right edge of the right padding. The mouse
+    /// hit area still spans the whole padding. Defaults to `"3pt"`
+    /// (4 pixels at 96 dpi); percentages are relative to the padding
+    /// width, so `"100%"` fills it like the historical thumb.
+    #[dynamic(
+        try_from = "crate::units::PixelUnit",
+        default = "default_scroll_bar_thumb_width",
+        validate = "validate_positive_dimension"
+    )]
+    pub scroll_bar_thumb_width: Dimension,
+
     /// If false, do not try to use a Wayland protocol connection
     /// when starting the gui frontend, and instead use X11.
     /// This option is only considered on X11/Wayland systems and
@@ -2086,6 +2098,11 @@ const fn default_half_cell() -> Dimension {
     Dimension::Cells(0.5)
 }
 
+// fork: 3pt is 4 pixels at 96 dpi and scales with the display dpi
+const fn default_scroll_bar_thumb_width() -> Dimension {
+    Dimension::Points(3.)
+}
+
 const fn default_reverse_video_cursor_min_contrast() -> f32 {
     2.5
 }
@@ -2378,6 +2395,23 @@ fn validate_line_height(value: &f64) -> Result<(), String> {
     }
 }
 
+// fork: rejects zero, negative and non-finite dimensions
+fn validate_positive_dimension(value: &Dimension) -> Result<(), String> {
+    let n = match value {
+        Dimension::Points(n)
+        | Dimension::Pixels(n)
+        | Dimension::Percent(n)
+        | Dimension::Cells(n) => *n,
+    };
+    if n.is_finite() && n > 0. {
+        Ok(())
+    } else {
+        Err(format!(
+            "Illegal value {value:?}; it must be greater than zero"
+        ))
+    }
+}
+
 // fork: defaults and strict validation of the overlay, scroll bar and
 // split appearance options
 #[cfg(test)]
@@ -2411,6 +2445,22 @@ mod overlay_chrome_tests {
             Value::String("not-a-color".into())
         )
         .is_err());
+    }
+
+    #[test]
+    fn scroll_bar_thumb_width_defaults_to_3pt_and_must_be_positive() {
+        assert_eq!(
+            Config::default_config().scroll_bar_thumb_width,
+            Dimension::Points(3.)
+        );
+        let cfg = parse("scroll_bar_thumb_width", Value::String("100%".into()))
+            .expect("percent is accepted");
+        assert_eq!(cfg.scroll_bar_thumb_width, Dimension::Percent(1.));
+        let cfg = parse("scroll_bar_thumb_width", Value::U64(6)).expect("pixels");
+        assert_eq!(cfg.scroll_bar_thumb_width, Dimension::Pixels(6.));
+        assert!(parse("scroll_bar_thumb_width", Value::U64(0)).is_err());
+        assert!(parse("scroll_bar_thumb_width", Value::String("-2px".into())).is_err());
+        assert!(parse("scroll_bar_thumb_width", Value::String("thin".into())).is_err());
     }
 }
 

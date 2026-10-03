@@ -41,6 +41,8 @@ pub mod fancy_tab_bar;
 pub mod paint;
 pub mod pane;
 pub mod screen_line;
+// fork: slim scroll bar thumb
+pub mod scroll_thumb;
 pub mod split;
 pub mod tab_bar;
 pub mod window_buttons;
