@@ -76,6 +76,22 @@ pub struct ClipboardImage {
     pub format: ClipboardImageFormat,
 }
 
+/// fork: progress indicator shown on the window's taskbar entry, see
+/// `WindowOps::set_progress`. Percentages are in the range 0..=100.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressState {
+    /// No progress indicator
+    None,
+    /// Normal progress at the given percentage
+    Normal(u8),
+    /// Busy, with no known completion percentage
+    Indeterminate,
+    /// Failed, at the given percentage
+    Error(u8),
+    /// Paused, at the given percentage
+    Paused(u8),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Dimensions {
     pub pixel_width: usize,
@@ -306,6 +322,11 @@ pub trait WindowOps {
     /// implementation does nothing on platforms without a standard
     /// mechanism.
     fn request_attention(&self) {}
+
+    /// fork: show a progress indicator on the window's taskbar entry (the
+    /// Windows taskbar button). The default implementation does nothing on
+    /// platforms without such an indicator.
+    fn set_progress(&self, _progress: ProgressState) {}
 
     /// Change the titlebar text for the window
     fn set_title(&self, title: &str);

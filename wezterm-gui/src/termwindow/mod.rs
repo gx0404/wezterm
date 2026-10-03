@@ -1365,6 +1365,15 @@ impl TermWindow {
                     // made every GUI window rebuild its tab bar and emit
                     // update-status
                     if self.window_contains_pane(pane_id) {
+                        // fork: mirror OSC 9;4 progress onto the taskbar
+                        if let Alert::Progress(progress) = &alert {
+                            window.set_progress(match progress {
+                                Progress::None => ProgressState::None,
+                                Progress::Percentage(pct) => ProgressState::Normal(*pct),
+                                Progress::Error(pct) => ProgressState::Error(*pct),
+                                Progress::Indeterminate => ProgressState::Indeterminate,
+                            });
+                        }
                         self.update_title();
                     }
                 }

@@ -5,12 +5,12 @@
 Fork addition, default `false`.
 
 When a pane rings the bell while its window is unfocused, request the
-user's attention from the window manager: X11 urgency hint, or a macOS
-dock bounce. Lua code can do the same explicitly via
+user's attention from the window manager: X11 urgency hint, a macOS
+dock bounce, or on Windows a flashing taskbar button that stays highlighted
+until the window is activated. Lua code can do the same explicitly via
 `window:request_attention()`.
 
-Windows (taskbar flashing) is not implemented yet and is planned: on Windows,
-and on Wayland where no standard mechanism exists, enabling this option
+On Wayland, where no standard mechanism exists, enabling this option
 currently has no effect.
 
 ```lua

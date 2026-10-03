@@ -52,17 +52,21 @@ wezterm-input-types.workspace = true
 clipboard-win = { workspace = true, features = ["std"] }
 shared_library.workspace = true
 winapi = { workspace=true, features = [
+    "combaseapi",
     "dwmapi",
     "handleapi",
     "imm",
     "libloaderapi",
+    "objbase",
     "shellapi",
     "shellscalingapi",
+    "shobjidl_core",
     "synchapi",
     "sysinfoapi",
     "timeapi",
     "winerror",
     "winuser",
+    "wtypesbase",
 ]}
 windows = { workspace=true, features = [
     "UI_ViewManagement",

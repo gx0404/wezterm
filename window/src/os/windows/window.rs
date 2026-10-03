@@ -4,8 +4,9 @@ use crate::parameters::{self, Parameters};
 use crate::{
     Appearance, Clipboard, ClipboardImage, ClipboardImageFormat, CursorIcon, DeadKeyStatus,
     Dimensions, Handled, KeyCode, KeyEvent, Modifiers, MouseButtons, MouseEvent, MouseEventKind,
-    MousePress, Point, RawKeyEvent, Rect, RequestedWindowGeometry, ResolvedGeometry, ScreenPoint,
-    ScreenRect, ULength, WindowDecorations, WindowEvent, WindowEventSender, WindowOps, WindowState,
+    MousePress, Point, ProgressState, RawKeyEvent, Rect, RequestedWindowGeometry, ResolvedGeometry,
+    ScreenPoint, ScreenRect, ULength, WindowDecorations, WindowEvent, WindowEventSender, WindowOps,
+    WindowState,
 };
 use anyhow::{bail, Context};
 use async_trait::async_trait;
@@ -1137,6 +1138,36 @@ impl WindowOps for Window {
         }
     }
 
+    fn request_attention(&self) {
+        let hwnd = self.0;
+        // fork: flash the taskbar button (not the caption) until the window
+        // is brought to the foreground; run from the message loop like the
+        // other window operations
+        promise::spawn::spawn(async move {
+            let mut info = FLASHWINFO {
+                cbSize: std::mem::size_of::<FLASHWINFO>() as UINT,
+                hwnd: hwnd.0,
+                dwFlags: FLASHW_TRAY | FLASHW_TIMERNOFG,
+                uCount: 0,
+                dwTimeout: 0,
+            };
+            unsafe {
+                FlashWindowEx(&mut info);
+            }
+        })
+        .detach();
+    }
+
+    fn set_progress(&self, progress: ProgressState) {
+        let hwnd = self.0;
+        // fork: the COM calls may pump messages, so keep them out of the
+        // caller's stack (the GUI calls this while handling a notification)
+        promise::spawn::spawn(async move {
+            set_taskbar_progress(hwnd.0, progress);
+        })
+        .detach();
+    }
+
     fn set_title(&self, title: &str) {
         let title = title.to_owned();
         Connection::with_window_inner(self.0, move |inner| {
@@ -1331,6 +1362,176 @@ impl WindowOps for Window {
                 color: top_border_color,
             }),
         }))
+    }
+}
+
+/// fork: state of the GUI thread's ITaskbarList3 (taskbar progress)
+#[derive(Clone, Copy)]
+enum TaskbarList {
+    Untried,
+    Unavailable,
+    Ready(*mut winapi::um::shobjidl_core::ITaskbarList3),
+}
+
+thread_local! {
+    static TASKBAR_LIST: std::cell::Cell<TaskbarList> = std::cell::Cell::new(TaskbarList::Untried);
+}
+
+/// fork: the GUI thread's ITaskbarList3, created on first use. It is never
+/// released: it lives as long as the GUI thread, and tearing it down during
+/// process exit gains nothing. A failed creation is not retried.
+unsafe fn taskbar_list() -> Option<*mut winapi::um::shobjidl_core::ITaskbarList3> {
+    use winapi::shared::winerror::{FAILED, RPC_E_CHANGED_MODE};
+    use winapi::shared::wtypesbase::CLSCTX_INPROC_SERVER;
+    use winapi::um::combaseapi::{CoCreateInstance, CoInitializeEx};
+    use winapi::um::objbase::COINIT_APARTMENTTHREADED;
+    use winapi::um::shobjidl_core::{CLSID_TaskbarList, ITaskbarList3};
+    use winapi::Interface;
+
+    match TASKBAR_LIST.with(|cell| cell.get()) {
+        TaskbarList::Ready(list) => return Some(list),
+        TaskbarList::Unavailable => return None,
+        TaskbarList::Untried => {}
+    }
+    TASKBAR_LIST.with(|cell| cell.set(TaskbarList::Unavailable));
+
+    // S_FALSE (already initialized) is fine, and RPC_E_CHANGED_MODE means
+    // the thread already joined the MTA, where the object still works
+    let hr = CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED);
+    if FAILED(hr) && hr != RPC_E_CHANGED_MODE {
+        log::warn!("CoInitializeEx failed ({:#x}); no taskbar progress", hr);
+        return None;
+    }
+
+    let mut list: *mut ITaskbarList3 = null_mut();
+    let hr = CoCreateInstance(
+        &CLSID_TaskbarList,
+        null_mut(),
+        CLSCTX_INPROC_SERVER,
+        &ITaskbarList3::uuidof(),
+        &mut list as *mut *mut ITaskbarList3 as *mut LPVOID,
+    );
+    if FAILED(hr) || list.is_null() {
+        log::warn!(
+            "creating ITaskbarList3 failed ({:#x}); no taskbar progress",
+            hr
+        );
+        return None;
+    }
+    let hr = (*list).HrInit();
+    if FAILED(hr) {
+        log::warn!(
+            "ITaskbarList3::HrInit failed ({:#x}); no taskbar progress",
+            hr
+        );
+        (*list).Release();
+        return None;
+    }
+
+    TASKBAR_LIST.with(|cell| cell.set(TaskbarList::Ready(list)));
+    Some(list)
+}
+
+/// fork: ITaskbarList3 state flag plus, for the states that show a bar, its
+/// value out of 100
+fn taskbar_progress(progress: ProgressState) -> (winapi::um::shobjidl_core::TBPFLAG, Option<u64>) {
+    use winapi::um::shobjidl_core::{
+        TBPF_ERROR, TBPF_INDETERMINATE, TBPF_NOPROGRESS, TBPF_NORMAL, TBPF_PAUSED,
+    };
+
+    // An error or paused report without a percentage (OSC 9;4;2 and
+    // 9;4;4 commonly omit it) would leave the colored bar empty and
+    // invisible, so show it full instead
+    fn full_if_zero(pct: u8) -> u64 {
+        match pct.min(100) {
+            0 => 100,
+            pct => pct as u64,
+        }
+    }
+
+    match progress {
+        ProgressState::None => (TBPF_NOPROGRESS, None),
+        ProgressState::Indeterminate => (TBPF_INDETERMINATE, None),
+        ProgressState::Normal(pct) => (TBPF_NORMAL, Some(pct.min(100) as u64)),
+        ProgressState::Error(pct) => (TBPF_ERROR, Some(full_if_zero(pct))),
+        ProgressState::Paused(pct) => (TBPF_PAUSED, Some(full_if_zero(pct))),
+    }
+}
+
+fn set_taskbar_progress(hwnd: HWND, progress: ProgressState) {
+    use winapi::shared::winerror::FAILED;
+
+    let (flag, value) = taskbar_progress(progress);
+    unsafe {
+        let Some(list) = taskbar_list() else {
+            return;
+        };
+        // SetProgressValue turns NOPROGRESS/INDETERMINATE into NORMAL, so set
+        // the value first and the state last
+        if let Some(value) = value {
+            (*list).SetProgressValue(hwnd, value, 100);
+        }
+        let hr = (*list).SetProgressState(hwnd, flag);
+        if FAILED(hr) {
+            log::debug!("ITaskbarList3::SetProgressState failed: {:#x}", hr);
+        }
+    }
+}
+
+#[cfg(test)]
+mod taskbar_progress_tests {
+    use super::taskbar_progress;
+    use crate::ProgressState;
+    use winapi::um::shobjidl_core::{
+        TBPF_ERROR, TBPF_INDETERMINATE, TBPF_NOPROGRESS, TBPF_NORMAL, TBPF_PAUSED,
+    };
+
+    #[test]
+    fn states_map_to_taskbar_flags() {
+        assert_eq!(
+            taskbar_progress(ProgressState::None),
+            (TBPF_NOPROGRESS, None)
+        );
+        assert_eq!(
+            taskbar_progress(ProgressState::Indeterminate),
+            (TBPF_INDETERMINATE, None)
+        );
+        assert_eq!(
+            taskbar_progress(ProgressState::Normal(42)),
+            (TBPF_NORMAL, Some(42))
+        );
+        assert_eq!(
+            taskbar_progress(ProgressState::Error(30)),
+            (TBPF_ERROR, Some(30))
+        );
+        assert_eq!(
+            taskbar_progress(ProgressState::Paused(70)),
+            (TBPF_PAUSED, Some(70))
+        );
+    }
+
+    #[test]
+    fn percentages_are_clamped() {
+        assert_eq!(
+            taskbar_progress(ProgressState::Normal(250)),
+            (TBPF_NORMAL, Some(100))
+        );
+        assert_eq!(
+            taskbar_progress(ProgressState::Normal(0)),
+            (TBPF_NORMAL, Some(0))
+        );
+    }
+
+    #[test]
+    fn error_and_paused_without_percentage_show_a_full_bar() {
+        assert_eq!(
+            taskbar_progress(ProgressState::Error(0)),
+            (TBPF_ERROR, Some(100))
+        );
+        assert_eq!(
+            taskbar_progress(ProgressState::Paused(0)),
+            (TBPF_PAUSED, Some(100))
+        );
     }
 }
 
