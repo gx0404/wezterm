@@ -43,7 +43,7 @@ NEXTEST_URL="https://github.com/nextest-rs/nextest/releases/download/cargo-nexte
 NEXTEST_SHA256="20ed0a7d3d6f8dda9bb1b0bcb5838aea5784d3e2360746280868996d709dde0a"
 # Windows 用 x86_64-pc-windows-msvc 包（根目录即 cargo-nextest.exe），同样与版本成对维护。
 NEXTEST_SHA256_WINDOWS="b0d6a6569d4ef63a095c5a574a6856c17fb755b51a02a17e4651e738e9192831"
-GRAPHIFY_VERSION="0.9.20"
+GRAPHIFY_VERSION="0.9.73"
 # musl 静态二进制（glibc 版本解耦）；与 ci/stylua.toml 共同决定键表派生物格式。
 STYLUA_VERSION="2.5.2"
 STYLUA_URL="https://github.com/JohnnyMorganz/StyLua/releases/download/v${STYLUA_VERSION}/stylua-linux-x86_64-musl.zip"
@@ -129,7 +129,9 @@ venv_ready() {
     py="$(venv_python)" || return 1
     "${py}" -c "import tomli" >/dev/null 2>&1 || return 1
     [ -x "${TOOLS}/venv/bin/graphify" ] || return 1
-    "${TOOLS}/venv/bin/graphify" --version 2>/dev/null | grep -q "${GRAPHIFY_VERSION}"
+    # 版本判定直接读已安装包的元数据：graphify 的 --version 会先打印技能版本告警，
+    # 在部分 shell 组合下让管道比对误判为未就绪。
+    "${py}" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('graphifyy') == '${GRAPHIFY_VERSION}' else 1)" >/dev/null 2>&1
 }
 
 # Git Bash 与 MSYS2 的 /tmp 指向不同目录，两套工具混用（如 MSYS2 bash 调 Git 自带的 unzip）时
@@ -361,7 +363,12 @@ install_venv() {
     local cand
     for cand in python3 python; do
         if command -v "${cand}" >/dev/null 2>&1 && "${cand}" -c "" </dev/null >/dev/null 2>&1; then
-            pyexe="$(command -v "${cand}")"
+            # 取解释器真实路径：WindowsApps 下的 python3 是应用执行别名，uv 无法按该路径识别
+            pyexe="$("${cand}" -c 'import sys; print(sys.executable)' </dev/null 2>/dev/null)"
+            if command -v cygpath >/dev/null 2>&1; then
+                pyexe="$(cygpath -u "${pyexe}")"
+            fi
+            [ -n "${pyexe}" ] || pyexe="$(command -v "${cand}")"
             break
         fi
     done
