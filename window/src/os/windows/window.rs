@@ -159,6 +159,12 @@ pub(crate) struct WindowInner {
     first_frame_presented: bool,
     pending_show: Option<ShowWindowCommand>,
     show_fallback_armed: bool,
+    /// fork: the last text cursor rect the GUI reported for IME placement.
+    /// The GUI only resends the rect when it changes, so it is replayed
+    /// after a resize, on focus and when a composition starts; otherwise
+    /// the candidate window could stay at (0,0) or at another window's spot
+    /// (all windows of the thread share the default input context).
+    last_ime_rect: Option<Rect>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -450,7 +456,9 @@ impl WindowInner {
         self.last_size.replace(current_dims);
 
         if !same {
-            self.set_ime_window_position(Rect::default());
+            // fork: replay the last known rect instead of resetting to (0,0);
+            // the GUI does not resend an unchanged rect after the resize
+            self.set_ime_window_position(self.last_ime_rect.unwrap_or_default());
 
             self.events.dispatch(WindowEvent::Resized {
                 dimensions: current_dims,
@@ -705,6 +713,7 @@ impl Window {
             first_frame_presented: false,
             pending_show: None,
             show_fallback_armed: false,
+            last_ime_rect: None,
         }));
 
         // Careful: `raw` owns a ref to inner, but there is no Drop impl
@@ -872,13 +881,28 @@ impl WindowInner {
     }
 
     fn set_text_cursor_position(&mut self, cursor: Rect) {
+        self.last_ime_rect = Some(cursor);
         self.set_ime_window_position(cursor);
+    }
+
+    /// fork: re-apply the last rect reported by the GUI (see last_ime_rect);
+    /// a no-op until the GUI has reported one
+    fn replay_ime_window_position(&mut self) {
+        if let Some(rect) = self.last_ime_rect {
+            self.set_ime_window_position(rect);
+        }
     }
 
     fn set_ime_window_position(&mut self, cursor: Rect) {
         let imc = ImmContext::get(self.hwnd.0);
         match self.config.ime_preedit_rendering {
-            ImePreeditRendering::Builtin => imc.set_candidate_window_position(cursor),
+            ImePreeditRendering::Builtin => {
+                // fork: several IMEs (TSF based ones such as Microsoft Pinyin
+                // among them) anchor their candidate list to the composition
+                // window even while it is hidden, so position both
+                imc.set_composition_window_position(cursor);
+                imc.set_candidate_window_position(cursor);
+            }
             ImePreeditRendering::System => imc.set_composition_window_position(cursor),
         }
     }
@@ -1881,10 +1905,12 @@ unsafe fn wm_set_focus(
     _wparam: WPARAM,
     _lparam: LPARAM,
 ) -> Option<LRESULT> {
-    rc_from_hwnd(hwnd)?
-        .borrow_mut()
-        .events
-        .dispatch(WindowEvent::FocusChanged(true));
+    let inner = rc_from_hwnd(hwnd)?;
+    let mut inner = inner.borrow_mut();
+    // fork: another window of this thread may have moved the shared input
+    // context while we were in the background
+    inner.replay_ime_window_position();
+    inner.events.dispatch(WindowEvent::FocusChanged(true));
     None
 }
 
@@ -2632,6 +2658,22 @@ unsafe fn ime_set_context(
     Some(result)
 }
 
+/// fork: place the IME windows before the IME shows them for a new
+/// composition. Returns None so that DefWindowProc carries on as before.
+unsafe fn ime_start_composition(
+    hwnd: HWND,
+    _msg: UINT,
+    _wparam: WPARAM,
+    _lparam: LPARAM,
+) -> Option<LRESULT> {
+    if let Some(inner) = rc_from_hwnd(hwnd) {
+        if let Ok(mut inner) = inner.try_borrow_mut() {
+            inner.replay_ime_window_position();
+        }
+    }
+    None
+}
+
 unsafe fn ime_end_composition(
     hwnd: HWND,
     _msg: UINT,
@@ -2707,6 +2749,19 @@ unsafe fn ime_composition(
                 .events
                 .dispatch(WindowEvent::AdviseDeadKeyStatus(DeadKeyStatus::None));
             inner.events.dispatch(WindowEvent::KeyEvent(key));
+
+            // fork: the IME can commit a result and start the next
+            // composition in the same message (typing on after a commit);
+            // pick up the new composition string instead of dropping it
+            if lparam & GCS_COMPSTR != 0 {
+                if let Ok(composing) = imc.get_str(GCS_COMPSTR) {
+                    if !composing.is_empty() {
+                        inner.events.dispatch(WindowEvent::AdviseDeadKeyStatus(
+                            DeadKeyStatus::Composing(composing),
+                        ));
+                    }
+                }
+            }
 
             return Some(1);
         }
@@ -3491,6 +3546,7 @@ unsafe fn do_wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> 
         WM_POWERBROADCAST => wm_powerbroadcast(hwnd, msg, wparam, lparam),
         WM_DPICHANGED => wm_dpichanged(hwnd, msg, wparam, lparam),
         WM_IME_SETCONTEXT => ime_set_context(hwnd, msg, wparam, lparam),
+        WM_IME_STARTCOMPOSITION => ime_start_composition(hwnd, msg, wparam, lparam),
         WM_IME_COMPOSITION => ime_composition(hwnd, msg, wparam, lparam),
         WM_IME_ENDCOMPOSITION => ime_end_composition(hwnd, msg, wparam, lparam),
         WM_MOUSEMOVE => mouse_move(hwnd, msg, wparam, lparam),
