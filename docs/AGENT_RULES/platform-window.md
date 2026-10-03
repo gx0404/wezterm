@@ -54,6 +54,11 @@
   的分支（`IS_WIN11_22H2` 走 DWMWA_SYSTEMBACKDROP_TYPE 三种都支持；否则亚克力要求
   build ≥ 17134 的 ACCENT_POLICY，`!IS_WIN10` 用 DWMWA_MICA_EFFECT 支持云母）。改
   `apply_theme` 的版本分支必须同步改它与 `backdrop_support_tests`。
+- 鼠标侧键（fork）：Windows 的 `WM_XBUTTONDOWN/UP/DBLCLK` 经
+  `os/windows/window.rs::mouse_button_event_kind` 映射为 `MousePress::X1/X2`，处理后
+  按 MSDN 返回 TRUE；按住状态只取 wparam 低字（`mouse_buttons_from_wparam`），高字
+  是发生变化的 X 键或滚轮增量；`WM_NCXBUTTON*` 不处理。其它平台目前不产生侧键
+  按下事件（macOS 只置 `MouseButtons::X1/X2` 位；Wayland 的穷举 match 已补分支）。
 - 纹理契约：`window/src/bitmaps/atlas.rs::Atlas`（`allocate()` 失败给
   `OutOfTextureSpace`）+ `bitmaps/mod.rs::Texture2d` trait——GUI 的 atlas
   降级链依赖该契约。

@@ -127,6 +127,11 @@
   版本判定（22H2+ 三种都支持，21H2 支持云母与亚克力，Win10 1803+ 只支持亚克力，更早全不支持），
   其他平台全 false；不依赖 GUI 连接、不取配置锁，配置求值期可调用。dotfiles 据此把系统不支持的
   窗口材质（如 Win10 选云母）回退为纯色，旧二进制没有该接口时行为不变。
+- Windows 鼠标侧键（XBUTTON1/XBUTTON2，即后退/前进）接入输入链：可在 `mouse_bindings` 里用
+  `button = 'X1'` / `'X2'` 绑定（无默认绑定，未绑定且未开启鼠标上报时忽略）；程序开启鼠标上报时按
+  xterm 按钮 8/9 上报（SGR 码 128/129，拖动 160/161，X10 与 1005 UTF-8 编码与 xterm 一致）。
+  经 mux 客户端连接的远端 pane 与 termwiz 浮层不转发侧键（对端可能是上游 codec 45 的 server）；
+  X11/Wayland/macOS 暂不产生侧键事件。文档见 `docs/config/mouse.md`。
 - dotfiles：`events/status.lua` 的 `setup` 新增可选项 `integrated_hides_tab_bar`（默认 false），
   为 true 时集成标题栏按钮模式下 herdr 应用模式仍可隐藏标签栏。
 - Windows UI 冒烟脚本 `scripts/ui_smoke_windows.ps1` 新增 `launcher` 与 `copy-mode` 两个浮层页面
@@ -358,6 +363,8 @@
   venv 内的绝对路径失效，需 `rm -rf .local/tools/venv` 后重跑 `make setup`。
 - `bell_requests_attention` 的 rustdoc 仍写「Windows 任务栏闪烁尚未实现」，改为与文档一致的
   已实现说明。
+- 终端鼠标上报的按钮码由 `i8` 改为 `u16`（`button_base_code`），能容纳 128 以上的按钮码；
+  1005 UTF-8 鼠标模式下 ≥0x80 的按钮字节改为两字节 UTF-8 编码（此前原样输出单字节）。
 
 
 ## 0.3.0(TBD)

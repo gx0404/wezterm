@@ -48,6 +48,13 @@
   （seqno+1 清空 changes，下次全量重绘）；`DiffState` 会合并相邻文本、抑制
   冗余光标/属性变更，别在渲染层重复做这类合并。
 - **vtparse 上限**：OSC 缓冲有 `MAX_OSC` 上限；加长 OSC 语义时同步评估两端。
+- **鼠标侧键**（fork）：`term/src/input.rs::MouseButton::X1/X2` 必须追加在 `None`
+  之后——codec 用 bincode 按变体序号编码，`None` 随每次移动发送，序号不能动，
+  `CODEC_VERSION` 不升。按钮码由 `terminalstate/mouse.rs::button_base_code`
+  给出（u16：X1=128、X2=129，即 xterm 按钮 8/9；拖动 +32）；X10 模式输出原字节，
+  1005 模式把 ≥0x80 的按钮字节按 UTF-8 编码。GUI 移动事件不把 X 位映射成拖动
+  按钮；`wezterm-client::ClientPane` 不向远端发送 X1/X2（上游 server 解码未知变体
+  会断开会话）。
 
 ## 禁止项
 
