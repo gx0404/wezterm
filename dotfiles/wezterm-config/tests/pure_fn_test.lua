@@ -878,6 +878,56 @@ do
    check('appearance_fonts.none_palette_font', ui.command_palette_font, nil)
 end
 
+-- 首窗按屏幕自适应（events/gui-startup.lua）：约 80% 并居中；屏幕信息不可用时保持默认大小。
+do
+   package.loaded['events.gui-startup'] = nil
+   local startup = require('events.gui-startup')
+   local geometry = startup.centered_geometry
+   local function describe(g)
+      return g and string.format('%dx%d@%d,%d', g.width, g.height, g.x, g.y) or 'nil'
+   end
+
+   local cases = {
+      { 'qhd', { x = 0, y = 0, width = 2560, height = 1440 }, 0.8, '2048x1152@256,144' },
+      -- 副屏在主屏左侧（负坐标）：居中要加上屏幕自己的原点
+      { 'offset', { x = -1920, y = 0, width = 1920, height = 1080 }, 0.8, '1536x864@-1728,108' },
+      { 'missing_origin', { width = 1000, height = 1000 }, 0.5, '640x500@180,250' },
+      -- 小屏：不低于最小尺寸，但不超过屏幕
+      { 'small_screen', { x = 0, y = 0, width = 500, height = 300 }, 0.8, '500x300@0,0' },
+      { 'min_size', { x = 0, y = 0, width = 700, height = 600 }, 0.5, '640x400@30,100' },
+      { 'nil_screen', nil, 0.8, 'nil' },
+      { 'zero_size', { x = 0, y = 0, width = 0, height = 1080 }, 0.8, 'nil' },
+      { 'bad_type', { width = '1920', height = 1080 }, 0.8, 'nil' },
+   }
+   for _, case in ipairs(cases) do
+      check('startup.' .. case[1], describe(geometry(case[2], case[3])), case[4])
+   end
+
+   local function fake_window(gui_window)
+      return {
+         gui_window = function()
+            return gui_window
+         end,
+      }
+   end
+   local calls = {}
+   local gui_window = {
+      set_inner_size = function(_, w, h)
+         table.insert(calls, string.format('size %d %d', w, h))
+      end,
+      set_position = function(_, x, y)
+         table.insert(calls, string.format('pos %d %d', x, y))
+      end,
+   }
+   local screen = { x = 0, y = 0, width = 2560, height = 1440 }
+   check('startup.fit_ok', startup.fit_to_screen(fake_window(gui_window), screen), true)
+   check('startup.fit_calls', table.concat(calls, ';'), 'size 2048 1152;pos 256 144')
+   -- 拿不到 GUI 窗口（不在活动工作区）或屏幕信息：什么都不做
+   check('startup.fit_no_gui_window', startup.fit_to_screen(fake_window(nil), screen), false)
+   check('startup.fit_no_screen', startup.fit_to_screen(fake_window(gui_window), nil), false)
+   check('startup.fit_untouched', #calls, 2)
+end
+
 -- 键位：Windows 与 Linux 同一套（除 Linux 专属的截图/AI 图片粘贴），不占裸 Alt，
 -- 不绑 Ctrl+B/C/V，翻页要 Shift。
 do
