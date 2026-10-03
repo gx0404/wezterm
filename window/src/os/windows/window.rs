@@ -118,6 +118,112 @@ struct TitleFontCache {
     stale: bool,
 }
 
+// fork: ACCENT_ENABLE_ACRYLICBLURBEHIND, which apply_theme uses for Acrylic
+// before Windows 11 22H2, first shipped in Windows 10 1803 (build 17134).
+// Older builds ignore it and the window is merely see-through.
+const ACRYLIC_ACCENT_MIN_BUILD: u32 = 17134;
+
+lazy_static! {
+    /// fork: the OS build number, or None if GetVersionExW failed.
+    static ref OS_BUILD_NUMBER: Option<u32> = {
+        let osver = OSVERSIONINFOW {
+            dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as _,
+            ..Default::default()
+        };
+
+        if unsafe { GetVersionExW(&osver as *const _ as _) } == winapi::shared::minwindef::TRUE {
+            Some(osver.dwBuildNumber)
+        } else {
+            None
+        }
+    };
+}
+
+/// fork: which win32_system_backdrop values apply_theme can actually render
+/// on this OS build (see ConnectionOps::system_backdrop_support).
+pub(crate) fn system_backdrop_support() -> crate::SystemBackdropSupport {
+    backdrop_support_for(*IS_WIN10, *IS_WIN11_22H2, *OS_BUILD_NUMBER)
+}
+
+/// fork: mirrors the branches of apply_theme, so the answer stays in step
+/// with what it does:
+/// * IS_WIN11_22H2 (build 22621+): DWMWA_SYSTEMBACKDROP_TYPE, which knows
+///   Mica, Acrylic and Tabbed. When the OS version is unknown both flags
+///   read true and apply_theme takes this path too.
+/// * otherwise SetWindowCompositionAttribute(ACCENT_POLICY) gives Acrylic
+///   from Windows 10 1803, and on Windows 11 21H2 (!IS_WIN10, build 22000+)
+///   DWMWA_MICA_EFFECT gives Mica. There is no Tabbed on this path.
+fn backdrop_support_for(
+    is_win10: bool,
+    is_win11_22h2: bool,
+    build: Option<u32>,
+) -> crate::SystemBackdropSupport {
+    let tabbed = is_win11_22h2;
+    crate::SystemBackdropSupport {
+        mica: tabbed || !is_win10,
+        acrylic: tabbed || build.map_or(true, |build| build >= ACRYLIC_ACCENT_MIN_BUILD),
+        tabbed,
+    }
+}
+
+#[cfg(test)]
+mod backdrop_support_tests {
+    use super::backdrop_support_for;
+    use crate::SystemBackdropSupport;
+
+    fn support(mica: bool, acrylic: bool, tabbed: bool) -> SystemBackdropSupport {
+        SystemBackdropSupport {
+            mica,
+            acrylic,
+            tabbed,
+        }
+    }
+
+    #[test]
+    fn windows_10_before_1803_has_no_backdrop() {
+        assert_eq!(
+            backdrop_support_for(true, false, Some(16299)),
+            support(false, false, false)
+        );
+    }
+
+    #[test]
+    fn windows_10_has_acrylic_only() {
+        for build in [17134, 19045] {
+            assert_eq!(
+                backdrop_support_for(true, false, Some(build)),
+                support(false, true, false)
+            );
+        }
+    }
+
+    #[test]
+    fn windows_11_21h2_has_mica_and_acrylic() {
+        assert_eq!(
+            backdrop_support_for(false, false, Some(22000)),
+            support(true, true, false)
+        );
+    }
+
+    #[test]
+    fn windows_11_22h2_has_everything() {
+        for build in [22621, 26100] {
+            assert_eq!(
+                backdrop_support_for(false, true, Some(build)),
+                support(true, true, true)
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_version_follows_the_systembackdrop_type_path() {
+        assert_eq!(
+            backdrop_support_for(true, true, None),
+            support(true, true, true)
+        );
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub(crate) struct HWindow(HWND);
 unsafe impl Send for HWindow {}

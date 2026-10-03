@@ -134,6 +134,22 @@ impl std::string::ToString for Appearance {
     }
 }
 
+/// fork: which system backdrop materials (`win32_system_backdrop`) the
+/// windowing environment can actually render. A material reported as
+/// unsupported is silently ignored by the platform (on Windows 10 asking
+/// for Mica just leaves a see-through window with no blur), so callers can
+/// pick another look instead. Platforms without system backdrops report
+/// everything as unsupported.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SystemBackdropSupport {
+    /// `win32_system_backdrop = "Mica"`
+    pub mica: bool,
+    /// `win32_system_backdrop = "Acrylic"`
+    pub acrylic: bool,
+    /// `win32_system_backdrop = "Tabbed"`
+    pub tabbed: bool,
+}
+
 bitflags! {
     #[derive(Default)]
     pub struct WindowState: u8 {

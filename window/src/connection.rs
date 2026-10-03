@@ -68,6 +68,15 @@ pub trait ConnectionOps {
         Appearance::Light
     }
 
+    /// fork: report which system backdrop materials this platform can
+    /// render. This is a property of the OS rather than of a live
+    /// connection, so it takes no `self`: the config is evaluated before
+    /// the Connection exists (startup) and on the config watcher thread
+    /// (reloads), and both need the real answer.
+    fn system_backdrop_support() -> crate::SystemBackdropSupport {
+        crate::SystemBackdropSupport::default()
+    }
+
     /// Hide the application.
     /// This actions hides all of the windows of the application and switches
     /// focus away from it.

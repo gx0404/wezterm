@@ -67,6 +67,25 @@ pub struct Screens {
 }
 impl_lua_conversion_dynamic!(Screens);
 
+/// fork: the table returned by `wezterm.gui.system_backdrop_support()`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromDynamic, ToDynamic)]
+pub struct SystemBackdropSupport {
+    pub mica: bool,
+    pub acrylic: bool,
+    pub tabbed: bool,
+}
+impl_lua_conversion_dynamic!(SystemBackdropSupport);
+
+impl From<window::SystemBackdropSupport> for SystemBackdropSupport {
+    fn from(support: window::SystemBackdropSupport) -> Self {
+        Self {
+            mica: support.mica,
+            acrylic: support.acrylic,
+            tabbed: support.tabbed,
+        }
+    }
+}
+
 impl From<window::screen::ScreenInfo> for ScreenInfo {
     fn from(info: window::screen::ScreenInfo) -> Self {
         Self {
@@ -143,6 +162,18 @@ pub fn register(lua: &Lua) -> anyhow::Result<()> {
         })?,
     )?;
 
+    // fork: an OS property, so it works without a Connection (the config
+    // is evaluated before the GUI starts and on the config watcher thread)
+    // and never takes the config lock.
+    window_mod.set(
+        "system_backdrop_support",
+        lua.create_function(|_, _: ()| {
+            Ok(SystemBackdropSupport::from(
+                Connection::system_backdrop_support(),
+            ))
+        })?,
+    )?;
+
     Ok(())
 }
 
@@ -190,5 +221,24 @@ mod tests {
             virtual_height: 1080,
         });
         assert_eq!(eval::<String>(&lua, "screens().main.name").unwrap(), "main");
+    }
+
+    #[test]
+    fn system_backdrop_support_works_off_the_gui_thread() {
+        let lua = Lua::new();
+        register(&lua).unwrap();
+        let expected = Connection::system_backdrop_support();
+        assert_eq!(
+            eval::<bool>(&lua, "system_backdrop_support().mica").unwrap(),
+            expected.mica
+        );
+        assert_eq!(
+            eval::<bool>(&lua, "system_backdrop_support().acrylic").unwrap(),
+            expected.acrylic
+        );
+        assert_eq!(
+            eval::<bool>(&lua, "system_backdrop_support().tabbed").unwrap(),
+            expected.tabbed
+        );
     }
 }

@@ -154,6 +154,11 @@ impl ConnectionOps for Connection {
         get_appearance()
     }
 
+    // fork: see window::system_backdrop_support for how this is decided
+    fn system_backdrop_support() -> crate::SystemBackdropSupport {
+        super::window::system_backdrop_support()
+    }
+
     fn name(&self) -> String {
         "Windows".to_string()
     }
