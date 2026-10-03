@@ -93,7 +93,7 @@ M.setup = function()
                title = 'InputSelector: Launch Menu',
                choices = choices,
                fuzzy = true,
-               fuzzy_description = nf.md_rocket .. ' Select a lauch item: ',
+               fuzzy_description = nf.md_rocket .. ' 选择启动项：',
                action = wezterm.action_callback(function(_window, _pane, id, label)
                   if not id and not label then
                      return

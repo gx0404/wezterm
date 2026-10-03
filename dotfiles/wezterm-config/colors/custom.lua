@@ -102,9 +102,41 @@ local chrome = {
       },
    },
    visual_bell = mocha.red,
-   scrollbar_thumb = mocha.surface2,
-   split = mocha.overlay0,
+   scrollbar_thumb = mocha.surface1,
+   split = mocha.surface0,
    compose_cursor = mocha.flamingo,
+
+   -- copy mode：当前命中用 peach 底，其余命中用 surface2；标记格用 mauve。
+   -- ColorSpec 类型的键要写成 { Color = '#rrggbb' }。
+   copy_mode_active_highlight_bg = { Color = mocha.peach },
+   copy_mode_active_highlight_fg = { Color = mocha.crust },
+   copy_mode_inactive_highlight_bg = { Color = mocha.surface2 },
+   copy_mode_inactive_highlight_fg = { Color = mocha.text },
+   copy_mode_mark_bg = { Color = mocha.mauve },
+   copy_mode_mark_fg = { Color = mocha.crust },
+
+   -- quick select：标签用 peach 底，命中文本用 surface1 底。
+   quick_select_label_bg = { Color = mocha.peach },
+   quick_select_label_fg = { Color = mocha.crust },
+   quick_select_match_bg = { Color = mocha.surface1 },
+   quick_select_match_fg = { Color = mocha.text },
+
+   -- 启动器与 InputSelector 的快捷键标签。
+   launcher_label_bg = { Color = mocha.surface1 },
+   launcher_label_fg = { Color = mocha.lavender },
+   input_selector_label_bg = { Color = mocha.surface1 },
+   input_selector_label_fg = { Color = mocha.lavender },
+}
+
+-- 只有本分支新构建认得的界面色键。旧二进制遇到 colors 里的未知键会弹 Configuration Error，
+-- 所以不放进 chrome，而是由 config/fluent.lua 逐键探测后合并进 colors。
+local fluent_chrome = {
+   -- 启动器 / InputSelector / 确认框 / CharSelect 里选中行的底色与左侧强调条颜色。
+   overlay_selected_bg = mocha.surface1,
+   overlay_selected_fg = mocha.lavender,
+   -- copy mode 搜索状态行与 quick select 状态行。
+   copy_mode_status_bg = { Color = mocha.surface0 },
+   copy_mode_status_fg = { Color = mocha.text },
 }
 
 return {
@@ -113,5 +145,6 @@ return {
    name = 'GX Mocha',
    scheme = scheme,
    chrome = chrome,
+   fluent_chrome = fluent_chrome,
    mocha = mocha,
 }

@@ -756,7 +756,59 @@ do
       check('colors.chrome.no_' .. key, colors.chrome[key], nil)
    end
    check('colors.chrome.tab_bar', type(colors.chrome.tab_bar), 'table')
-   check('colors.chrome.split', colors.chrome.split, colors.mocha.overlay0)
+   check('colors.chrome.split', colors.chrome.split, colors.mocha.surface0)
+   check('colors.chrome.scrollbar_thumb', colors.chrome.scrollbar_thumb, colors.mocha.surface1)
+   check('colors.chrome.visual_bell', colors.chrome.visual_bell, colors.mocha.red)
+
+   -- 浮层与元素配色（Mocha）：ColorSpec 类型的键写成 { Color = '#rrggbb' }，RgbaColor 直接写色值
+   local mocha = colors.mocha
+   local specs = {
+      copy_mode_active_highlight_bg = mocha.peach,
+      copy_mode_active_highlight_fg = mocha.crust,
+      copy_mode_inactive_highlight_bg = mocha.surface2,
+      copy_mode_inactive_highlight_fg = mocha.text,
+      copy_mode_mark_bg = mocha.mauve,
+      copy_mode_mark_fg = mocha.crust,
+      quick_select_label_bg = mocha.peach,
+      quick_select_label_fg = mocha.crust,
+      quick_select_match_bg = mocha.surface1,
+      quick_select_match_fg = mocha.text,
+      launcher_label_bg = mocha.surface1,
+      launcher_label_fg = mocha.lavender,
+      input_selector_label_bg = mocha.surface1,
+      input_selector_label_fg = mocha.lavender,
+   }
+   for key, expected in pairs(specs) do
+      check(
+         'colors.chrome.' .. key,
+         type(colors.chrome[key]) == 'table' and colors.chrome[key].Color,
+         expected
+      )
+   end
+   -- 本分支新构建才认得的界面色：单放 fluent_chrome，不进静态的 chrome（旧二进制会报未知键）
+   check(
+      'colors.fluent.overlay_selected_bg',
+      colors.fluent_chrome.overlay_selected_bg,
+      mocha.surface1
+   )
+   check(
+      'colors.fluent.overlay_selected_fg',
+      colors.fluent_chrome.overlay_selected_fg,
+      mocha.lavender
+   )
+   check(
+      'colors.fluent.copy_mode_status_bg',
+      colors.fluent_chrome.copy_mode_status_bg.Color,
+      mocha.surface0
+   )
+   check(
+      'colors.fluent.copy_mode_status_fg',
+      colors.fluent_chrome.copy_mode_status_fg.Color,
+      mocha.text
+   )
+   for key in pairs(colors.fluent_chrome) do
+      check('colors.chrome.excludes_fluent.' .. key, colors.chrome[key], nil)
+   end
 
    local appearance = require('config.appearance')
    check('appearance.color_scheme', appearance.color_scheme, colors.name)
@@ -776,6 +828,33 @@ do
    check('colors.tab_bar.new_tab_hover_bg', tab_bar.new_tab_hover.bg_color, colors.mocha.surface0)
    check('colors.tab_bar.new_tab_hover_italic', tab_bar.new_tab_hover.italic, nil)
    check('appearance.tab_max_width', appearance.tab_max_width, 36)
+   check('appearance.palette_bg', appearance.command_palette_bg_color, 'rgba(24, 24, 37, 0.94)')
+   check('appearance.palette_fg', appearance.command_palette_fg_color, colors.mocha.text)
+   check('appearance.char_select_bg', appearance.char_select_bg_color, 'rgba(24, 24, 37, 0.94)')
+   check('appearance.char_select_fg', appearance.char_select_fg_color, colors.mocha.text)
+   check('appearance.pane_select_bg', appearance.pane_select_bg_color, 'rgba(17, 17, 27, 0.75)')
+   check('appearance.pane_select_fg', appearance.pane_select_fg_color, colors.mocha.yellow)
+   check('appearance.cursor_thickness', appearance.cursor_thickness, '2px')
+   check('appearance.padding', appearance.window_padding.left + appearance.window_padding.right, 20)
+   check(
+      'appearance.padding_vertical',
+      appearance.window_padding.top + appearance.window_padding.bottom,
+      16
+   )
+   local bell = appearance.visual_bell
+   check('appearance.bell_in_ms', bell.fade_in_duration_ms, 150)
+   check('appearance.bell_out_ms', bell.fade_out_duration_ms, 150)
+   check('appearance.bell_in_ease', bell.fade_in_function, 'EaseOut')
+   check('appearance.bell_out_ease', bell.fade_out_function, 'EaseOut')
+   -- 这几个键只有新构建认得，只能经 config/fluent.lua 写入，不能出现在静态表里
+   for _, key in ipairs({
+      'char_select_border_color',
+      'scroll_bar_thumb_width',
+      'split_thickness',
+      'max_fps_follows_display',
+   }) do
+      check('appearance.fluent_key_not_static.' .. key, appearance[key], nil)
+   end
    check('appearance.close_button_in_tabs', appearance.show_close_tab_button_in_tabs, true)
 
    -- 遮罩层/专注模式背景跟随 gui-settings.json 里设置浮层选中的方案
@@ -926,6 +1005,47 @@ do
       check('new_tab.entries', #choices_data, #require('config.launch').launch_menu)
       for idx, data in ipairs(choices_data) do
          check('new_tab.domain.' .. idx, type(data.domain), 'table')
+      end
+   end
+   -- 右键弹出的 InputSelector：说明文字是中文，标题保留 'InputSelector:' 前缀（标签标题据此
+   -- 换成望远镜图标）。
+   if loaded then
+      local real_on = wezterm.on
+      local handler = nil
+      wezterm.on = function(name, callback)
+         if name == 'new-tab-button-click' then
+            handler = callback
+         end
+      end
+      new_tab.setup()
+      wezterm.on = real_on
+      local performed = nil
+      local window = {
+         effective_config = function()
+            return { ssh_domains = {}, unix_domains = {} }
+         end,
+         perform_action = function(_, action)
+            performed = action
+         end,
+      }
+      check('new_tab.click_handler', type(handler), 'function')
+      if handler then
+         handler(window, {}, 'Right', {})
+         local selector = type(performed) == 'table' and performed.InputSelector
+         check('new_tab.selector_shown', type(selector), 'table')
+         if selector then
+            check(
+               'new_tab.fuzzy_description_zh',
+               selector.fuzzy_description:find('选择启动项', 1, true) ~= nil,
+               true
+            )
+            check(
+               'new_tab.fuzzy_description_typo_gone',
+               selector.fuzzy_description:find('lauch', 1, true),
+               nil
+            )
+            check('new_tab.title_prefix', selector.title:find('InputSelector:', 1, true), 1)
+         end
       end
    end
    -- 末项用的按键动作要随 WezTerm GX 本体一起发布（0.2.0 新增）；旧二进制上这一项会失败。
@@ -1296,6 +1416,41 @@ do
    check('fluent.rejected_is_skipped', out.max_fps_follows_display, nil)
    out = fluent.apply({ max_fps_follows_display = false }, { supports = accept_all, is_win = true })
    check('fluent.no_override', out.max_fps_follows_display, false)
+
+   -- 登记的键（界面色放在 colors 里合并，不覆盖已有的 colors 键）
+   local declared = fluent.declared(true)
+   local mocha = require('colors.custom').mocha
+   check(
+      'fluent.declared.char_select_border',
+      declared.top.char_select_border_color,
+      mocha.surface1
+   )
+   check('fluent.declared.thumb_width', declared.top.scroll_bar_thumb_width, '3pt')
+   check('fluent.declared.split_thickness', declared.top.split_thickness, '1px')
+   check(
+      'fluent.declared.non_win_no_follows',
+      fluent.declared(false).top.max_fps_follows_display,
+      nil
+   )
+   out = fluent.apply({ colors = { split = '#313244' } }, { supports = accept_all, is_win = false })
+   check('fluent.merge.keeps_chrome', out.colors.split, '#313244')
+   check('fluent.merge.adds_overlay', out.colors.overlay_selected_bg, mocha.surface1)
+   check('fluent.merge.adds_status', out.colors.copy_mode_status_bg.Color, mocha.surface0)
+   check('fluent.merge.adds_top', out.split_thickness, '1px')
+   out = fluent.apply({ colors = { split = '#313244' } }, { supports = reject_all, is_win = false })
+   check('fluent.reject.colors_untouched', out.colors.overlay_selected_bg, nil)
+   check('fluent.reject.top_untouched', out.split_thickness, nil)
+   -- 逐键探测：只认得部分键时，认得的写入、不认得的跳过
+   local function only_overlay(key, value)
+      return key == 'colors' and value.overlay_selected_bg ~= nil
+   end
+   out = fluent.apply({}, { supports = only_overlay, is_win = false })
+   check('fluent.partial.overlay_in', out.colors and out.colors.overlay_selected_bg, mocha.surface1)
+   check('fluent.partial.status_out', out.colors and out.colors.copy_mode_status_bg, nil)
+   check('fluent.partial.top_out', out.split_thickness, nil)
+   -- 没有 colors 可合并时不凭空建一个空表
+   out = fluent.apply({}, { supports = reject_all, is_win = false })
+   check('fluent.reject.no_empty_colors', out.colors, nil)
 
    -- 真实探测：老键认得，未知键与类型不符不认得
    check('fluent.probe.known_key', fluent.supported('max_fps', 60), true)

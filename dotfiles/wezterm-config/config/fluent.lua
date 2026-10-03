@@ -1,5 +1,6 @@
 local wezterm = require('wezterm')
 local platform = require('utils.platform')
+local palette = require('colors.custom')
 
 -- 只有本分支（gx0404/wezterm）新构建才认得的配置键。
 --
@@ -11,6 +12,8 @@ local platform = require('utils.platform')
 -- 以后新增 fork 配置键：先在 Rust 侧加字段，再把键登记到 declared() 里；不要直接写进
 -- config/appearance.lua 等静态表。
 
+local mocha = palette.mocha
+
 local M = {}
 
 ---本分支新增、旧二进制不认得的配置键。top 是顶层键，colors 是 `colors` 表里的键
@@ -18,8 +21,15 @@ local M = {}
 ---@param is_win boolean
 ---@return { top: table, colors: table }
 local function declared(is_win)
-   local top = {}
-   local colors = {}
+   local top = {
+      -- CharSelect 外框线色；不设时与背景同色（看不见）。
+      char_select_border_color = mocha.surface1,
+      -- 滚动条 thumb 画成细线圆端，宽度不再占满右侧 padding。
+      scroll_bar_thumb_width = '3pt',
+      -- 分割线粗细与下划线粗细解耦（underline_thickness 保持 1.5pt）。
+      split_thickness = '1px',
+   }
+   local colors = palette.fluent_chrome
 
    -- 帧率上限跟随窗口所在显示器的刷新率（config.rs::max_fps_follows_display，目前只有
    -- Windows 实现，其他平台忽略，所以只在 Windows 写入）。max_fps 仍是读不到刷新率时的兜底。

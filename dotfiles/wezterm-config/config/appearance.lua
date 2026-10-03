@@ -39,6 +39,7 @@ local options = {
    end),
    front_end = front_end[platform.os],
    underline_thickness = '1.5pt',
+   cursor_thickness = '2px',
 
    -- animation_fps 是动画（视觉铃声淡入淡出等）的帧率。光标与闪烁文字的缓动都用 Constant：
    -- 非 Constant 的缓动会让空闲窗口按 animation_fps 持续重绘，Constant 只在亮灭切换时
@@ -76,11 +77,16 @@ local options = {
    show_tab_index_in_tab_bar = false,
    switch_to_last_active_tab_when_closing_tab = true,
 
-   -- command palette
-   command_palette_fg_color = '#b4befe',
-   command_palette_bg_color = '#11111b',
+   -- 浮层：命令面板与字符选择用 mantle 带 alpha 的底（隐约透出下层），窗格选择的编号盖在
+   -- 半透明 crust 上。选中行与外框的配色在 colors（colors/custom.lua）与 config/fluent.lua。
+   command_palette_fg_color = mocha.text,
+   command_palette_bg_color = 'rgba(24, 24, 37, 0.94)',
    command_palette_font_size = 12,
    command_palette_rows = 25,
+   char_select_fg_color = mocha.text,
+   char_select_bg_color = 'rgba(24, 24, 37, 0.94)',
+   pane_select_fg_color = mocha.yellow,
+   pane_select_bg_color = 'rgba(17, 17, 27, 0.75)',
 
    -- window
    window_padding = {
@@ -120,11 +126,13 @@ local options = {
       brightness = 0.72,
    },
 
+   -- 视觉铃声：淡入淡出各 150ms，animation_fps 为 60 才有平滑的过渡。颜色见
+   -- colors.visual_bell（colors/custom.lua）。
    visual_bell = {
-      fade_in_function = 'EaseIn',
-      fade_in_duration_ms = 250,
+      fade_in_function = 'EaseOut',
+      fade_in_duration_ms = 150,
       fade_out_function = 'EaseOut',
-      fade_out_duration_ms = 250,
+      fade_out_duration_ms = 150,
       target = 'CursorColor',
    },
 }
