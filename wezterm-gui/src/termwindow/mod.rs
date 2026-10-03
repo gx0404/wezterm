@@ -475,6 +475,9 @@ pub struct TermWindow {
     line_quad_cache: RefCell<LfuCache<LineQuadCacheKey, LineQuadCacheValue>>,
 
     last_status_call: Instant,
+    /// fork: coalesces `update_title` requests into one rebuild per
+    /// TITLE_UPDATE_COALESCE window (see `title_update.rs`).
+    title_update: title_update::TitleUpdateCoalescer,
     cursor_blink_state: RefCell<ColorEase>,
     blink_state: RefCell<ColorEase>,
     rapid_blink_state: RefCell<ColorEase>,
@@ -611,7 +614,7 @@ impl TermWindow {
             pane.focus_changed(focused);
         }
 
-        self.update_title();
+        self.update_title_now();
         self.emit_window_event("window-focus-changed", None);
     }
 
@@ -826,6 +829,7 @@ impl TermWindow {
                 &config,
             )),
             last_status_call: Instant::now(),
+            title_update: Default::default(),
             cursor_blink_state: RefCell::new(ColorEase::new(
                 config.cursor_blink_rate,
                 config.cursor_blink_ease_in,
@@ -1444,7 +1448,7 @@ impl TermWindow {
                         tab.resize(self.terminal_size);
                     }
                 };
-                self.update_title();
+                self.update_title_now();
                 window.invalidate();
             }
             TermWindowNotif::SetInnerSize { width, height } => {
@@ -2173,7 +2177,56 @@ impl TermWindow {
     /// Called by various bits of code to update the title bar.
     /// Let's also trigger the status event so that it can choose
     /// to update the right-status.
+    /// fork: requests are coalesced; the rebuild runs once at the end of
+    /// a TITLE_UPDATE_COALESCE window. Each rebuild re-runs the tab bar
+    /// layout, 2N+1 format-* Lua callbacks and an update-status event, so
+    /// a 10Hz title spinner in a few tabs used to keep the GUI thread
+    /// busy. Paths that must show the new state on the very next frame
+    /// use `update_title_now`.
     fn update_title(&mut self) {
+        self.request_title_update(true);
+    }
+
+    /// fork: queue a coalesced title rebuild; `with_status` also emits
+    /// update-status (still gated by its EventState) when it runs.
+    fn request_title_update(&mut self, with_status: bool) {
+        if !self.title_update.request(with_status) {
+            // Already queued for this window
+            return;
+        }
+        let window = match self.window.as_ref() {
+            Some(window) => window.clone(),
+            None => {
+                // No window to deliver the timer to: run it right away
+                self.flush_pending_title_update();
+                return;
+            }
+        };
+        promise::spawn::spawn(async move {
+            Timer::after(title_update::TITLE_UPDATE_COALESCE).await;
+            window.notify(TermWindowNotif::Apply(Box::new(|tw| {
+                tw.flush_pending_title_update();
+            })));
+        })
+        .detach();
+    }
+
+    /// fork: timer side of `request_title_update`; a no-op when an
+    /// immediate update already consumed the request.
+    fn flush_pending_title_update(&mut self) {
+        if let Some(with_status) = self.title_update.take() {
+            if with_status {
+                self.schedule_status_update();
+            }
+            self.update_title_impl();
+        }
+    }
+
+    /// fork: un-coalesced `update_title` for paths whose next frame must
+    /// already reflect the new state (focus change, tab switch, window
+    /// size change, switching mux window). Swallows a queued request.
+    fn update_title_now(&mut self) {
+        self.title_update.take();
         self.schedule_status_update();
         self.update_title_impl();
     }
@@ -2552,7 +2605,7 @@ impl TermWindow {
                 pane.focus_changed(true);
             }
 
-            self.update_title();
+            self.update_title_now();
             self.update_scrollbar();
         }
         Ok(())
@@ -2619,7 +2672,7 @@ impl TermWindow {
         window.set_active_tab_idx_without_saving(tab_idx);
 
         drop(window);
-        self.update_title();
+        self.update_title_now();
         self.update_scrollbar();
 
         Ok(())

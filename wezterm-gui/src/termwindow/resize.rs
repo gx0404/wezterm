@@ -300,7 +300,9 @@ impl super::TermWindow {
         };
         self.resize_overlays();
         self.invalidate_fancy_tab_bar();
-        self.update_title();
+        // fork: the tab bar is laid out for the window width, so the next
+        // frame needs it rebuilt; don't wait for the coalescing window
+        self.update_title_now();
 
         window.set_resize_increments(if self.config.use_resize_increments {
             ri_calc.into()
