@@ -369,7 +369,17 @@ impl GlState {
     fn create_ext(wgl: Rc<WglWrapper>, extensions: String, hdc: HDC) -> anyhow::Result<Self> {
         use ffiextra::*;
 
-        let format_id = Self::choose_pixel_format_arb(&wgl, &extensions, hdc)?;
+        // fork: a window's pixel format can only be set once. When the
+        // context is rebuilt after a loss (gpu_recovery.rs) the HWND
+        // already carries one, so reuse it instead of failing over to the
+        // basic context.
+        let existing_format = unsafe { GetPixelFormat(hdc) };
+        let format_id = if existing_format != 0 {
+            log::debug!("reusing pixel format {existing_format} already set on the window");
+            existing_format
+        } else {
+            Self::choose_pixel_format_arb(&wgl, &extensions, hdc)?
+        };
 
         let mut pfd: PIXELFORMATDESCRIPTOR = unsafe { std::mem::zeroed() };
 
@@ -388,12 +398,14 @@ impl GlState {
             );
         }
 
-        let res = unsafe { SetPixelFormat(hdc, format_id, &pfd) };
-        if res == 0 {
-            anyhow::bail!(
-                "SetPixelFormat function failed: {}",
-                std::io::Error::last_os_error()
-            );
+        if existing_format == 0 {
+            let res = unsafe { SetPixelFormat(hdc, format_id, &pfd) };
+            if res == 0 {
+                anyhow::bail!(
+                    "SetPixelFormat function failed: {}",
+                    std::io::Error::last_os_error()
+                );
+            }
         }
 
         let mut attribs = vec![

@@ -83,6 +83,7 @@ pub mod box_model;
 pub mod charselect;
 pub mod clipboard;
 pub mod context_menu;
+mod gpu_recovery;
 pub mod keybinds;
 pub mod keyevent;
 mod live_resize;
@@ -174,6 +175,11 @@ pub enum TermWindowNotif {
         width: usize,
         height: usize,
     },
+    /// fork: the GPU context was lost; drop the render state and create a
+    /// new context (see gpu_recovery.rs)
+    RebuildRenderState,
+    /// fork: the new context is waiting in `TermWindow::gpu_handoff`
+    RenderStateRebuilt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -540,6 +546,12 @@ pub struct TermWindow {
     gl: Option<Rc<glium::backend::Context>>,
     webgpu: Option<Rc<WebGpuState>>,
     config_subscription: Option<config::ConfigSubscription>,
+    /// fork: retry/backoff state for rebuilding the render state after the
+    /// GPU context is lost (see gpu_recovery.rs)
+    gpu_recovery: gpu_recovery::ContextLossTracker,
+    /// fork: slot through which the asynchronously created replacement
+    /// context reaches `finish_render_state_rebuild`
+    gpu_handoff: gpu_recovery::ContextHandoff,
 }
 
 impl TermWindow {
@@ -871,6 +883,8 @@ impl TermWindow {
             has_animation: RefCell::new(None),
             scheduled_animation: RefCell::new(None),
             allow_images: AllowImage::Yes,
+            gpu_recovery: Default::default(),
+            gpu_handoff: Default::default(),
             semantic_zones: HashMap::new(),
             ui_items: vec![],
             dragging: None,
@@ -1160,9 +1174,9 @@ impl TermWindow {
         };
 
         if gl.is_context_lost() {
-            log::error!("opengl context was lost; should reinit");
-            window.close();
-            front_end().forget_known_window(window);
+            // fork: rebuild the render state instead of closing the window;
+            // the rebuild runs from dispatch_notif, outside the paint path
+            self.note_context_lost(window);
             return false;
         }
 
@@ -1174,7 +1188,23 @@ impl TermWindow {
             ),
         );
         self.paint_impl(&mut RenderFrame::Glium(&mut frame));
-        let presented = window.finish_frame(frame).is_ok();
+        let presented = match window.finish_frame(frame) {
+            Ok(()) => {
+                self.gpu_recovery.on_frame_presented();
+                true
+            }
+            Err(err) => {
+                // fork: swap_buffers is the other place glium reports a
+                // lost context
+                if matches!(
+                    err.downcast_ref::<glium::SwapBuffersError>(),
+                    Some(glium::SwapBuffersError::ContextLost)
+                ) {
+                    self.note_context_lost(window);
+                }
+                false
+            }
+        };
         if presented && !self.notified_first_frame {
             self.notified_first_frame = true;
             window.notify_first_frame_presented();
@@ -1190,7 +1220,23 @@ impl TermWindow {
                 match err.downcast_ref::<wgpu::SurfaceError>() {
                     Some(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                         self.webgpu.as_mut().unwrap().resize(self.dimensions);
-                        return self.do_paint_webgpu_impl();
+                        return match self.do_paint_webgpu_impl() {
+                            // fork: a surface that stays lost after being
+                            // reconfigured needs the whole device rebuilt
+                            // (see gpu_recovery.rs)
+                            Err(err)
+                                if matches!(
+                                    err.downcast_ref::<wgpu::SurfaceError>(),
+                                    Some(wgpu::SurfaceError::Lost)
+                                ) =>
+                            {
+                                if let Some(window) = self.window.clone() {
+                                    self.note_context_lost(&window);
+                                }
+                                Ok(false)
+                            }
+                            result => result,
+                        };
                     }
                     _ => {}
                 }
@@ -1215,6 +1261,12 @@ impl TermWindow {
                 self.shape_cache.borrow_mut().clear();
                 self.invalidate_modal();
                 window.invalidate();
+            }
+            TermWindowNotif::RebuildRenderState => {
+                self.begin_render_state_rebuild(window);
+            }
+            TermWindowNotif::RenderStateRebuilt => {
+                self.finish_render_state_rebuild(window);
             }
             TermWindowNotif::PerformAssignment {
                 pane_id,

@@ -256,6 +256,13 @@ impl WindowInner {
     fn enable_opengl(&mut self) -> anyhow::Result<Rc<glium::backend::Context>> {
         let conn = Connection::get().unwrap();
 
+        // fork: the GUI calls this again to recover from a lost context
+        // (gpu_recovery.rs) after dropping its own references. Release ours
+        // first: the EGL surface and the WGL pixel format are bound to this
+        // HWND, and ANGLE only restores a lost device once every old
+        // context is gone.
+        self.gl_state.take();
+
         let gl_state = if self.config.prefer_egl {
             match conn.gl_connection.borrow().as_ref() {
                 None => crate::egl::GlState::create(None, self.hwnd.0),
