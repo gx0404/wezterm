@@ -4,11 +4,12 @@ use crate::color::LinearRgba;
 use crate::customglyph::{BlockKey, Poly};
 use crate::glyphcache::CachedGlyph;
 use crate::quad::{QuadImpl, QuadTrait, TripleLayerQuadAllocator, TripleLayerQuadAllocatorTrait};
+use crate::termwindow::render::corners::rounded_corner_arc;
 use crate::termwindow::{
     ColorEase, MouseCapture, RenderState, TermWindowNotif, UIItem, UIItemType,
 };
 use crate::utilsprites::RenderMetrics;
-use ::window::{RectF, WindowOps};
+use ::window::{PointF, RectF, WindowOps};
 use anyhow::anyhow;
 use config::{Dimension, DimensionContext};
 use finl_unicode::grapheme_clusters::Graphemes;
@@ -1008,6 +1009,68 @@ impl super::TermWindow {
         }
     }
 
+    /// fork: draw one rounded corner as a background-colored sector with
+    /// the border arc stroked on top. Upstream filled the whole sector
+    /// with the border color, which only looks right when border and
+    /// background share a color; this keeps a contrasting border as a
+    /// thin outline through the corner. `border_width` is the pixel
+    /// width of the edge the corner belongs to and doubles as the arc's
+    /// stroke width; a zero or transparent border draws no arc.
+    fn render_rounded_corner(
+        &self,
+        layers: &mut TripleLayerQuadAllocator,
+        origin: PointF,
+        corner: &PixelSizedPoly,
+        border_width: f32,
+        border_color: LinearRgba,
+        colors: &ElementColors,
+        inherited_colors: Option<&ElementColors>,
+    ) -> anyhow::Result<()> {
+        if corner.width <= 0. || corner.height <= 0. {
+            return Ok(());
+        }
+        let size = euclid::size2(corner.width, corner.height);
+        let line_width = border_width as isize;
+
+        // The sector goes down first so that a translucent background
+        // never dims the arc painted over it.
+        let bg = self.resolve_bg(colors, inherited_colors);
+        let mut quad = self.poly_quad(
+            layers,
+            0,
+            origin,
+            corner.poly,
+            line_width,
+            size,
+            LinearRgba::TRANSPARENT,
+        )?;
+        bg.apply(&mut quad);
+        quad.set_grayscale();
+
+        if border_width <= 0. || border_color == LinearRgba::TRANSPARENT {
+            return Ok(());
+        }
+        // A plain background in the border color already covers the arc
+        // pixel for pixel; skipping the stroke keeps those callers
+        // rendering exactly as before.
+        if bg.mix_value == 0. && bg.color == border_color {
+            return Ok(());
+        }
+        if let Some(arc) = rounded_corner_arc(corner.poly, corner.width, corner.height) {
+            self.poly_quad(
+                layers,
+                0,
+                origin,
+                arc,
+                line_width.max(1),
+                size,
+                border_color,
+            )?
+            .set_grayscale();
+        }
+        Ok(())
+    }
+
     fn render_element_background<'a>(
         &self,
         element: &ComputedElement,
@@ -1026,63 +1089,53 @@ impl super::TermWindow {
             let bottom_right_width = c.bottom_right.width;
             let bottom_right_height = c.bottom_right.height;
 
-            if top_left_width > 0. && top_left_height > 0. {
-                self.poly_quad(
-                    layers,
-                    0,
-                    element.border_rect.origin,
-                    c.top_left.poly,
-                    element.border.top as isize,
-                    euclid::size2(top_left_width, top_left_height),
-                    colors.border.top,
-                )?
-                .set_grayscale();
-            }
-            if top_right_width > 0. && top_right_height > 0. {
-                self.poly_quad(
-                    layers,
-                    0,
-                    euclid::point2(
-                        element.border_rect.max_x() - top_right_width,
-                        element.border_rect.min_y(),
-                    ),
-                    c.top_right.poly,
-                    element.border.top as isize,
-                    euclid::size2(top_right_width, top_right_height),
-                    colors.border.top,
-                )?
-                .set_grayscale();
-            }
-            if bottom_left_width > 0. && bottom_left_height > 0. {
-                self.poly_quad(
-                    layers,
-                    0,
-                    euclid::point2(
-                        element.border_rect.min_x(),
-                        element.border_rect.max_y() - bottom_left_height,
-                    ),
-                    c.bottom_left.poly,
-                    element.border.bottom as isize,
-                    euclid::size2(bottom_left_width, bottom_left_height),
-                    colors.border.bottom,
-                )?
-                .set_grayscale();
-            }
-            if bottom_right_width > 0. && bottom_right_height > 0. {
-                self.poly_quad(
-                    layers,
-                    0,
-                    euclid::point2(
-                        element.border_rect.max_x() - bottom_right_width,
-                        element.border_rect.max_y() - bottom_right_height,
-                    ),
-                    c.bottom_right.poly,
-                    element.border.bottom as isize,
-                    euclid::size2(bottom_right_width, bottom_right_height),
-                    colors.border.bottom,
-                )?
-                .set_grayscale();
-            }
+            // fork: each corner is a background sector with the border
+            // arc stroked on top; see render_rounded_corner.
+            self.render_rounded_corner(
+                layers,
+                element.border_rect.origin,
+                &c.top_left,
+                element.border.top,
+                colors.border.top,
+                colors,
+                inherited_colors,
+            )?;
+            self.render_rounded_corner(
+                layers,
+                euclid::point2(
+                    element.border_rect.max_x() - top_right_width,
+                    element.border_rect.min_y(),
+                ),
+                &c.top_right,
+                element.border.top,
+                colors.border.top,
+                colors,
+                inherited_colors,
+            )?;
+            self.render_rounded_corner(
+                layers,
+                euclid::point2(
+                    element.border_rect.min_x(),
+                    element.border_rect.max_y() - bottom_left_height,
+                ),
+                &c.bottom_left,
+                element.border.bottom,
+                colors.border.bottom,
+                colors,
+                inherited_colors,
+            )?;
+            self.render_rounded_corner(
+                layers,
+                euclid::point2(
+                    element.border_rect.max_x() - bottom_right_width,
+                    element.border_rect.max_y() - bottom_right_height,
+                ),
+                &c.bottom_right,
+                element.border.bottom,
+                colors.border.bottom,
+                colors,
+                inherited_colors,
+            )?;
 
             // Filling the background is more complex because we can't
             // simply fill the padding rect--we'd clobber the corner
