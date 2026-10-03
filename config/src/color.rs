@@ -639,6 +639,26 @@ pub struct WindowFrameConfig {
     pub border_right_color: Option<RgbaColor>,
     pub border_top_color: Option<RgbaColor>,
     pub border_bottom_color: Option<RgbaColor>,
+
+    /// fork: corner radius of the tabs in the fancy tab bar (the top two
+    /// corners, or the bottom two with `tab_bar_at_bottom`). Defaults to
+    /// `"0.5cell"`, the historical radius.
+    #[dynamic(
+        try_from = "crate::units::PixelUnit",
+        default = "default_tab_corner_radius",
+        validate = "crate::config::validate_non_negative_dimension"
+    )]
+    pub tab_corner_radius: Dimension,
+    /// fork: background of the integrated close button while hovered
+    /// (`integrated_title_button_style = "Windows"`). Defaults to
+    /// `#c42b1c`, the Windows 11 caption close color.
+    #[dynamic(default)]
+    pub close_button_hover_bg: Option<RgbaColor>,
+}
+
+// fork: the radius the fancy tab bar always used
+const fn default_tab_corner_radius() -> Dimension {
+    Dimension::Cells(0.5)
 }
 
 const fn default_zero_pixel() -> Dimension {
@@ -668,6 +688,8 @@ impl Default for WindowFrameConfig {
             border_right_color: None,
             border_top_color: None,
             border_bottom_color: None,
+            tab_corner_radius: default_tab_corner_radius(),
+            close_button_hover_bg: None,
         }
     }
 }

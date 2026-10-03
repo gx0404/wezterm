@@ -190,6 +190,45 @@ pub struct Config {
     #[dynamic(default = "default_command_palette_bg_color")]
     pub command_palette_bg_color: RgbaColor,
 
+    /// fork: corner radius of the overlay boxes drawn with the command
+    /// palette styling (command palette, settings, keybindings,
+    /// wallpapers and context menus). Defaults to `"0.25cell"`, the
+    /// historical command palette radius; `"0px"` gives square corners.
+    #[dynamic(
+        try_from = "crate::units::PixelUnit",
+        default = "default_overlay_corner_radius",
+        validate = "validate_non_negative_dimension"
+    )]
+    pub overlay_corner_radius: Dimension,
+
+    /// fork: color of the 1 pixel border around those overlay boxes.
+    /// When unset the border is `command_palette_fg_color` at 12% over
+    /// `command_palette_bg_color`.
+    #[dynamic(default)]
+    pub overlay_border_color: Option<RgbaColor>,
+
+    /// fork: background of the selected row in those overlays. When unset
+    /// the selected row uses `command_palette_fg_color` (reverse video).
+    #[dynamic(default)]
+    pub command_palette_selection_bg_color: Option<RgbaColor>,
+
+    /// fork: text color of the selected row in those overlays. When unset
+    /// it uses `command_palette_bg_color` (reverse video).
+    #[dynamic(default)]
+    pub command_palette_selection_fg_color: Option<RgbaColor>,
+
+    /// fork: color of secondary text in those overlays (footer hints,
+    /// inactive section tabs, key labels). When unset it is
+    /// `command_palette_fg_color` at 60% over `command_palette_bg_color`.
+    #[dynamic(default)]
+    pub command_palette_secondary_fg_color: Option<RgbaColor>,
+
+    /// fork: accent color of those overlays: the bar at the left edge of
+    /// the selected row and the underline of the active settings section.
+    /// When unset it is the cursor background color of the color scheme.
+    #[dynamic(default)]
+    pub command_palette_accent_color: Option<RgbaColor>,
+
     /// Font to use for PaneSelect
     #[dynamic(default)]
     pub pane_select_font: Option<TextStyle>,
@@ -1802,6 +1841,11 @@ fn default_command_palette_bg_color() -> RgbaColor {
     (0x33, 0x33, 0x33).into()
 }
 
+// fork: the radius the command palette box always had
+const fn default_overlay_corner_radius() -> Dimension {
+    Dimension::Cells(0.25)
+}
+
 fn default_swallow_mouse_click_on_window_focus() -> bool {
     cfg!(target_os = "macos")
 }
@@ -2421,7 +2465,24 @@ fn validate_positive_dimension(value: &Dimension) -> Result<(), String> {
     }
 }
 
+// fork: rejects negative and non-finite dimensions; zero is allowed
+// (a zero corner radius means square corners)
+pub(crate) fn validate_non_negative_dimension(value: &Dimension) -> Result<(), String> {
+    let n = match value {
+        Dimension::Points(n)
+        | Dimension::Pixels(n)
+        | Dimension::Percent(n)
+        | Dimension::Cells(n) => *n,
+    };
+    if n.is_finite() && n >= 0. {
+        Ok(())
+    } else {
+        Err(format!("Illegal value {value:?}; it must not be negative"))
+    }
+}
+
 // fork: like `validate_positive_dimension`, but unset is allowed
+
 fn validate_opt_positive_dimension(value: &Option<Dimension>) -> Result<(), String> {
     value.as_ref().map_or(Ok(()), validate_positive_dimension)
 }
@@ -2486,6 +2547,88 @@ mod overlay_chrome_tests {
         assert_eq!(cfg.split_thickness, Some(Dimension::Points(1.)));
         assert!(parse("split_thickness", Value::U64(0)).is_err());
         assert!(parse("split_thickness", Value::String("-1px".into())).is_err());
+    }
+
+    #[test]
+    fn overlay_corner_radius_defaults_to_quarter_cell_and_allows_zero() {
+        assert_eq!(
+            Config::default_config().overlay_corner_radius,
+            Dimension::Cells(0.25)
+        );
+        let cfg = parse("overlay_corner_radius", Value::String("8px".into())).expect("pixels");
+        assert_eq!(cfg.overlay_corner_radius, Dimension::Pixels(8.));
+        // 0 = 直角，允许
+        let cfg = parse("overlay_corner_radius", Value::U64(0)).expect("zero");
+        assert_eq!(cfg.overlay_corner_radius, Dimension::Pixels(0.));
+        assert!(parse("overlay_corner_radius", Value::String("-1px".into())).is_err());
+        assert!(parse("overlay_corner_radius", Value::String("round".into())).is_err());
+    }
+
+    #[test]
+    fn overlay_colors_default_to_unset() {
+        let config = Config::default_config();
+        assert_eq!(config.overlay_border_color, None);
+        assert_eq!(config.command_palette_selection_bg_color, None);
+        assert_eq!(config.command_palette_selection_fg_color, None);
+        assert_eq!(config.command_palette_secondary_fg_color, None);
+        assert_eq!(config.command_palette_accent_color, None);
+
+        for key in [
+            "overlay_border_color",
+            "command_palette_selection_bg_color",
+            "command_palette_selection_fg_color",
+            "command_palette_secondary_fg_color",
+            "command_palette_accent_color",
+        ] {
+            assert!(parse(key, Value::String("#45475a".into())).is_ok(), "{key}");
+            assert!(
+                parse(key, Value::String("not-a-color".into())).is_err(),
+                "{key}"
+            );
+        }
+        let cfg = parse(
+            "command_palette_accent_color",
+            Value::String("#89b4fa".into()),
+        )
+        .expect("valid color");
+        assert_eq!(
+            cfg.command_palette_accent_color,
+            Some((0x89, 0xb4, 0xfa).into())
+        );
+    }
+
+    fn parse_window_frame(key: &str, value: Value) -> Result<Config, wezterm_dynamic::Error> {
+        let mut frame = std::collections::BTreeMap::new();
+        frame.insert(Value::String(key.into()), value);
+        parse("window_frame", Value::Object(frame.into()))
+    }
+
+    #[test]
+    fn window_frame_tab_corner_radius_defaults_to_half_cell() {
+        assert_eq!(
+            Config::default_config().window_frame.tab_corner_radius,
+            Dimension::Cells(0.5)
+        );
+        let cfg =
+            parse_window_frame("tab_corner_radius", Value::String("8px".into())).expect("pixels");
+        assert_eq!(cfg.window_frame.tab_corner_radius, Dimension::Pixels(8.));
+        assert!(parse_window_frame("tab_corner_radius", Value::U64(0)).is_ok());
+        assert!(parse_window_frame("tab_corner_radius", Value::String("-2px".into())).is_err());
+    }
+
+    #[test]
+    fn window_frame_close_button_hover_bg_defaults_to_unset() {
+        assert_eq!(
+            Config::default_config().window_frame.close_button_hover_bg,
+            None
+        );
+        let cfg = parse_window_frame("close_button_hover_bg", Value::String("#e81123".into()))
+            .expect("valid color");
+        assert_eq!(
+            cfg.window_frame.close_button_hover_bg,
+            Some((0xe8, 0x11, 0x23).into())
+        );
+        assert!(parse_window_frame("close_button_hover_bg", Value::String("nope".into())).is_err());
     }
 }
 
