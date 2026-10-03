@@ -507,5 +507,9 @@ if (Test-Path -LiteralPath $resultPath) {
     $probes = @($probes | Where-Object { $_.scenario -ne $Scenario }) + $probe
     $r | Add-Member -NotePropertyName probes -NotePropertyValue $probes -Force
     if ($r.status -eq 'PENDING') { $r.status = 'CAPTURED' }
+    # 分配批次目录时写的占位说明（"只分配证据目录..."）在探针跑完后不再成立。
+    if ($r.PSObject.Properties['note'] -and $r.note -like '只分配证据目录*') {
+        $r.note = '性能探针已运行，见 probes 与各 summary-<场景>.json；无截图，images_reviewed=false 表示不适用'
+    }
     [IO.File]::WriteAllText($resultPath, (($r | ConvertTo-Json -Depth 8) + "`n"), (New-Object Text.UTF8Encoding $false))
 }
