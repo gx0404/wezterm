@@ -24,7 +24,14 @@
 - **抽象优先**：上游消费方（mux、wezterm-ssh 经 re-export）只依赖 trait；
   新平台能力先扩 trait 再实现，不允许 cfg 泄漏到调用方。
 - **ConPTY 兼容**：Windows 实现依赖系统 conpty 可用性探测；改动需在
-  WinPty 回退路径上同样验证（无环境记 PENDING）。
+  WinPty 回退路径上同样验证（无环境记 PENDING）。随包 ConPTY 的版本、
+  来源与 SHA256 登记在 `assets/windows/conhost/README.md`，升级必须成对
+  替换并清理 `target/<profile>/` 旧副本（build.rs 只在缺失时复制）。
+- fork 既定行为：`conpty.rs::Inner::resize` 行列未变只更新像素尺寸、不调
+  `ResizePseudoConsole`（PTY 层去重不是策略）；`procinfo/windows.rs` 进程
+  快照进程级共享（500ms TTL）并按 ppid 索引建树，cmdline 与 cwd 独立读取
+  （上限 UNICODE_STRING / 32767）；`WinChild` 的 Future 等待线程持有进程
+  句柄直到等待结束。
 - **CommandBuilder 语义**：env 继承与登录 shell 修饰的规则影响所有 spawn
   路径（含 ssh 域）；改动要有针对性测试并列出受影响域。
 

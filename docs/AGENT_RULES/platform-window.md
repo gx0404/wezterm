@@ -26,6 +26,16 @@
   （`os/windows/wgl.rs`），与 `egl.rs::SwapInterval(0)`、macOS 一致——帧率
   节流统一交给 GUI 的 max_fps 机制，不要在平台层重新启用 vsync（paint 会
   在 wndProc 内同步等 vblank 卡住消息循环）。
+- 帧节流（fork，Windows）：`wm_paint` 节流期间 `ValidateRect` 避免
+  `WM_PAINT` 空转；节流定时器是 `Connection.frame_timer`
+  （`CreateWaitableTimerExW` HIGH_RESOLUTION，并入 `wait_message` 等待集，
+  deadline 自本帧开始按 `effective_frame_interval(config.max_fps,
+  max_fps_follows_display, monitor_refresh_hz)` 计算，创建失败回退 async-io
+  定时器）；`Connection::create_new` 调 `timeBeginPeriod(1)`。
+  `WindowInner.monitor_refresh_hz` 在创建、`WM_DISPLAYCHANGE`、换显示器时
+  刷新。`default_dpi` 取光标所在显示器（尊重 `dpi_by_screen`/`dpi`），
+  `WM_DPICHANGED` 采纳系统建议矩形。WGL `PixelFormatProfile::{Lean,Legacy}`
+  先请求无 MSAA/深度/模板再回退，探测结果 thread_local 缓存、探测窗口销毁。
 - 纹理契约：`window/src/bitmaps/atlas.rs::Atlas`（`allocate()` 失败给
   `OutOfTextureSpace`）+ `bitmaps/mod.rs::Texture2d` trait——GUI 的 atlas
   降级链依赖该契约。

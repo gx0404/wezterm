@@ -16,7 +16,16 @@
   `parse_buffered_data`（escape 解析，含 DECSET 2026 同步输出 hold/flush 与
   coalesce 延迟）→ `send_actions_to_mux` → `Pane::perform_actions`；单批
   action ≥2048 时按 2048 子批依次应用、子批间释放终端锁（fork：高速大输出
-  时渲染线程不再被单次长临界区挡住，小批路径与上游等价）。
+  时渲染线程不再被单次长临界区挡住，小批路径与上游等价）；sink 带
+  `FlushKind`，同步输出帧（`SyncFrame`：`?2026l`、hold 超时、软复位）整批
+  一次应用**不拆子批**，子批以 `into_iter().take()` 转移所有权不拷贝。
+- 前台进程探测（fork）：`localpane.rs::divine_process_list` 走
+  `stale_cache.rs` 的 stale-while-revalidate——`AllowStale` 过期立即返回旧值
+  并后台单飞刷新（Windows TTL 1s，其余 300ms），刷新后经
+  `Alert::CurrentWorkingDirectoryChanged` 触发标题重算；`FetchImmediate`
+  （关闭确认、继承 cwd）保持同步。禁止在 GUI 线程同步做全量进程快照。
+  `domain.rs` 的 openpty+spawn 经 `smol::unblock` 移出主线程；WSL 域把
+  spawn 额外 env 登记进 `WSLENV`。
 - 域与 pane：`mux/src/domain.rs::Domain` trait（LocalDomain、
   `ssh.rs::RemoteSshDomain`）；`pane.rs::Pane` trait +
   `localpane.rs::LocalPane`；`tab.rs::Tab`（`TabInner` 内 bintree pane 树 +

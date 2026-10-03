@@ -54,7 +54,18 @@ Lua gui 命名空间。平台窗口与事件抽象在 platform-window 域（`win
   时另一侧记 PENDING，不得声称已验证）。
 - **缓存失效代数**：`quad_generation/shape_generation` 递增驱动 LfuCache
   失效；config reload 走 `config_was_reloaded` 刷新字体与形状缓存，新增
-  配置相关缓存必须挂进这条链。
+  配置相关缓存必须挂进这条链（fork 已挂入：`title_config_cache`）。
+- **标题刷新合并**（fork）：`termwindow/title_update.rs`——标题类 Alert 先按
+  `window_contains_pane` 过滤，`update_title` 只置 pending，约 40ms 合并窗口
+  后执行一次 `update_title_impl`；焦点变化/切 tab/非 live `apply_dimensions`
+  直接刷新。format-* 回调共用一份 `TitleFormatArgs`（tabs/panes/config 表，
+  handler 视为只读），config 表缓存在 `TermWindow.title_config_cache`。
+- **live resize**（fork）：`termwindow/live_resize.rs`——live 期间只 resize
+  活动 tab，其余标脏，100ms 静止或切到该 tab 时补齐；布局真源仍是 mux::Tab。
+- 纯色背景层（`BackgroundSource::Color`）直接画四边形不占 atlas，
+  `ATLAS_SIZE` 初值 1024。文本浮层共享行样式在 `overlay/style.rs`
+  （`overlay_selected_*`、`copy_mode_status_*`），滚动条 thumb 在
+  `render/scroll_thumb.rs`（`scroll_bar_thumb_width`，命中区仍整宽）。
 - **纹理耗尽降级链**：`AllowImage::Yes→Scale(2/4/8)→No`；新图像路径要接进
   该链而不是自行吞错。
 - **wezterm.gui 只在 GUI 进程注册**（window-funcs crate 由 main.rs 单独
