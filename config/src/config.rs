@@ -679,7 +679,7 @@ pub struct Config {
     #[dynamic(default = "linear_ease")]
     pub cursor_blink_ease_out: EasingFunction,
 
-    #[dynamic(default = "default_anim_fps")]
+    #[dynamic(default = "default_anim_fps", validate = "validate_animation_fps")]
     pub animation_fps: u8,
 
     #[dynamic(default)]
@@ -876,7 +876,7 @@ pub struct Config {
     #[dynamic(default = "default_true")]
     pub unzoom_on_switch_pane: bool,
 
-    #[dynamic(default = "default_max_fps")]
+    #[dynamic(default = "default_max_fps", validate = "validate_max_fps")]
     pub max_fps: u64,
 
     /// fork: 为 true 时帧率上限跟随窗口所在显示器的刷新率（跨显示器拖动、
@@ -1937,6 +1937,29 @@ fn default_max_fps() -> u64 {
     60
 }
 
+/// fork: max_fps 的合法上限。0 会让帧间隔除零 panic，超过 1000 已无意义
+const MAX_FPS_LIMIT: u64 = 1000;
+
+fn validate_max_fps(value: &u64) -> Result<(), String> {
+    if (1..=MAX_FPS_LIMIT).contains(value) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Illegal value {value} for max_fps; it must be in the range 1..={MAX_FPS_LIMIT}!"
+        ))
+    }
+}
+
+fn validate_animation_fps(value: &u8) -> Result<(), String> {
+    if *value >= 1 {
+        Ok(())
+    } else {
+        Err(format!(
+            "Illegal value {value} for animation_fps; it must be >= 1!"
+        ))
+    }
+}
+
 fn default_tiling_desktop_environments() -> Vec<String> {
     [
         "X11 LG3D",
@@ -2371,6 +2394,80 @@ fn default_macos_forward_mods() -> Modifiers {
 
 fn default_colr_rasterizer() -> FontRasterizerSelection {
     FontRasterizerSelection::Harfbuzz
+}
+
+// fork: max_fps / animation_fps 取值校验：0 与越界值要在配置阶段报错，
+// 而不是在渲染路径除零 panic
+#[cfg(test)]
+mod fps_validation_tests {
+    use super::*;
+    use wezterm_dynamic::{FromDynamicOptions, UnknownFieldAction, Value};
+
+    fn config_with(field: &str, value: Value) -> Result<Config, wezterm_dynamic::Error> {
+        let mut obj = std::collections::BTreeMap::new();
+        obj.insert(Value::String(field.into()), value);
+        Config::from_dynamic(
+            &Value::Object(obj.into()),
+            FromDynamicOptions {
+                unknown_fields: UnknownFieldAction::Deny,
+                deprecated_fields: UnknownFieldAction::Warn,
+            },
+        )
+    }
+
+    #[test]
+    fn defaults_pass_validation() {
+        assert_eq!(Config::default_config().max_fps, 60);
+        assert_eq!(Config::default_config().animation_fps, 10);
+        assert!(!Config::default_config().max_fps_follows_display);
+    }
+
+    #[test]
+    fn max_fps_zero_is_rejected_with_range_in_message() {
+        let err = config_with("max_fps", Value::U64(0))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("max_fps"), "{err}");
+        assert!(err.contains("1..=1000"), "{err}");
+    }
+
+    #[test]
+    fn max_fps_above_limit_is_rejected() {
+        assert!(config_with("max_fps", Value::U64(1001)).is_err());
+    }
+
+    #[test]
+    fn max_fps_bounds_are_inclusive() {
+        assert_eq!(config_with("max_fps", Value::U64(1)).unwrap().max_fps, 1);
+        assert_eq!(
+            config_with("max_fps", Value::U64(1000)).unwrap().max_fps,
+            1000
+        );
+        assert_eq!(
+            config_with("max_fps", Value::U64(165)).unwrap().max_fps,
+            165
+        );
+    }
+
+    #[test]
+    fn animation_fps_zero_is_rejected() {
+        let err = config_with("animation_fps", Value::U64(0))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("animation_fps"), "{err}");
+        assert_eq!(
+            config_with("animation_fps", Value::U64(1))
+                .unwrap()
+                .animation_fps,
+            1
+        );
+    }
+
+    #[test]
+    fn max_fps_follows_display_round_trips() {
+        let cfg = config_with("max_fps_follows_display", Value::Bool(true)).unwrap();
+        assert!(cfg.max_fps_follows_display);
+    }
 }
 
 // fork: `clipboard_image_paste` 的默认值与小写序列化守门
