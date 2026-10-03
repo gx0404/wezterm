@@ -38,7 +38,7 @@
 | `make kb` / `make kb-check` | 重建/校验知识库 | kb 写盘，kb-check 只读 |
 | `make gx-bundle` | docker ubuntu:20.04 容器构建 release 四件套并组装离线安装包 `dist/*.tar.xz`（有 Windows 包时顺带产出 zip） | 需 docker（或 `GX_USE_LOCAL=1` 本机构建，产物标注 glibc）；联网装依赖，耗时 |
 | `make package` | 按宿主平台调用 GX 原生打包入口 | 与下面两项相同；不上传、不安装 |
-| `make gx-package-windows` | 编译并生成完整 Windows x64 安装 EXE、清单和 SHA-256 | Windows、MSVC、Rust ≥ 1.89、Inno Setup ≥ 7.1；Windows 可直接运行 `python scripts/gx_package.py windows` |
+| `make gx-package-windows` | 编译并生成完整 Windows x64 安装 EXE、清单和 SHA-256 | Windows、MSVC、Rust ≥ 1.89、Inno Setup ≥ 7.1、Strawberry Perl、NASM ≥ 3.02；Windows 可直接运行 `scripts\gx_msvc_env.cmd python scripts\gx_package.py windows`（先 `--check` 预检） |
 | `make gx-package-deb` | 编译并生成兼容 Ubuntu 20.04/24.04 的同一个 amd64 deb、清单和 SHA-256 | 原生构建需 Ubuntu 20.04、Rust ≥ 1.89、`get-deps`、pkg-config；新版 Linux/WSL 用 `python3 scripts/gx_package.py deb --container`；不修改用户配置 |
 | `make gx-install` | 源码路径安装：rust 检查 → `./get-deps`（需 sudo，交互确认）→ release 构建 → `dotfiles/install.sh` 部署 | 改 `$HOME` 下用户文件（先备份）；联网 |
 | `make gx-upgrade` | **一条命令本机替换**：docker 容器构建 release 四件套（无 sudo；`GX_USE_LOCAL=1` 本机构建）→ `dotfiles/install.sh` 用户级部署（配置/插件/字体随快照，全带备份）→ 版本验证 | 改 `$HOME` 下用户文件（先备份）；需 docker、联网；已开窗口仍跑旧二进制需重启 |

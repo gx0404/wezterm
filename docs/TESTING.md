@@ -21,7 +21,13 @@
 ## Windows 本地验收前置
 
 在 Visual Studio 的 x64 Native Tools 命令提示符中运行，确保 `cl`、`nmake`、
-SDK、Strawberry Perl 和 nextest 可用。Rust 版本以 `scripts/gx_package.py` 为准，
+SDK、Strawberry Perl 和 nextest 可用。也可以从任意 shell 用
+`scripts\gx_msvc_env.cmd <命令>` 进入同一环境（自动把 Git for Windows、
+NASM 3.02、Strawberry Perl 排到 MSYS2 之前，产物目录固定 `target-gx-msvc/`）：
+MSYS2 的 `git` 若排在前面，`gx_package.py` 会因 POSIX 路径误报
+「must be an independent Git checkout」。本机实测缺的只有 NASM 与 Strawberry Perl，
+可 `winget install NASM.NASM` / `winget install StrawberryPerl.StrawberryPerl`
+补齐（Build Tools 2022、SDK 10.0.26100、Inno Setup 7.1 已就位）。Rust 版本以 `scripts/gx_package.py` 为准，
 nextest 版本以 `scripts/setup_env.sh` 为准；只通过当前进程环境选择工具，不修改
 用户全局默认工具链。
 
