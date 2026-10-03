@@ -50,6 +50,14 @@ struct Inner {
     size: PtySize,
 }
 
+/// fork: ResizePseudoConsole only takes the cell grid size.  A live window
+/// resize delivers a WM_SIZE for every pixel step, and each one used to
+/// call it for every pane even though the grid had not changed; when only
+/// the pixel dimensions change, just record them.
+fn needs_console_resize(current: &PtySize, num_rows: u16, num_cols: u16) -> bool {
+    current.rows != num_rows || current.cols != num_cols
+}
+
 impl Inner {
     pub fn resize(
         &mut self,
@@ -58,10 +66,12 @@ impl Inner {
         pixel_width: u16,
         pixel_height: u16,
     ) -> Result<(), Error> {
-        self.con.resize(COORD {
-            X: num_cols as i16,
-            Y: num_rows as i16,
-        })?;
+        if needs_console_resize(&self.size, num_rows, num_cols) {
+            self.con.resize(COORD {
+                X: num_cols as i16,
+                Y: num_rows as i16,
+            })?;
+        }
         self.size = PtySize {
             rows: num_rows,
             cols: num_cols,
@@ -113,5 +123,35 @@ impl SlavePty for ConPtySlavePty {
         let inner = self.inner.lock().unwrap();
         let child = inner.con.spawn_command(cmd)?;
         Ok(Box::new(child))
+    }
+}
+
+// fork(A7-b): ConPTY resize 去重判定的单测。
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn size(rows: u16, cols: u16, pixel_width: u16, pixel_height: u16) -> PtySize {
+        PtySize {
+            rows,
+            cols,
+            pixel_width,
+            pixel_height,
+        }
+    }
+
+    #[test]
+    fn pixel_only_change_skips_console_resize() {
+        // live resize 时逐像素的 WM_SIZE：行列不变，不应调 ResizePseudoConsole
+        let current = size(24, 80, 800, 600);
+        assert!(!needs_console_resize(&current, 24, 80));
+    }
+
+    #[test]
+    fn row_or_col_change_resizes_console() {
+        let current = size(24, 80, 800, 600);
+        assert!(needs_console_resize(&current, 25, 80));
+        assert!(needs_console_resize(&current, 24, 81));
+        assert!(needs_console_resize(&current, 1, 1));
     }
 }
