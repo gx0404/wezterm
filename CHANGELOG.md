@@ -11,6 +11,9 @@
 ## 0.4.0(TBD)
 
 ### Added
+- 开发权限：Claude Code 项目配置使用 `acceptEdits` + Bash/常用工具 allow，
+  移除 cargo build/run 与 make 构建、测试等显式询问规则；普通开发操作免逐次确认，
+  原有敏感文件 deny 和危险操作 PreToolUse 安全门保留，不改用户全局设置。
 - 将原 GX Shell subtree 功能回迁到独立 `gx0404/wezterm` 的 `gx` 分支，保留
   `feature/gx_wezterm` 的 Windows 本地构建改动；GX Shell 集成仓只锁定组件完整 SHA，
   不再包含组件源码。`gx_package.py --stage-dir DIR` 的载荷布局和清单保持不变，

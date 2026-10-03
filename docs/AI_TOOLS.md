@@ -33,16 +33,26 @@
 
 ## 权限面（Claude settings.json 要点）
 
-- allow：只读 git、resolver、框架检查类 make、cargo check/nextest/fmt --check。
-- ask：push/commit、setup/graph/kb（写产物）、ci-check/build/test（耗时长、
-  会起 sshd）、cargo run/build、rm。
-- deny：读 .env/.pem/.git。
+- 项目默认模式为 `acceptEdits`；allow 放行仓内 Read/Edit/Write、Glob/Grep、
+  整个 Bash 工具以及 WebFetch/WebSearch/Agent/Skill，普通开发操作不再逐次询问。
+- 不设项目级 `permissions.ask`；原先 cargo build/run、make build/test/setup 等
+  确认规则已移除。Bash 整体授权覆盖管道、环境变量和 shell 展开，不再逐条补前缀。
+- deny（读 .env/.pem/.git）与现有 PreToolUse 安全门原样保留；危险模式仍按
+  `.claude/hooks/dangerous_patterns.conf` 拒绝或询问。Bash 放行不是文件系统沙箱。
+- 仅修改本仓 `.claude/settings.json`，不改用户全局权限。Claude Code 自 v2.1.257
+  起忽略项目/本地配置中的 `defaultMode: bypassPermissions`，因此这里使用
+  项目范围支持的 `acceptEdits` + 工具 allow，而不是写入无效的 bypass 设置。
+- 运行中通常会热重载权限规则；已经显示的旧确认框可取消后重试，必要时从仓根
+  重启并恢复会话。用户/受管设置中的 ask/deny 和客户端内置安全检查仍可能生效。
+  配置语义见 [官方设置说明](https://code.claude.com/docs/en/settings) 与
+  [权限规则](https://code.claude.com/docs/en/permissions)。
 
 ## 逐客户端验证记录
 
 | 项 | ZCode | Claude | Codex | Kimi |
 |---|---|---|---|---|
-| 配置语法解析 | PASS（JSON） | PASS（JSON） | PASS（TOML） | N/A（无目录） |
+| 配置语法解析 | PASS（JSON） | PASS（JSON + Claude Code 2.1.288 doctor） | PASS（TOML） | N/A（无目录） |
+| 项目权限加载与 Bash 实测 | N/A | PASS（2026-10-03，CLI 2.1.288：会话模式为 acceptEdits，含 PATH、管道与 `${PIPESTATUS[0]}` 的 `cargo build --help` 执行成功，permission_denials 为空；未传权限覆盖参数，未实际构建） | N/A | N/A |
 | hooks 探针（无副作用 JSON） | PASS（离线探针：`python3 -m unittest discover -s scripts -p test_ai_tool_hooks.py`；含**注册入口探针**（按配置原样解释器+适配器调用）与 codex/zcode 配置形状锁） | PASS（同左，block_dangerous.sh 直接探针） | PASS（--protocol codex 探针 + python3 注册入口探针） | N/A |
 | 新会话规则加载 | PENDING（首次真实会话时补验） | PENDING | PENDING | PENDING |
 | MCP | N/A（本仓无项目级 MCP） | N/A | N/A | N/A |
