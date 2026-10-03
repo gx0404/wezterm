@@ -144,21 +144,58 @@ fn perform_actions_in_chunks<F: FnMut(Vec<Action>)>(actions: Vec<Action>, mut pe
         perform(actions);
         return;
     }
-    for chunk in actions.chunks(SUB_BATCH_ACTIONS) {
-        perform(chunk.to_vec());
+    // fork: move the actions into each sub-batch instead of cloning them.
+    let mut actions = actions.into_iter();
+    loop {
+        let chunk: Vec<Action> = actions.by_ref().take(SUB_BATCH_ACTIONS).collect();
+        if chunk.is_empty() {
+            break;
+        }
+        perform(chunk);
+    }
+}
+
+/// fork: why the output pump flushed a batch of actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlushKind {
+    /// Regular coalesced output (delay elapsed, buffer full, EOF, or the
+    /// output preceding a synchronized block).  Large batches may be
+    /// applied in sub-batches.
+    Coalesced,
+    /// A DECSET 2026 synchronized frame: flushed by `?2026l`, by the hold
+    /// timing out, or by a soft reset.  It must reach the terminal in a
+    /// single `perform_actions` call; splitting it would let the renderer
+    /// paint a half-applied frame between sub-batches.
+    SyncFrame,
+}
+
+/// fork: apply a flushed batch according to its `FlushKind`.
+fn perform_flushed_actions<F: FnMut(Vec<Action>)>(
+    actions: Vec<Action>,
+    kind: FlushKind,
+    mut perform: F,
+) {
+    match kind {
+        FlushKind::SyncFrame => perform(actions),
+        FlushKind::Coalesced => perform_actions_in_chunks(actions, perform),
     }
 }
 
 /// This function applies parsed actions to the pane and notifies any
 /// mux subscribers about the output event
-fn send_actions_to_mux(pane: &Weak<dyn Pane>, dead: &Arc<AtomicBool>, actions: Vec<Action>) {
+fn send_actions_to_mux(
+    pane: &Weak<dyn Pane>,
+    dead: &Arc<AtomicBool>,
+    actions: Vec<Action>,
+    kind: FlushKind,
+) {
     let start = Instant::now();
     match pane.upgrade() {
         Some(pane) => {
-            // fork: apply huge batches in sub-batches so the GUI render
-            // thread can grab the terminal mutex in between; see
-            // `perform_actions_in_chunks`.
-            perform_actions_in_chunks(actions, |batch| pane.perform_actions(batch));
+            // fork: apply huge coalesced batches in sub-batches so the GUI
+            // render thread can grab the terminal mutex in between, but
+            // keep synchronized frames whole; see `perform_flushed_actions`.
+            perform_flushed_actions(actions, kind, |batch| pane.perform_actions(batch));
             histogram!("send_actions_to_mux.perform_actions.latency").record(start.elapsed());
             Mux::notify_from_any_thread(MuxNotification::PaneOutput(pane.pane_id()));
         }
@@ -197,7 +234,7 @@ enum HoldStep {
     /// Keep buffering.
     Buffer,
     /// Flush everything buffered so far, including the action just seen.
-    Flush,
+    Flush(FlushKind),
 }
 
 impl SyncOutputHold {
@@ -238,7 +275,7 @@ impl SyncOutputHold {
                 // must not cost an extra render (a frame wrapped in
                 // ?2026h/?2026l is then presented exactly once).
                 if has_pending {
-                    HoldStep::Flush
+                    HoldStep::Flush(FlushKind::Coalesced)
                 } else {
                     HoldStep::Buffer
                 }
@@ -249,12 +286,12 @@ impl SyncOutputHold {
                 // Synchronized output frame ended: flush all pending
                 // actions to the terminal.
                 *self = Self::Idle;
-                HoldStep::Flush
+                HoldStep::Flush(FlushKind::SyncFrame)
             }
             Action::CSI(CSI::Device(dev)) if matches!(**dev, Device::SoftReset) => {
                 // Soft reset requested
                 *self = Self::Idle;
-                HoldStep::Flush
+                HoldStep::Flush(FlushKind::SyncFrame)
             }
             _ => HoldStep::Buffer,
         }
@@ -295,8 +332,8 @@ fn parse_buffered_data(pane: Weak<dyn Pane>, dead: &Arc<AtomicBool>, rx: FileDes
     // fork: the loop body lives in `parse_buffered_data_with_sink` so that
     // the synchronized output hold policy can be exercised without a Pane.
     let pane_id = pane.upgrade().map(|pane| pane.pane_id());
-    parse_buffered_data_with_sink(pane_id, dead, rx, &mut |actions| {
-        send_actions_to_mux(&pane, dead, actions)
+    parse_buffered_data_with_sink(pane_id, dead, rx, &mut |actions, kind| {
+        send_actions_to_mux(&pane, dead, actions, kind)
     });
 }
 
@@ -314,7 +351,7 @@ fn parse_buffered_data_with_sink(
     pane_id: Option<PaneId>,
     dead: &Arc<AtomicBool>,
     mut rx: FileDescriptor,
-    sink: &mut dyn FnMut(Vec<Action>),
+    sink: &mut dyn FnMut(Vec<Action>, FlushKind),
 ) {
     let mut buf = vec![0; configuration().mux_output_parser_buffer_size];
     let mut parser = termwiz::escape::parser::Parser::new();
@@ -340,7 +377,7 @@ fn parse_buffered_data_with_sink(
                 if hold.take_expired(Instant::now()) {
                     warn_synchronized_output_timeout(pane_id, hold_timeout);
                     if !actions.is_empty() {
-                        sink(std::mem::take(&mut actions));
+                        sink(std::mem::take(&mut actions), FlushKind::SyncFrame);
                         action_size = 0;
                     }
                 }
@@ -363,17 +400,24 @@ fn parse_buffered_data_with_sink(
                         hold.on_action(&action, !actions.is_empty(), Instant::now, hold_timeout);
                     action.append_to(&mut actions);
 
-                    if step == HoldStep::Flush && !actions.is_empty() {
-                        sink(std::mem::take(&mut actions));
-                        action_size = 0;
+                    if let HoldStep::Flush(kind) = step {
+                        if !actions.is_empty() {
+                            sink(std::mem::take(&mut actions), kind);
+                            action_size = 0;
+                        }
                     }
                 });
                 action_size += size;
                 // fork: a guest that keeps writing without ever closing the
                 // block must not accumulate actions without bound; once the
-                // hold expires the coalescing path below flushes as usual.
+                // hold expires the frame buffered so far is flushed whole.
                 if hold.take_expired(Instant::now()) {
                     warn_synchronized_output_timeout(pane_id, hold_timeout);
+                    if !actions.is_empty() {
+                        sink(std::mem::take(&mut actions), FlushKind::SyncFrame);
+                        deadline = None;
+                        action_size = 0;
+                    }
                 }
                 if !actions.is_empty() && !hold.is_held() {
                     // If we haven't accumulated too much data,
@@ -405,7 +449,7 @@ fn parse_buffered_data_with_sink(
                         }
                     }
 
-                    sink(std::mem::take(&mut actions));
+                    sink(std::mem::take(&mut actions), FlushKind::Coalesced);
                     deadline = None;
                     action_size = 0;
                 }
@@ -423,7 +467,13 @@ fn parse_buffered_data_with_sink(
     // for very short lived commands so that we don't forget to
     // display what they displayed.
     if !actions.is_empty() {
-        sink(std::mem::take(&mut actions));
+        // fork: an unterminated synchronized frame is still applied whole.
+        let kind = if hold.is_held() {
+            FlushKind::SyncFrame
+        } else {
+            FlushKind::Coalesced
+        };
+        sink(std::mem::take(&mut actions), kind);
     }
 }
 
@@ -1693,12 +1743,13 @@ mod sync_output_hold_tests {
 
     #[test]
     fn begin_with_pending_actions_flushes_them_first() {
-        // 块前确有未刷新动作：保持上游语义，先 flush 再 hold
+        // 块前确有未刷新动作：保持上游语义，先 flush 再 hold；块前输出
+        // 不属于同步帧，按普通合并批处理
         let now = Instant::now();
         let mut hold = SyncOutputHold::Idle;
         assert_eq!(
             hold.on_action(&set_sync(), true, || now, TIMEOUT),
-            HoldStep::Flush
+            HoldStep::Flush(FlushKind::Coalesced)
         );
         assert!(hold.is_held());
     }
@@ -1738,7 +1789,7 @@ mod sync_output_hold_tests {
         assert!(!hold.take_expired(now + Duration::from_millis(149)));
         assert_eq!(
             hold.on_action(&reset_sync(), true, || now, TIMEOUT),
-            HoldStep::Flush
+            HoldStep::Flush(FlushKind::SyncFrame)
         );
         assert!(!hold.is_held());
         assert!(!hold.take_expired(now + Duration::from_secs(10)));
@@ -1751,7 +1802,7 @@ mod sync_output_hold_tests {
         hold.on_action(&set_sync(), false, || now, TIMEOUT);
         assert_eq!(
             hold.on_action(&soft_reset(), true, || now, TIMEOUT),
-            HoldStep::Flush
+            HoldStep::Flush(FlushKind::SyncFrame)
         );
         assert!(!hold.is_held());
         assert!(!hold.take_expired(now + Duration::from_secs(10)));
@@ -1782,7 +1833,7 @@ mod sync_output_hold_tests {
         assert!(hold.is_held());
         assert_eq!(
             hold.on_action(&reset_sync(), true, || now, Duration::ZERO),
-            HoldStep::Flush
+            HoldStep::Flush(FlushKind::SyncFrame)
         );
         assert!(!hold.is_held());
     }
@@ -1831,15 +1882,15 @@ mod parse_buffered_data_tests {
     /// 起一条与生产相同的解析泵线程；sink 把每次 flush 的批次送回测试。
     fn spawn_pump() -> (
         FileDescriptor,
-        mpsc::Receiver<Vec<Action>>,
+        mpsc::Receiver<(Vec<Action>, FlushKind)>,
         thread::JoinHandle<()>,
     ) {
         let (tx, rx) = allocate_socketpair().expect("socketpair");
         let (batch_tx, batch_rx) = mpsc::channel();
         let handle = thread::spawn(move || {
             let dead = Arc::new(AtomicBool::new(false));
-            parse_buffered_data_with_sink(Some(1), &dead, rx, &mut |batch| {
-                batch_tx.send(batch).ok();
+            parse_buffered_data_with_sink(Some(1), &dead, rx, &mut |batch, kind| {
+                batch_tx.send((batch, kind)).ok();
             });
         });
         (tx, batch_rx, handle)
@@ -1871,7 +1922,7 @@ mod parse_buffered_data_tests {
         tx.write_all(b"\x1b[?2026hhello").expect("write");
         // 没有超时的话泵会阻塞在 read() 直到 tx 被丢弃；此处在 tx 仍存活时
         // 就收到批次，证明 hold 已到期强制 flush。
-        let batch = batches
+        let (batch, kind) = batches
             .recv_timeout(Duration::from_secs(5))
             .expect("forced flush after timeout");
         assert!(
@@ -1879,6 +1930,7 @@ mod parse_buffered_data_tests {
             "flushed too early: {:?}",
             started.elapsed()
         );
+        assert_eq!(kind, FlushKind::SyncFrame);
         assert_eq!(batch.len(), 2, "{batch:?}");
         assert!(is_set_sync(&batch[0]));
         assert_eq!(batch[1], Action::PrintString("hello".into()));
@@ -1892,14 +1944,53 @@ mod parse_buffered_data_tests {
         config::use_default_configuration();
         let (mut tx, batches, handle) = spawn_pump();
         tx.write_all(b"\x1b[?2026hhello\x1b[?2026l").expect("write");
-        let batch = batches
+        let (batch, kind) = batches
             .recv_timeout(Duration::from_secs(5))
             .expect("frame flush");
         // 上游会在 ?2026h 处先 flush 出只含该动作的批次；现在整帧一次到达
+        assert_eq!(kind, FlushKind::SyncFrame);
         assert_eq!(batch.len(), 3, "{batch:?}");
         assert!(is_set_sync(&batch[0]));
         assert_eq!(batch[1], Action::PrintString("hello".into()));
         assert!(is_reset_sync(&batch[2]));
+        drop(tx);
+        handle.join().expect("pump thread");
+        assert!(batches.recv().is_err(), "unexpected extra batch");
+    }
+
+    #[test]
+    fn large_synchronized_frame_is_flushed_as_one_sync_frame() {
+        config::use_default_configuration();
+        let (mut tx, batches, handle) = spawn_pump();
+        // 每个 "x\x1b[m" 解析为 Print + SGR 两个动作，整帧远超子批阈值
+        let mut frame = b"\x1b[?2026h".to_vec();
+        for _ in 0..SUB_BATCH_ACTIONS {
+            frame.extend_from_slice(b"x\x1b[m");
+        }
+        frame.extend_from_slice(b"\x1b[?2026l");
+        tx.write_all(&frame).expect("write");
+        let (batch, kind) = batches
+            .recv_timeout(Duration::from_secs(5))
+            .expect("frame flush");
+        assert_eq!(kind, FlushKind::SyncFrame);
+        assert_eq!(batch.len(), SUB_BATCH_ACTIONS * 2 + 2);
+        assert!(is_set_sync(&batch[0]));
+        assert!(is_reset_sync(batch.last().expect("non-empty")));
+        drop(tx);
+        handle.join().expect("pump thread");
+        assert!(batches.recv().is_err(), "unexpected extra batch");
+    }
+
+    #[test]
+    fn plain_output_is_flushed_as_coalesced() {
+        config::use_default_configuration();
+        let (mut tx, batches, handle) = spawn_pump();
+        tx.write_all(b"hello").expect("write");
+        let (batch, kind) = batches
+            .recv_timeout(Duration::from_secs(5))
+            .expect("coalesced flush");
+        assert_eq!(kind, FlushKind::Coalesced);
+        assert_eq!(batch, vec![Action::PrintString("hello".into())]);
         drop(tx);
         handle.join().expect("pump thread");
         assert!(batches.recv().is_err(), "unexpected extra batch");
@@ -1943,6 +2034,31 @@ mod action_sub_batch_tests {
         assert_eq!(
             calls.iter().map(Vec::len).collect::<Vec<_>>(),
             vec![SUB_BATCH_ACTIONS, SUB_BATCH_ACTIONS, 7]
+        );
+        assert_eq!(calls.concat(), actions);
+    }
+
+    #[test]
+    fn sync_frame_is_performed_as_a_single_call_even_when_large() {
+        // DECSET 2026 同步帧拆开会让渲染线程在子批间画出半帧，必须整批一次
+        let mut calls = Vec::new();
+        let actions = print_actions(SUB_BATCH_ACTIONS * 2 + 7);
+        perform_flushed_actions(actions.clone(), FlushKind::SyncFrame, |batch| {
+            calls.push(batch)
+        });
+        assert_eq!(calls, vec![actions]);
+    }
+
+    #[test]
+    fn coalesced_flush_keeps_sub_batching() {
+        let mut calls = Vec::new();
+        let actions = print_actions(SUB_BATCH_ACTIONS + 1);
+        perform_flushed_actions(actions.clone(), FlushKind::Coalesced, |batch| {
+            calls.push(batch)
+        });
+        assert_eq!(
+            calls.iter().map(Vec::len).collect::<Vec<_>>(),
+            vec![SUB_BATCH_ACTIONS, 1]
         );
         assert_eq!(calls.concat(), actions);
     }
