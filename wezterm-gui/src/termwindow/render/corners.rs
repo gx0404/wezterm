@@ -1,4 +1,6 @@
 use crate::customglyph::*;
+use crate::termwindow::box_model::{Corners, SizedPoly};
+use config::Dimension;
 
 pub const TOP_LEFT_ROUNDED_CORNER: &[Poly] = &[Poly {
     path: &[PolyCommand::Oval {
@@ -171,6 +173,61 @@ pub fn rounded_corner_arc(
     }
 }
 
+/// fork: all four corners rounded with the same `radius`.
+///
+/// `Dimension::Pixels`/`Points` evaluate to the same pixel count on both
+/// axes and give a true circle; `Cells`/`Percent` follow the cell width
+/// on one axis and the cell height on the other and give an ellipse.
+// fork: consumed by the overlay chrome once it adopts contrasting
+// borders; unused until then.
+#[allow(dead_code)]
+pub fn rounded_corners(radius: Dimension) -> Corners {
+    Corners {
+        top_left: SizedPoly {
+            width: radius,
+            height: radius,
+            poly: TOP_LEFT_ROUNDED_CORNER,
+        },
+        top_right: SizedPoly {
+            width: radius,
+            height: radius,
+            poly: TOP_RIGHT_ROUNDED_CORNER,
+        },
+        bottom_left: SizedPoly {
+            width: radius,
+            height: radius,
+            poly: BOTTOM_LEFT_ROUNDED_CORNER,
+        },
+        bottom_right: SizedPoly {
+            width: radius,
+            height: radius,
+            poly: BOTTOM_RIGHT_ROUNDED_CORNER,
+        },
+    }
+}
+
+/// fork: only the top two corners rounded. The bottom corners are
+/// `SizedPoly::none()`, so the side borders run all the way down to the
+/// bottom edge; the fancy tab bar keeps its own zero-width, 0.33-cell
+/// placeholders there on purpose to stop its sides short.
+#[allow(dead_code)]
+pub fn top_rounded_corners(radius: Dimension) -> Corners {
+    Corners {
+        top_left: SizedPoly {
+            width: radius,
+            height: radius,
+            poly: TOP_LEFT_ROUNDED_CORNER,
+        },
+        top_right: SizedPoly {
+            width: radius,
+            height: radius,
+            poly: TOP_RIGHT_ROUNDED_CORNER,
+        },
+        bottom_left: SizedPoly::none(),
+        bottom_right: SizedPoly::none(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +321,37 @@ mod tests {
             assert_eq!((left + radius_x, top + radius_y), expected_center);
             assert_eq!((radius_x, radius_y), (4.5, 9.5));
         }
+    }
+
+    #[test]
+    fn rounded_corners_use_one_radius_on_both_axes() {
+        let radius = Dimension::Pixels(8.);
+        let corners = rounded_corners(radius);
+        let pieces = [
+            (corners.top_left, TOP_LEFT_ROUNDED_CORNER),
+            (corners.top_right, TOP_RIGHT_ROUNDED_CORNER),
+            (corners.bottom_left, BOTTOM_LEFT_ROUNDED_CORNER),
+            (corners.bottom_right, BOTTOM_RIGHT_ROUNDED_CORNER),
+        ];
+        for (piece, fill) in pieces {
+            assert_eq!(piece.width, radius);
+            assert_eq!(piece.height, radius);
+            assert_eq!(piece.poly, fill);
+        }
+    }
+
+    #[test]
+    fn top_rounded_corners_leave_the_bottom_square() {
+        let radius = Dimension::Points(6.);
+        let corners = top_rounded_corners(radius);
+        assert_eq!(corners.top_left.poly, TOP_LEFT_ROUNDED_CORNER);
+        assert_eq!(corners.top_right.poly, TOP_RIGHT_ROUNDED_CORNER);
+        assert_eq!(
+            (corners.top_left.width, corners.top_left.height),
+            (radius, radius)
+        );
+        // 下两角无占位：侧边直边一直画到底边
+        assert_eq!(corners.bottom_left, SizedPoly::none());
+        assert_eq!(corners.bottom_right, SizedPoly::none());
     }
 }

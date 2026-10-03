@@ -77,10 +77,20 @@ pub struct SizedPoly {
 
 impl SizedPoly {
     pub fn to_pixels(&self, context: &LayoutContext) -> PixelSizedPoly {
+        self.to_pixels_in(context.width, context.height)
+    }
+
+    /// fork: the context-free core of `to_pixels`, so corner sizing can
+    /// be unit tested without a render state.
+    pub fn to_pixels_in(
+        &self,
+        width: DimensionContext,
+        height: DimensionContext,
+    ) -> PixelSizedPoly {
         PixelSizedPoly {
             poly: self.poly,
-            width: self.width.evaluate_as_pixels(context.width),
-            height: self.height.evaluate_as_pixels(context.height),
+            width: self.width.evaluate_as_pixels(width),
+            height: self.height.evaluate_as_pixels(height),
         }
     }
 
@@ -1360,5 +1370,64 @@ mod border_edge_tests {
         assert_eq!(edges.bottom, euclid::rect(8., 49., 84., 1.));
         assert_eq!(edges.left, euclid::rect(0., 6., 1., 38.));
         assert_eq!(edges.right, euclid::rect(99., 6., 1., 38.));
+    }
+}
+
+#[cfg(test)]
+mod corner_size_tests {
+    use super::*;
+    use crate::termwindow::render::corners::rounded_corners;
+
+    /// 宽/高两个方向的上下文：dpi 相同，列宽与行高不同
+    fn contexts(
+        dpi: f32,
+        cell_width: f32,
+        cell_height: f32,
+    ) -> (DimensionContext, DimensionContext) {
+        (
+            DimensionContext {
+                dpi,
+                pixel_max: 1920.,
+                pixel_cell: cell_width,
+            },
+            DimensionContext {
+                dpi,
+                pixel_max: 1080.,
+                pixel_cell: cell_height,
+            },
+        )
+    }
+
+    #[test]
+    fn pixel_and_point_radii_make_true_circles() {
+        for (dpi, cell_width, cell_height) in [(96., 9., 20.), (144., 13., 29.), (192., 18., 41.)] {
+            let (width, height) = contexts(dpi, cell_width, cell_height);
+            for radius in [Dimension::Pixels(8.), Dimension::Points(6.)] {
+                let corners = rounded_corners(radius);
+                for piece in [
+                    corners.top_left,
+                    corners.top_right,
+                    corners.bottom_left,
+                    corners.bottom_right,
+                ] {
+                    let px = piece.to_pixels_in(width, height);
+                    assert_eq!(px.width, px.height, "{radius:?} at dpi {dpi}");
+                    assert!(px.width > 0., "{radius:?} at dpi {dpi}");
+                }
+            }
+        }
+        // Points 随 dpi 缩放：6pt 在 96/144/192 dpi 分别是 8/12/16 px
+        let (width, _) = contexts(144., 13., 29.);
+        assert_eq!(Dimension::Points(6.).evaluate_as_pixels(width), 12.);
+    }
+
+    #[test]
+    fn cell_radii_follow_the_cell_aspect_ratio() {
+        // Cells 按列宽/行高分别换算，得到的是椭圆而非正圆（现有 tab bar 用法）
+        let (width, height) = contexts(96., 9., 20.);
+        let px = rounded_corners(Dimension::Cells(0.5))
+            .top_left
+            .to_pixels_in(width, height);
+        assert_eq!((px.width, px.height), (4., 10.));
     }
 }
