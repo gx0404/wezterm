@@ -29,6 +29,7 @@ use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 use std::rc::Rc;
 use std::sync::Mutex;
+use std::time::Instant;
 use wezterm_color_types::LinearRgba;
 use wezterm_font::FontConfiguration;
 use wezterm_input_types::KeyboardLedStatus;
@@ -108,6 +109,16 @@ pub(crate) struct HWindow(HWND);
 unsafe impl Send for HWindow {}
 unsafe impl Sync for HWindow {}
 
+/// fork: 帧定时器到期扫描时单个窗口的状态（见 WindowInner::frame_timer_tick）
+pub(crate) enum FrameTick {
+    /// 未处于高精度定时器节流中
+    Idle,
+    /// 仍在节流，deadline 未到
+    Pending(Instant),
+    /// 节流已结束；invalidate 为真表示期间有被吞掉的 WM_PAINT 需补发
+    Expired { invalidate: bool },
+}
+
 pub(crate) struct WindowInner {
     /// Non-owning reference to the window handle
     hwnd: HWindow,
@@ -135,6 +146,13 @@ pub(crate) struct WindowInner {
     /// 决定帧间隔；在创建后、WM_DISPLAYCHANGE 与跨显示器移动时刷新
     monitor: HMONITOR,
     monitor_refresh_hz: Option<u32>,
+    /// fork: 最近一次 wm_paint 的开始时刻；节流 deadline 从这里起算，
+    /// paint 本身的耗时不再叠加到帧间隔上
+    frame_start: Instant,
+    /// 高精度帧定时器路径下本窗口的节流到期时刻；async_io 回退路径为 None
+    next_paint_deadline: Option<Instant>,
+    /// 回退路径的代数计数，让过期的 async_io 回调不会提前结束新一轮节流
+    throttle_generation: u64,
     /// fork: 首帧 present 之前不执行 ShowWindow，避免 DWM 合成未初始化的
     /// 表面产生白帧；挂起的 show 命令存在 pending_show，兜底定时器由
     /// show_fallback_armed 保证只装一次
@@ -324,6 +342,60 @@ impl WindowInner {
             self.config.max_fps_follows_display,
             self.monitor_refresh_hz,
         )
+    }
+
+    pub(crate) fn hwnd(&self) -> HWND {
+        self.hwnd.0
+    }
+
+    /// fork: 把本帧的节流 deadline（frame_start + 帧间隔）交给 Connection 的
+    /// 高精度帧定时器；没有高精度定时器（Win10 < 1803）时回退 async_io
+    /// 定时器，语义相同只是精度受系统节拍限制
+    fn schedule_paint_throttle(&mut self) {
+        let deadline = self.frame_start + self.frame_interval();
+        let conn = Connection::get().expect("Connection::init has not been called");
+        if conn.request_frame_deadline(deadline) {
+            self.next_paint_deadline = Some(deadline);
+            return;
+        }
+
+        self.next_paint_deadline = None;
+        self.throttle_generation = self.throttle_generation.wrapping_add(1);
+        let generation = self.throttle_generation;
+        let window_id = self.hwnd;
+        promise::spawn::spawn(async move {
+            async_io::Timer::at(deadline).await;
+            Connection::with_window_inner(window_id, move |inner| {
+                if inner.throttle_generation != generation {
+                    // 期间已重新调度（配置重载/新一帧），这次回调作废
+                    return Ok(());
+                }
+                inner.paint_throttled = false;
+                if inner.invalidated {
+                    unsafe {
+                        InvalidateRect(inner.hwnd.0, null(), 0);
+                    }
+                }
+                Ok(())
+            });
+        })
+        .detach();
+    }
+
+    /// fork: 帧定时器到期时由 Connection 在主线程调用。`cutoff` 之前到期的
+    /// 窗口结束节流并报告是否需要补发重绘；未到期的交回 deadline 供重设
+    pub(crate) fn frame_timer_tick(&mut self, cutoff: Instant) -> FrameTick {
+        match self.next_paint_deadline {
+            None => FrameTick::Idle,
+            Some(deadline) if deadline > cutoff => FrameTick::Pending(deadline),
+            Some(_) => {
+                self.next_paint_deadline = None;
+                self.paint_throttled = false;
+                FrameTick::Expired {
+                    invalidate: self.invalidated,
+                }
+            }
+        }
     }
 
     /// Check if we need to generate a resize callback.
@@ -592,6 +664,9 @@ impl Window {
             invalidated: true,
             monitor: null_mut(),
             monitor_refresh_hz: None,
+            frame_start: Instant::now(),
+            next_paint_deadline: None,
+            throttle_generation: 0,
             first_frame_presented: false,
             pending_show: None,
             show_fallback_armed: false,
@@ -776,6 +851,11 @@ impl WindowInner {
     fn config_did_change(&mut self, config: &ConfigHandle) {
         self.config = config.clone();
         self.apply_decoration();
+        // fork: max_fps / max_fps_follows_display 重载后立刻生效：正处于
+        // 节流窗口时按新间隔从本帧开始重算 deadline
+        if self.paint_throttled {
+            self.schedule_paint_throttle();
+        }
     }
 
     fn toggle_fullscreen(&mut self) {
@@ -1972,6 +2052,9 @@ unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> 
         return Some(0);
     }
 
+    // fork: 节流 deadline 从本帧开始计
+    inner.frame_start = Instant::now();
+
     let mut ps = PAINTSTRUCT {
         fErase: 0,
         fIncUpdate: 0,
@@ -1996,19 +2079,7 @@ unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> 
     inner.events.dispatch(WindowEvent::NeedRepaint);
 
     inner.paint_throttled = true;
-    let window_id = inner.hwnd;
-    let interval = inner.frame_interval();
-    promise::spawn::spawn(async move {
-        async_io::Timer::after(interval).await;
-        Connection::with_window_inner(window_id, move |inner| {
-            inner.paint_throttled = false;
-            if inner.invalidated {
-                InvalidateRect(inner.hwnd.0, null(), 0);
-            }
-            Ok(())
-        });
-    })
-    .detach();
+    inner.schedule_paint_throttle();
 
     Some(0)
 }

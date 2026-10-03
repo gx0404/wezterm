@@ -1,26 +1,30 @@
 //! The connection to the GUI subsystem
-use super::{HWindow, WindowInner};
+use super::{FrameTick, HWindow, WindowInner};
 use crate::connection::ConnectionOps;
 use crate::screen::{ScreenInfo, Screens};
 use crate::spawn::*;
 use crate::{Appearance, ScreenRect};
 use anyhow::Context;
 use config::ConfigHandle;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
-use std::ptr::null_mut;
+use std::ptr::{null, null_mut};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 use winapi::shared::minwindef::*;
+use winapi::shared::ntdef::LARGE_INTEGER;
 use winapi::shared::windef::*;
 use winapi::shared::winerror::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS};
+use winapi::um::handleapi::CloseHandle;
 use winapi::um::shellscalingapi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
-use winapi::um::winbase::INFINITE;
+use winapi::um::synchapi::{CancelWaitableTimer, CreateWaitableTimerExW, SetWaitableTimerEx};
+use winapi::um::winbase::{INFINITE, WAIT_OBJECT_0};
 use winapi::um::wingdi::{
     DEVMODEW, DISPLAY_DEVICEW, DM_DISPLAYFREQUENCY, QDC_ONLY_ACTIVE_PATHS, QDC_VIRTUAL_MODE_AWARE,
 };
-use winapi::um::winnt::HANDLE;
+use winapi::um::winnt::{HANDLE, TIMER_ALL_ACCESS};
 use winapi::um::winuser::*;
 use windows::Win32::Devices::Display::{
     DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig,
@@ -33,8 +37,91 @@ use winreg::RegKey;
 
 pub struct Connection {
     event_handle: HANDLE,
+    /// fork: 高精度帧定时器，驱动所有窗口的 max_fps 节流 deadline；
+    /// Win10 1803 以前创建失败为 None，此时 wm_paint 回退 async_io 定时器
+    frame_timer: Option<FrameTimer>,
     pub(crate) windows: RefCell<HashMap<HWindow, Rc<RefCell<WindowInner>>>>,
     pub(crate) gl_connection: RefCell<Option<Rc<crate::egl::GlConnection>>>,
+}
+
+/// winapi 0.3.9 未收录的 CreateWaitableTimerExW 标志（Win10 1803+）：
+/// 定时器不受 15.6ms 系统时钟节拍量化，精度到 0.5ms 以内
+const CREATE_WAITABLE_TIMER_HIGH_RESOLUTION: DWORD = 0x0000_0002;
+
+/// 定时器实际唤醒可能比 deadline 早几十微秒；容差内视为已到期，避免为
+/// 这点差值再武装一次定时器
+const FRAME_DEADLINE_SLACK: Duration = Duration::from_micros(250);
+
+/// 窗口正被借用（极少见）时无法读其 deadline，稍后重试的间隔
+const FRAME_TICK_RETRY: Duration = Duration::from_millis(1);
+
+/// fork: 高精度可等待定时器句柄 + 当前武装的到期时刻
+struct FrameTimer {
+    handle: HANDLE,
+    armed: Cell<Option<Instant>>,
+}
+
+impl FrameTimer {
+    fn new() -> Option<Self> {
+        let handle = unsafe {
+            CreateWaitableTimerExW(
+                null_mut(),
+                null(),
+                CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                TIMER_ALL_ACCESS,
+            )
+        };
+        if handle.is_null() {
+            log::info!(
+                "CreateWaitableTimerExW(HIGH_RESOLUTION) failed ({}); \
+                 frame pacing falls back to async-io timers",
+                std::io::Error::last_os_error()
+            );
+            return None;
+        }
+        Some(Self {
+            handle,
+            armed: Cell::new(None),
+        })
+    }
+
+    /// 把定时器设到 deadline。lpDueTime 负值表示相对时间（100ns 单位）；
+    /// 已过期的 deadline 用 1 tick 立即触发
+    fn arm(&self, deadline: Instant) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let ticks = (remaining.as_nanos() / 100).max(1) as i64;
+        let mut due: LARGE_INTEGER = unsafe { std::mem::zeroed() };
+        unsafe {
+            *due.QuadPart_mut() = -ticks;
+        }
+        let ok =
+            unsafe { SetWaitableTimerEx(self.handle, &due, 0, None, null_mut(), null_mut(), 0) };
+        if ok == 0 {
+            log::error!(
+                "SetWaitableTimerEx failed: {}",
+                std::io::Error::last_os_error()
+            );
+            self.armed.set(None);
+            return;
+        }
+        self.armed.set(Some(deadline));
+    }
+
+    fn cancel(&self) {
+        unsafe {
+            CancelWaitableTimer(self.handle);
+        }
+        self.armed.set(None);
+    }
+}
+
+impl Drop for FrameTimer {
+    fn drop(&mut self) {
+        self.cancel();
+        unsafe {
+            CloseHandle(self.handle);
+        }
+    }
 }
 
 pub(crate) fn get_appearance() -> Appearance {
@@ -123,20 +210,99 @@ impl Connection {
         let event_handle = SPAWN_QUEUE.event_handle.0;
         Ok(Self {
             event_handle,
+            frame_timer: FrameTimer::new(),
             windows: RefCell::new(HashMap::new()),
             gl_connection: RefCell::new(None),
         })
     }
 
+    /// fork: 同时等待 spawn 队列事件与帧定时器。返回值 WAIT_OBJECT_0+i
+    /// 对应第 i 个句柄，WAIT_OBJECT_0+count 表示有新消息到达
     fn wait_message(&self) {
-        unsafe {
+        let mut handles: [HANDLE; 2] = [self.event_handle, null_mut()];
+        let mut count: DWORD = 1;
+        if let Some(timer) = &self.frame_timer {
+            handles[1] = timer.handle;
+            count = 2;
+        }
+        let res = unsafe {
             MsgWaitForMultipleObjects(
-                1,
-                &self.event_handle,
+                count,
+                handles.as_ptr(),
                 0,
                 INFINITE,
                 QS_ALLEVENTS | QS_ALLINPUT | QS_ALLPOSTMESSAGE,
-            );
+            )
+        };
+        if count == 2 && res == WAIT_OBJECT_0 + 1 {
+            self.frame_timer_fired();
+        }
+    }
+
+    /// fork: wm_paint 调用，请求帧定时器不晚于 deadline 唤醒主线程；已武装
+    /// 的时刻更早时不动，到期扫描会接着处理更晚的窗口。
+    /// 返回 false 表示没有高精度定时器，调用方走 async_io 回退路径
+    pub(crate) fn request_frame_deadline(&self, deadline: Instant) -> bool {
+        let Some(timer) = &self.frame_timer else {
+            return false;
+        };
+        match timer.armed.get() {
+            Some(armed) if armed <= deadline => {}
+            _ => timer.arm(deadline),
+        }
+        true
+    }
+
+    /// 帧定时器到期：遍历窗口，已到期的结束节流并补发重绘，再按剩余最近的
+    /// deadline 重设定时器。此处在消息循环里而非 wndProc 内，正常情况下没有
+    /// 未释放的 RefCell 借用；借不到的窗口稍后重试，避免永远卡在节流态
+    fn frame_timer_fired(&self) {
+        let Some(timer) = &self.frame_timer else {
+            return;
+        };
+        timer.armed.set(None);
+
+        let now = Instant::now();
+        let expiry_cutoff = now + FRAME_DEADLINE_SLACK;
+        let windows: Vec<Rc<RefCell<WindowInner>>> =
+            self.windows.borrow().values().map(Rc::clone).collect();
+
+        fn earliest(current: Option<Instant>, candidate: Instant) -> Option<Instant> {
+            Some(current.map_or(candidate, |c| c.min(candidate)))
+        }
+
+        let mut next_deadline: Option<Instant> = None;
+        let mut to_invalidate: Vec<HWND> = Vec::new();
+
+        for window in windows {
+            let mut inner = match window.try_borrow_mut() {
+                Ok(inner) => inner,
+                Err(_) => {
+                    next_deadline = earliest(next_deadline, now + FRAME_TICK_RETRY);
+                    continue;
+                }
+            };
+            match inner.frame_timer_tick(expiry_cutoff) {
+                FrameTick::Idle => {}
+                FrameTick::Pending(deadline) => {
+                    next_deadline = earliest(next_deadline, deadline);
+                }
+                FrameTick::Expired { invalidate } => {
+                    if invalidate {
+                        to_invalidate.push(inner.hwnd());
+                    }
+                }
+            }
+        }
+
+        for hwnd in to_invalidate {
+            unsafe {
+                InvalidateRect(hwnd, null(), 0);
+            }
+        }
+
+        if let Some(deadline) = next_deadline {
+            timer.arm(deadline);
         }
     }
 
