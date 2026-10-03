@@ -1474,29 +1474,20 @@ do
       check('startup.' .. case[1], describe(geometry(case[2], case[3])), case[4])
    end
 
-   local function fake_window(gui_window)
-      return {
-         gui_window = function()
-            return gui_window
-         end,
-      }
-   end
-   local calls = {}
-   local gui_window = {
-      set_inner_size = function(_, w, h)
-         table.insert(calls, string.format('size %d %d', w, h))
-      end,
-      set_position = function(_, x, y)
-         table.insert(calls, string.format('pos %d %d', x, y))
-      end,
-   }
-   local screen = { x = 0, y = 0, width = 2560, height = 1440 }
-   check('startup.fit_ok', startup.fit_to_screen(fake_window(gui_window), screen), true)
-   check('startup.fit_calls', table.concat(calls, ';'), 'size 2048 1152;pos 256 144')
-   -- 拿不到 GUI 窗口（不在活动工作区）或屏幕信息：什么都不做
-   check('startup.fit_no_gui_window', startup.fit_to_screen(fake_window(nil), screen), false)
-   check('startup.fit_no_screen', startup.fit_to_screen(fake_window(gui_window), nil), false)
-   check('startup.fit_untouched', #calls, 2)
+   -- spawn_window 几何：2560x1440@144dpi、12pt → 格子约 14.4x31.2px，80% 居中
+   local screen = { x = 0, y = 0, width = 2560, height = 1440, effective_dpi = 144 }
+   local spawn = startup.spawn_geometry(screen, 0.8, 12)
+   check('startup.spawn_cols', spawn.width, 142)
+   check('startup.spawn_rows', spawn.height, 36)
+   check('startup.spawn_pos', string.format('%d,%d,%s', spawn.position.x, spawn.position.y, spawn.position.origin), '256,144,ActiveScreen')
+   -- 副屏负坐标不影响相对活动屏幕的位置
+   local off = startup.spawn_geometry({ x = -1920, y = 0, width = 1920, height = 1080 }, 0.8, 12)
+   check('startup.spawn_offset_pos', string.format('%d,%d', off.position.x, off.position.y), '192,108')
+   -- 缺 DPI 按 96 估算；屏幕信息不可用或字号非法时为 nil
+   local cw, ch = startup.estimate_cell_size(12, nil)
+   check('startup.cell_96dpi', string.format('%.1fx%.1f', cw, ch), '9.6x20.8')
+   check('startup.spawn_nil_screen', startup.spawn_geometry(nil, 0.8, 12), nil)
+   check('startup.spawn_bad_font', startup.spawn_geometry(screen, 0.8, 0), nil)
 end
 
 -- 帧率与动画（utils/display.lua、config/appearance.lua）：max_fps 60 兜底、活动屏幕刷新率
