@@ -1258,6 +1258,12 @@ pub enum MousePress {
     Left,
     Right,
     Middle,
+    /// fork: the first extended ("back") button; Windows XBUTTON1,
+    /// reported to applications as xterm button 8.
+    X1,
+    /// fork: the second extended ("forward") button; Windows XBUTTON2,
+    /// reported to applications as xterm button 9.
+    X2,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

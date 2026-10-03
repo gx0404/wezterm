@@ -727,7 +727,7 @@ impl super::TermWindow {
         let action = match button {
             MousePress::Left => Some(KeyAssignment::SpawnTab(SpawnTabDomain::CurrentPaneDomain)),
             MousePress::Right => Some(KeyAssignment::ShowLauncher),
-            MousePress::Middle => None,
+            MousePress::Middle | MousePress::X1 | MousePress::X2 => None,
         };
 
         async fn dispatch_new_tab_button(
@@ -1333,17 +1333,7 @@ impl super::TermWindow {
             },
             button: match event.kind {
                 WMEK::Release(ref press) | WMEK::Press(ref press) => mouse_press_to_tmb(press),
-                WMEK::Move => {
-                    if event.mouse_buttons == WMB::LEFT {
-                        TMB::Left
-                    } else if event.mouse_buttons == WMB::RIGHT {
-                        TMB::Right
-                    } else if event.mouse_buttons == WMB::MIDDLE {
-                        TMB::Middle
-                    } else {
-                        TMB::None
-                    }
-                }
+                WMEK::Move => move_button(event.mouse_buttons),
                 WMEK::VertWheel(amount) => {
                     if amount > 0 {
                         TMB::WheelUp(amount as usize)
@@ -1386,6 +1376,27 @@ fn mouse_press_to_tmb(press: &MousePress) -> TMB {
         MousePress::Left => TMB::Left,
         MousePress::Right => TMB::Right,
         MousePress::Middle => TMB::Middle,
+        MousePress::X1 => TMB::X1,
+        MousePress::X2 => TMB::X2,
+    }
+}
+
+/// fork: the button a move reports to the pane. The side button bits are
+/// masked off first so that holding one does not turn a left drag into a
+/// buttonless move. They are deliberately not mapped to TMB::X1/X2: macOS
+/// sets those bits without delivering a press, which would report drags
+/// the application never saw start; the terminal model instead falls back
+/// to the button it last saw pressed.
+fn move_button(buttons: WMB) -> TMB {
+    let buttons = buttons & (WMB::LEFT | WMB::RIGHT | WMB::MIDDLE);
+    if buttons == WMB::LEFT {
+        TMB::Left
+    } else if buttons == WMB::RIGHT {
+        TMB::Right
+    } else if buttons == WMB::MIDDLE {
+        TMB::Middle
+    } else {
+        TMB::None
     }
 }
 
@@ -1495,6 +1506,28 @@ mod tests {
         // Outside the modal entirely: nothing is hit, so the press is
         // free to dismiss it
         assert!(hit_ui_item(&items, 400, 10).is_none());
+    }
+
+    #[test]
+    fn side_buttons_map_to_terminal_buttons() {
+        assert_eq!(mouse_press_to_tmb(&MousePress::X1), TMB::X1);
+        assert_eq!(mouse_press_to_tmb(&MousePress::X2), TMB::X2);
+        assert_eq!(mouse_press_to_tmb(&MousePress::Left), TMB::Left);
+        assert_eq!(mouse_press_to_tmb(&MousePress::Right), TMB::Right);
+        assert_eq!(mouse_press_to_tmb(&MousePress::Middle), TMB::Middle);
+    }
+
+    #[test]
+    fn move_button_ignores_side_buttons() {
+        assert_eq!(move_button(WMB::NONE), TMB::None);
+        assert_eq!(move_button(WMB::X1), TMB::None);
+        assert_eq!(move_button(WMB::X2), TMB::None);
+        assert_eq!(move_button(WMB::LEFT), TMB::Left);
+        assert_eq!(move_button(WMB::LEFT | WMB::X1), TMB::Left);
+        assert_eq!(move_button(WMB::RIGHT | WMB::X2), TMB::Right);
+        assert_eq!(move_button(WMB::MIDDLE | WMB::X1 | WMB::X2), TMB::Middle);
+        // Unchanged: several regular buttons at once report no button
+        assert_eq!(move_button(WMB::LEFT | WMB::RIGHT), TMB::None);
     }
 
     const LEFT_PRESS: WMEK = WMEK::Press(MousePress::Left);

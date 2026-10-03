@@ -976,6 +976,37 @@ mod tests {
         }
     }
 
+    fn side_down(button: MouseButton) -> MouseEventTrigger {
+        MouseEventTrigger::Down { streak: 1, button }
+    }
+
+    #[test]
+    fn side_buttons_have_no_default_binding() {
+        let im = InputMap::default_input_map();
+        for button in [MouseButton::X1, MouseButton::X2] {
+            assert!(im
+                .lookup_mouse(side_down(button), mods(MouseRegion::Any))
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn user_side_button_binding_matches() {
+        let mut im = InputMap::default_input_map();
+        im.mouse.insert(
+            (side_down(MouseButton::X1), mods(MouseRegion::Any)),
+            KeyAssignment::ActivateTabRelative(-1),
+        );
+        assert!(matches!(
+            im.lookup_mouse(side_down(MouseButton::X1), mods(MouseRegion::Any)),
+            Some(KeyAssignment::ActivateTabRelative(-1))
+        ));
+        // X2 stays unbound
+        assert!(im
+            .lookup_mouse(side_down(MouseButton::X2), mods(MouseRegion::Any))
+            .is_none());
+    }
+
     fn config_with_overrides(pairs: Vec<(String, wezterm_dynamic::Value)>) -> ConfigHandle {
         // overridden_config always loads from the user's config file;
         // point it at a minimal temp config instead so the ambient

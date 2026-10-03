@@ -751,6 +751,9 @@ impl WaylandWindowInner {
                 MousePress::Left => MouseButtons::LEFT,
                 MousePress::Right => MouseButtons::RIGHT,
                 MousePress::Middle => MouseButtons::MIDDLE,
+                // fork: not produced by pointer.rs yet; keeps the match total
+                MousePress::X1 => MouseButtons::X1,
+                MousePress::X2 => MouseButtons::X2,
             };
 
             if state == ButtonState::Pressed {
