@@ -12,6 +12,9 @@ BIN="${ROOT}/target/debug/wezterm"
 
 fail=0
 note() { printf '[generated-check] %s\n' "$*"; }
+# Windows 检出（core.autocrlf）工作区为 CRLF，生成器输出 LF：比对忽略行尾 CR，
+# 行内容仍逐字节比对（Linux 检出两者等价）。
+same() { diff --strip-trailing-cr -q "$1" "$2" >/dev/null 2>&1; }
 bad()  { printf '[generated-check] 不一致: %s\n' "$*"; fail=1; }
 
 TMP="$(mktemp -d)"
@@ -20,7 +23,7 @@ trap 'rm -rf "${TMP}"' EXIT
 if [ -x "${BIN}" ]; then
     for shell in bash zsh fish; do
         "${BIN}" shell-completion --shell "${shell}" > "${TMP}/${shell}" 2>/dev/null
-        if ! cmp -s "${TMP}/${shell}" "${ROOT}/assets/shell-completion/${shell}"; then
+        if ! same "${TMP}/${shell}" "${ROOT}/assets/shell-completion/${shell}"; then
             bad "assets/shell-completion/${shell}（重跑 make generated-write 或说明差异）"
         fi
     done
@@ -40,7 +43,7 @@ if [ -x "${BIN}" ]; then
                 cat "${TMP}/keytable.lua"
                 echo '```'
             } | perl -0777 -pe 's/^\n+|\n\K\n+$//g' > "${TMP}/${fname}"
-            if ! cmp -s "${TMP}/${fname}" "${ROOT}/docs/examples/${fname}"; then
+            if ! same "${TMP}/${fname}" "${ROOT}/docs/examples/${fname}"; then
                 bad "docs/examples/${fname}（重跑 make generated-write 或说明差异）"
             fi
         else
@@ -60,7 +63,7 @@ if [ -d "${TMP}/docs" ]; then
     # mkdocs.yml 写在临时副本的上一级，不影响仓库。
     while IFS= read -r rel; do
         [ -f "${TMP}/docs/${rel}" ] || continue
-        if ! cmp -s "${TMP}/docs/${rel}" "${ROOT}/docs/${rel}"; then
+        if ! same "${TMP}/docs/${rel}" "${ROOT}/docs/${rel}"; then
             bad "docs/${rel} 与 generate-docs.py 再生成不一致"
         fi
     done < <(git -C "${ROOT}" ls-files -- docs)
@@ -69,7 +72,7 @@ fi
 # fork（WEZ-GEN-01）：zh-CN 译表派生比对——重跑 gen_zh_table.py
 # 与入库的 config/src/i18n/zh_cn.rs 逐字节比对
 if python3 "${ROOT}/scripts/gen_zh_table.py" > "${TMP}/zh_cn.rs" 2>/dev/null; then
-    if ! cmp -s "${TMP}/zh_cn.rs" "${ROOT}/config/src/i18n/zh_cn.rs"; then
+    if ! same "${TMP}/zh_cn.rs" "${ROOT}/config/src/i18n/zh_cn.rs"; then
         bad "config/src/i18n/zh_cn.rs（重跑 python3 scripts/gen_zh_table.py > config/src/i18n/zh_cn.rs）"
     fi
 else
