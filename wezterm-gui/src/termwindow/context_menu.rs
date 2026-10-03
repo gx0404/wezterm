@@ -1,19 +1,20 @@
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
-use crate::termwindow::{DimensionContext, TermWindow, UIItemType};
+use crate::termwindow::overlay_style::{
+    chrome_px, overlay_layout_context, row_height_px, row_inset_px, separator_px, OverlayStyle,
+};
+use crate::termwindow::{TermWindow, UIItemType};
 use config::i18n::{fill, tr};
 use config::keyassignment::{
     ClipboardCopyDestination, ClipboardPasteSource, KeyAssignment, PaneDirection, SpawnCommand,
     SpawnTabDomain, SplitPane, SplitSize,
 };
-use config::Dimension;
 use mux::tab::TabId;
 use mux::Mux;
 use std::cell::RefCell;
 use std::rc::Rc;
 use termwiz::cell::unicode_column_width;
 use wezterm_term::{KeyCode, KeyModifiers};
-use window::color::LinearRgba;
 use window::WindowOps;
 
 /// What activating a menu row does
@@ -41,49 +42,42 @@ fn on_tab(tab_idx: Option<usize>, action: KeyAssignment) -> Option<KeyAssignment
     ]))
 }
 
-/// 菜单几何的唯一真源：下面的 `Element` 构造与外框尺寸推导共用这些常量，
-/// 于是宽高估算不会和实际 box model 漂移（WZ-04 的 `+ 16.` 魔数由此消失）。
-/// 菜单行的左右内边距（单元格）
-const ROW_PADDING_H_CELLS: f32 = 0.75;
-/// 菜单行的上下内边距（单元格）
-const ROW_PADDING_V_CELLS: f32 = 0.1;
-/// 菜单外框四边的内边距 / 外边距（单元格）与边框（像素）
-const MENU_PADDING_CELLS: f32 = 0.25;
-const MENU_MARGIN_CELLS: f32 = 0.25;
-const MENU_BORDER_PIXELS: f32 = 1.;
-/// 分隔行的字形；宽度同样按显示列数参与估算
-const SEPARATOR_ROW: &str = "────────";
+/// 菜单几何的唯一真源是 `overlay_style`：行高、行内边距、分隔行与外框
+/// 尺寸都由它与实际构造的 `Element` 共用的常量推出，宽高估算因此不会和
+/// box model 漂移（WZ-04 的 `+ 16.` 魔数由此消失）。
 /// 宽度下限（单元格），避免只有极短标签时菜单细成一条
 const MIN_WIDTH_CELLS: f32 = 10.;
-
-/// 一行的渲染文本：`None` 标签是分隔行
-fn row_text(label: Option<&String>) -> String {
-    match label {
-        Some(label) => label.clone(),
-        None => SEPARATOR_ROW.to_string(),
-    }
-}
 
 /// 菜单内容占用的最大显示列数（纯函数）。
 ///
 /// CJK 一格占两列，按 `chars().count()` 估算会少算一半宽度，box model
-/// 随后把中文菜单项拦腰截断（WZ-04），所以一律用显示列宽。
+/// 随后把中文菜单项拦腰截断（WZ-04），所以一律用显示列宽。分隔行是满宽
+/// 细线，不贡献宽度。
 fn content_width_cells(items: &[MenuItem]) -> f32 {
-    items.iter().fold(MIN_WIDTH_CELLS, |acc, (label, _)| {
-        acc.max(unicode_column_width(&row_text(label.as_ref()), None) as f32)
-    })
+    items
+        .iter()
+        .fold(MIN_WIDTH_CELLS, |acc, (label, _)| match label {
+            Some(label) => acc.max(unicode_column_width(label, None) as f32),
+            None => acc,
+        })
 }
 
-/// 由内容列数推导菜单外框的像素尺寸（纯函数）。
+/// 由内容列数与行数推导菜单外框的像素尺寸（纯函数）。
 ///
-/// 内容 + 行内边距 + 外框内边距 + 外边距 + 边框，全部取自上面那批与
-/// `Element` 构造共用的常量，因此估算不会与实际 box model 漂移。
-fn menu_box_size(content_cells: f32, rows: usize, cell_width: f32, cell_height: f32) -> (f32, f32) {
-    let chrome_cells = 2. * (MENU_PADDING_CELLS + MENU_MARGIN_CELLS);
-    let row_height = cell_height * (1. + 2. * ROW_PADDING_V_CELLS);
-    let width = (content_cells + 2. * ROW_PADDING_H_CELLS + chrome_cells) * cell_width
-        + 2. * MENU_BORDER_PIXELS;
-    let height = rows as f32 * row_height + chrome_cells * cell_height + 2. * MENU_BORDER_PIXELS;
+/// 宽 = 内容 + 行的水平占用（行内边距 + 强调条）+ 外框一圈；高 = 文字行
+/// × 行高 + 分隔行 × 分隔行高 + 外框一圈。全部取自 `overlay_style`。
+fn menu_box_size(
+    content_cells: f32,
+    text_rows: usize,
+    separator_rows: usize,
+    cell_width: f32,
+    cell_height: f32,
+) -> (f32, f32) {
+    let (chrome_w, chrome_h) = chrome_px(cell_width, cell_height);
+    let width = content_cells * cell_width + row_inset_px(cell_width) + chrome_w;
+    let height = text_rows as f32 * row_height_px(cell_height)
+        + separator_rows as f32 * separator_px(cell_height)
+        + chrome_h;
     (width, height)
 }
 
@@ -338,62 +332,35 @@ impl ContextMenu {
         let metrics = crate::utilsprites::RenderMetrics::with_font_metrics(&font.metrics())
             .scale_line_height(term_window.config.command_palette_line_height);
 
-        let bg: InheritableColor = term_window
-            .config
-            .command_palette_bg_color
-            .to_linear()
-            .into();
-        let fg: InheritableColor = term_window
-            .config
-            .command_palette_fg_color
-            .to_linear()
-            .into();
+        let config = term_window.config.clone();
+        let style = OverlayStyle::from_config(&config, term_window.palette());
 
+        // 每行都进 hit map（分隔行也挂行号：点上去什么也不做，但不能被当成
+        // 点菜单外）
         let mut rows = vec![];
         for (idx, (label, action)) in items.iter().enumerate() {
-            let (row_bg, row_fg) = if idx == selected && action.is_some() {
-                (fg.clone(), bg.clone())
-            } else {
-                (LinearRgba::TRANSPARENT.into(), fg.clone())
-            };
-            let text = row_text(label.as_ref());
-            rows.push(
-                Element::new(&font, ElementContent::Text(text))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: row_bg,
-                        text: row_fg,
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(ROW_PADDING_H_CELLS),
-                        right: Dimension::Cells(ROW_PADDING_H_CELLS),
-                        top: Dimension::Cells(ROW_PADDING_V_CELLS),
-                        bottom: Dimension::Cells(ROW_PADDING_V_CELLS),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(idx)),
-            );
+            rows.push(match label {
+                Some(label) => style.row(
+                    &font,
+                    ElementContent::Text(label.clone()),
+                    idx == selected && action.is_some(),
+                    idx,
+                ),
+                None => style.separator(&font).item_type(UIItemType::Modal(idx)),
+            });
         }
 
-        let element = Element::new(&font, ElementContent::Children(rows))
-            .colors(ElementColors {
-                border: BorderColor::default(),
-                bg: bg.clone(),
-                text: fg.clone(),
-            })
-            .padding(BoxDimension::new(Dimension::Cells(MENU_PADDING_CELLS)))
-            .border(BoxDimension::new(Dimension::Pixels(MENU_BORDER_PIXELS)))
-            .margin(BoxDimension::new(Dimension::Cells(MENU_MARGIN_CELLS)))
-            .display(DisplayType::Block)
-            // 外框自己也要进 hit map：内边距/边框/外边距这一圈不属于任何行，
-            // 点在那里会被「点浮层外即关闭」当成点外面（WZ-06）
-            .item_type(UIItemType::Modal(MODAL_CHROME_ROW));
+        // 外框自己也要进 hit map（`container` 挂 MODAL_CHROME_ROW）：内边距/
+        // 边框/外边距这一圈不属于任何行，点在那里会被「点浮层外即关闭」
+        // 当成点外面（WZ-06）
+        let element = style.container(&font, rows);
 
         let border = term_window.get_os_border();
+        let separator_rows = items.iter().filter(|(label, _)| label.is_none()).count();
         let (menu_width, menu_height) = menu_box_size(
             content_width_cells(items),
-            items.len(),
+            items.len() - separator_rows,
+            separator_rows,
             metrics.cell_size.width as f32,
             metrics.cell_size.height as f32,
         );
@@ -409,27 +376,16 @@ impl ContextMenu {
 
         let (padding_left, padding_top) = term_window.padding_left_top();
         let computed = term_window.compute_element(
-            &LayoutContext {
-                width: DimensionContext {
-                    dpi: term_window.dimensions.dpi as f32,
-                    pixel_max: term_window.dimensions.pixel_width as f32,
-                    pixel_cell: metrics.cell_size.width as f32,
-                },
-                height: DimensionContext {
-                    dpi: term_window.dimensions.dpi as f32,
-                    pixel_max: term_window.dimensions.pixel_height as f32,
-                    pixel_cell: metrics.cell_size.height as f32,
-                },
-                bounds: euclid::rect(
+            &overlay_layout_context(
+                term_window,
+                &metrics,
+                euclid::rect(
                     padding_left as f32 + menu_x,
                     padding_top as f32 + menu_y,
                     menu_width,
                     menu_height,
                 ),
-                metrics: &metrics,
-                gl_state: term_window.render_state.as_ref().unwrap(),
-                zindex: 100,
-            },
+            ),
             &element,
         )?;
         Ok(vec![computed])
@@ -553,41 +509,54 @@ mod tests {
     }
 
     #[test]
-    fn content_width_covers_the_separator_row() {
+    fn separator_rows_do_not_widen_the_menu() {
         let sep: MenuItem = (None, None);
+        // 分隔行是满宽细线：只有分隔行时走宽度下限
         assert_eq!(
             content_width_cells(std::slice::from_ref(&sep)),
-            MIN_WIDTH_CELLS.max(unicode_column_width(SEPARATOR_ROW, None) as f32)
+            MIN_WIDTH_CELLS
         );
-        // 分隔行不得压低正文行算出的宽度
+        // 也不得压低正文行算出的宽度
         assert_eq!(content_width_cells(&[item("拆分窗格（右）"), sep]), 14.);
     }
 
     #[test]
     fn menu_box_leaves_room_for_the_whole_label() {
-        let (cell_w, cell_h) = (9., 20.);
-        let cells = content_width_cells(&[item("拆分窗格（右）")]);
-        let (width, _) = menu_box_size(cells, 1, cell_w, cell_h);
-        // box model 给行的可用文本宽度 = 外框宽 - 边框 - 外框内边距 - 行内边距；
-        // 它必须严格大于标签宽度，否则最后一个字形被 `break` 掉
-        let chrome =
-            2. * MENU_BORDER_PIXELS + 2. * (MENU_PADDING_CELLS + ROW_PADDING_H_CELLS) * cell_w;
-        assert!(
-            width - chrome > cells * cell_w,
-            "width={} chrome={} cells={}",
-            width,
-            chrome,
-            cells
-        );
-        // 旧的 `+ 16.` 魔数连按字符数算出的宽度都兜不住中文
-        assert!(width > cells * cell_w + 16.);
+        for (cell_w, cell_h) in [(9., 20.), (8., 17.), (13., 29.), (18., 41.)] {
+            for label in ["拆分窗格（右）", "隐藏/最小化窗口", "显示快捷键速查表"]
+            {
+                let cells = content_width_cells(&[item(label)]);
+                assert_eq!(
+                    cells,
+                    MIN_WIDTH_CELLS.max(unicode_column_width(label, None) as f32)
+                );
+                let (width, _) = menu_box_size(cells, 1, 0, cell_w, cell_h);
+                // box model 给行的可用文本宽度 = 外框宽 - 外框一圈 - 行的水平
+                // 占用（box model 不扣外边距，实际还多出两侧外边距的余量）。
+                // 它必须不小于标签宽度，否则最后一个字形被 `break` 掉
+                let (chrome_w, _) = chrome_px(cell_w, cell_h);
+                let room = width - chrome_w - row_inset_px(cell_w);
+                assert!(
+                    room >= cells * cell_w,
+                    "cell={cell_w} label={label} width={width} room={room}"
+                );
+                // 旧的 `+ 16.` 魔数连按字符数算出的宽度都兜不住中文
+                assert!(width > cells * cell_w + 16.);
+            }
+        }
     }
 
     #[test]
-    fn menu_box_height_accounts_for_container_chrome() {
-        let (_, height) = menu_box_size(MIN_WIDTH_CELLS, 3, 9., 20.);
-        let rows = 3. * 20. * (1. + 2. * ROW_PADDING_V_CELLS);
-        assert!(height > rows, "height={} rows={}", height, rows);
+    fn menu_box_height_counts_rows_separators_and_chrome() {
+        let (cell_w, cell_h) = (9., 20.);
+        let (_, height) = menu_box_size(MIN_WIDTH_CELLS, 3, 2, cell_w, cell_h);
+        let (_, chrome_h) = chrome_px(cell_w, cell_h);
+        assert_eq!(
+            height,
+            3. * row_height_px(cell_h) + 2. * separator_px(cell_h) + chrome_h
+        );
+        // 分隔行比文字行矮
+        assert!(separator_px(cell_h) < row_height_px(cell_h));
     }
 
     #[test]

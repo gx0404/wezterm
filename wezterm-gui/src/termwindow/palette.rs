@@ -2,11 +2,10 @@ use crate::commands::{CommandDef, ExpandedCommand};
 use crate::overlay::selector::{matcher_pattern, matcher_score};
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
-use crate::termwindow::render::corners::{
-    BOTTOM_LEFT_ROUNDED_CORNER, BOTTOM_RIGHT_ROUNDED_CORNER, TOP_LEFT_ROUNDED_CORNER,
-    TOP_RIGHT_ROUNDED_CORNER,
+use crate::termwindow::overlay_style::{
+    chrome_px, overlay_layout_context, rows_that_fit, ChromeKind, OverlayStyle,
 };
-use crate::termwindow::{DimensionContext, GuiWin, TermWindow, UIItemType};
+use crate::termwindow::{GuiWin, TermWindow};
 use crate::utilsprites::RenderMetrics;
 use config::i18n::{tr, tr_cow};
 use config::keyassignment::KeyAssignment;
@@ -24,7 +23,6 @@ use std::path::PathBuf;
 use termwiz::nerdfonts::NERD_FONTS;
 use wezterm_dynamic::{FromDynamic, ToDynamic};
 use wezterm_term::{KeyCode, KeyModifiers};
-use window::color::LinearRgba;
 
 struct MatchResults {
     selection: String,
@@ -272,6 +270,10 @@ impl CommandPalette {
             .expect("to resolve command palette font");
         let metrics = RenderMetrics::with_font_metrics(&font.metrics())
             .scale_line_height(term_window.config.command_palette_line_height);
+        // fork: shared overlay chrome (rounded stroked box, accent bar on
+        // the selected row, key chips); see overlay_style.rs
+        let config = term_window.config.clone();
+        let style = OverlayStyle::from_config(&config, term_window.palette());
 
         let top_bar_height = if term_window.show_tab_bar && !term_window.config.tab_bar_at_bottom {
             term_window.tab_bar_pixel_height_lossy()
@@ -282,22 +284,7 @@ impl CommandPalette {
         let border = term_window.get_os_border();
         let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;
 
-        let mut elements =
-            vec![
-                Element::new(&font, ElementContent::Text(format!("> {selection}_")))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: term_window
-                            .config
-                            .command_palette_fg_color
-                            .to_linear()
-                            .into(),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-            ];
+        let mut elements = vec![style.chrome(&font, format!("> {selection}_"), ChromeKind::Input)];
 
         for (display_idx, command) in matches
             .matches
@@ -330,28 +317,7 @@ impl CommandPalette {
                 None => &' ',
             };
 
-            let solid_bg_color: InheritableColor = term_window
-                .config
-                .command_palette_bg_color
-                .to_linear()
-                .into();
-            let solid_fg_color: InheritableColor = term_window
-                .config
-                .command_palette_fg_color
-                .to_linear()
-                .into();
-
-            let (bg, text) = if display_idx == selected_row {
-                (solid_fg_color.clone(), solid_bg_color.clone())
-            } else {
-                (LinearRgba::TRANSPARENT.into(), solid_fg_color.clone())
-            };
-
-            let (label_bg, label_text) = if display_idx == selected_row {
-                (solid_fg_color.clone(), solid_bg_color.clone())
-            } else {
-                (solid_bg_color.clone(), solid_fg_color.clone())
-            };
+            let selected = display_idx == selected_row;
 
             // DRY if the brief and doc are the same
             // fork: localize at render time; the frecency store keeps
@@ -374,47 +340,14 @@ impl CommandPalette {
             if !command.keys.is_empty() {
                 let key_label =
                     crate::commands::format_key_label(&command.keys, &term_window.config);
-
-                row.push(
-                    Element::new(&font, ElementContent::Text(key_label))
-                        .float(Float::Right)
-                        .padding(BoxDimension {
-                            left: Dimension::Cells(1.25),
-                            right: Dimension::Cells(0.5),
-                            top: Dimension::Cells(0.),
-                            bottom: Dimension::Cells(0.),
-                        })
-                        .zindex(10)
-                        .colors(ElementColors {
-                            border: BorderColor::default(),
-                            bg: label_bg.clone(),
-                            text: label_text.clone(),
-                        }),
-                );
+                row.push(style.key_chip(&font, key_label, selected));
             }
 
-            elements.push(
-                Element::new(&font, ElementContent::Children(row))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg,
-                        text,
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.25),
-                        right: Dimension::Cells(0.25),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    // Register the row in the hit map so that mouse
-                    // events can be routed back to the modal
-                    .item_type(UIItemType::Modal(display_idx)),
-            );
+            // Register the row in the hit map so that mouse events can be
+            // routed back to the modal
+            elements.push(style.row(&font, ElementContent::Children(row), selected, display_idx));
         }
 
-        let dimensions = term_window.dimensions;
         let size = term_window.terminal_size;
 
         // Avoid covering the entire width
@@ -426,92 +359,27 @@ impl CommandPalette {
         let desired_pixel_width =
             desired_width as f32 * term_window.render_metrics.cell_size.width as f32;
 
-        let element = Element::new(&font, ElementContent::Children(elements))
-            .colors(ElementColors {
-                border: BorderColor::new(
-                    term_window
-                        .config
-                        .command_palette_bg_color
-                        .to_linear()
-                        .into(),
-                ),
-                bg: term_window
-                    .config
-                    .command_palette_bg_color
-                    .to_linear()
-                    .into(),
-                text: term_window
-                    .config
-                    .command_palette_fg_color
-                    .to_linear()
-                    .into(),
-            })
-            .margin(BoxDimension {
-                left: Dimension::Cells(0.25),
-                right: Dimension::Cells(0.25),
-                top: Dimension::Cells(0.25),
-                bottom: Dimension::Cells(0.25),
-            })
-            .padding(BoxDimension {
-                left: Dimension::Cells(0.25),
-                right: Dimension::Cells(0.25),
-                top: Dimension::Cells(0.25),
-                bottom: Dimension::Cells(0.25),
-            })
-            .border(BoxDimension::new(Dimension::Pixels(1.)))
-            .border_corners(Some(Corners {
-                top_left: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
-                    poly: TOP_LEFT_ROUNDED_CORNER,
-                },
-                top_right: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
-                    poly: TOP_RIGHT_ROUNDED_CORNER,
-                },
-                bottom_left: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
-                    poly: BOTTOM_LEFT_ROUNDED_CORNER,
-                },
-                bottom_right: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
-                    poly: BOTTOM_RIGHT_ROUNDED_CORNER,
-                },
-            }))
-            .min_width(Some(Dimension::Pixels(desired_pixel_width)))
-            // fork: register the enclosing box in the hit map too. Its
-            // padding/border/margin ring belongs to no row, so a press
-            // there was treated as a press outside the modal and closed
-            // the palette.
-            .item_type(UIItemType::Modal(MODAL_CHROME_ROW));
+        // fork: the enclosing box is registered in the hit map by
+        // `container`. Its padding/border/margin ring belongs to no row, so
+        // a press there was treated as a press outside the modal and
+        // closed the palette.
+        let element = style
+            .container(&font, elements)
+            .min_width(Some(Dimension::Pixels(desired_pixel_width)));
 
         let x_adjust = ((avail_pixel_width - padding_left) - desired_pixel_width) / 2.;
 
         let computed = term_window.compute_element(
-            &LayoutContext {
-                height: DimensionContext {
-                    dpi: dimensions.dpi as f32,
-                    pixel_max: dimensions.pixel_height as f32,
-                    pixel_cell: metrics.cell_size.height as f32,
-                },
-                width: DimensionContext {
-                    dpi: dimensions.dpi as f32,
-                    pixel_max: dimensions.pixel_width as f32,
-                    pixel_cell: metrics.cell_size.width as f32,
-                },
-                bounds: euclid::rect(
+            &overlay_layout_context(
+                term_window,
+                &metrics,
+                euclid::rect(
                     padding_left + x_adjust,
                     top_pixel_y,
                     desired_pixel_width,
                     size.rows as f32 * term_window.render_metrics.cell_size.height as f32,
                 ),
-                metrics: &metrics,
-                gl_state: term_window.render_state.as_ref().unwrap(),
-                zindex: 100,
-            },
+            ),
             &element,
         )?;
 
@@ -545,8 +413,10 @@ impl CommandPalette {
         let mut row = self.selected_row.borrow_mut();
         *row = row.saturating_add(1).min(limit);
         let mut top_row = self.top_row.borrow_mut();
-        if *row > *top_row + max_rows_on_screen - 1 {
-            *top_row = row.saturating_sub(max_rows_on_screen - 1);
+        // fork: saturating, so an empty row budget cannot underflow
+        let last_visible = max_rows_on_screen.max(1) - 1;
+        if *row > *top_row + last_visible {
+            *top_row = row.saturating_sub(last_visible);
         }
     }
 
@@ -694,9 +564,19 @@ impl Modal for CommandPalette {
         let metrics = RenderMetrics::with_font_metrics(&font.metrics())
             .scale_line_height(term_window.config.command_palette_line_height);
 
-        let mut max_rows_on_screen = ((term_window.dimensions.pixel_height * 8 / 10)
-            / metrics.cell_size.height as usize)
-            - 2;
+        // fork: count in rendered row heights (overlay_style::row_px); the
+        // input line and the box chrome take the rest. Saturating: a very
+        // short window used to underflow here.
+        let (_, chrome_height) = chrome_px(
+            metrics.cell_size.width as f32,
+            metrics.cell_size.height as f32,
+        );
+        let mut max_rows_on_screen = rows_that_fit(
+            term_window.dimensions.pixel_height as f32 * 0.8 - chrome_height,
+            &metrics,
+        )
+        .saturating_sub(1)
+        .max(1);
         if let Some(size) = term_window.config.command_palette_rows {
             max_rows_on_screen = max_rows_on_screen.min(size);
         }

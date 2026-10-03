@@ -8,14 +8,16 @@
 use crate::commands::{format_key_label, CommandDef, ExpandedCommand};
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
-use crate::termwindow::{DimensionContext, TermWindow, UIItemType};
+use crate::termwindow::overlay_style::{
+    chrome_px, overlay_layout_context, rows_that_fit, ChromeKind, OverlayStyle,
+};
+use crate::termwindow::TermWindow;
 use config::i18n::{tr, tr_cow};
 use config::keyassignment::KeyAssignment;
 use config::Dimension;
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 use wezterm_term::{KeyCode, KeyModifiers};
-use window::color::LinearRgba;
 use window::WindowOps;
 
 pub struct KeybindsOverlay {
@@ -74,17 +76,8 @@ impl KeybindsOverlay {
             .expect("to resolve command palette font");
         let metrics = crate::utilsprites::RenderMetrics::with_font_metrics(&font.metrics())
             .scale_line_height(term_window.config.command_palette_line_height);
-
-        let bg: InheritableColor = term_window
-            .config
-            .command_palette_bg_color
-            .to_linear()
-            .into();
-        let fg: InheritableColor = term_window
-            .config
-            .command_palette_fg_color
-            .to_linear()
-            .into();
+        let config = term_window.config.clone();
+        let style = OverlayStyle::from_config(&config, term_window.palette());
 
         let top_bar_height = if term_window.show_tab_bar && !term_window.config.tab_bar_at_bottom {
             term_window.tab_bar_pixel_height_lossy()
@@ -95,32 +88,23 @@ impl KeybindsOverlay {
         let border = term_window.get_os_border();
         let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;
 
-        let mut max_rows_on_screen = ((term_window.dimensions.pixel_height * 8 / 10)
-            / metrics.cell_size.height as usize)
-            .saturating_sub(4);
+        // 行数按渲染出的行高（`row_px`）算：标题、页脚两行 chrome 与外框
+        // 一圈先扣掉
+        let (_, chrome_height) = chrome_px(
+            metrics.cell_size.width as f32,
+            metrics.cell_size.height as f32,
+        );
+        let mut max_rows_on_screen = rows_that_fit(
+            term_window.dimensions.pixel_height as f32 * 0.8 - chrome_height,
+            &metrics,
+        )
+        .saturating_sub(2);
         if let Some(size) = term_window.config.command_palette_rows {
             max_rows_on_screen = max_rows_on_screen.min(size);
         }
         *self.max_rows_on_screen.borrow_mut() = max_rows_on_screen;
 
-        let mut rows =
-            vec![
-                Element::new(&font, ElementContent::Text(tr("Keybindings").into_owned()))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: fg.clone(),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.1),
-                        bottom: Dimension::Cells(0.1),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-            ];
+        let mut rows = vec![style.chrome(&font, tr("Keybindings").into_owned(), ChromeKind::Title)];
 
         let top_row = *self.top_row.borrow();
         let selected = *self.selected.borrow();
@@ -146,85 +130,30 @@ impl KeybindsOverlay {
                 )
             };
             let label = format!("{group}{}", tr_cow(command.brief.clone()));
-
-            let (row_bg, row_fg) = if display_idx == selected {
-                (fg.clone(), bg.clone())
-            } else {
-                (LinearRgba::TRANSPARENT.into(), fg.clone())
-            };
+            let is_selected = display_idx == selected;
 
             let mut row = vec![Element::new(&font, ElementContent::Text(label))
                 .min_width(Some(Dimension::Percent(1.)))];
 
             if !command.keys.is_empty() {
                 let key_label = format_key_label(&command.keys, &term_window.config);
-                row.push(
-                    Element::new(&font, ElementContent::Text(key_label))
-                        .float(Float::Right)
-                        .padding(BoxDimension {
-                            left: Dimension::Cells(1.25),
-                            right: Dimension::Cells(0.5),
-                            top: Dimension::Cells(0.),
-                            bottom: Dimension::Cells(0.),
-                        })
-                        .zindex(10)
-                        .colors(ElementColors {
-                            border: BorderColor::default(),
-                            bg: if display_idx == selected {
-                                bg.clone()
-                            } else {
-                                fg.clone()
-                            },
-                            text: if display_idx == selected {
-                                fg.clone()
-                            } else {
-                                bg.clone()
-                            },
-                        }),
-                );
+                row.push(style.key_chip(&font, key_label, is_selected));
             }
 
-            rows.push(
-                Element::new(&font, ElementContent::Children(row))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: row_bg,
-                        text: row_fg,
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.25),
-                        right: Dimension::Cells(0.25),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(display_idx)),
-            );
+            rows.push(style.row(
+                &font,
+                ElementContent::Children(row),
+                is_selected,
+                display_idx,
+            ));
         }
 
-        rows.push(
-            Element::new(
-                &font,
-                ElementContent::Text(tr("↑↓ scroll  Esc close").into_owned()),
-            )
-            .colors(ElementColors {
-                border: BorderColor::default(),
-                bg: LinearRgba::TRANSPARENT.into(),
-                text: fg.clone(),
-            })
-            .padding(BoxDimension {
-                left: Dimension::Cells(0.5),
-                right: Dimension::Cells(0.5),
-                top: Dimension::Cells(0.1),
-                bottom: Dimension::Cells(0.1),
-            })
-            .min_width(Some(Dimension::Percent(1.)))
-            .display(DisplayType::Block)
-            .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-        );
+        rows.push(style.chrome(
+            &font,
+            tr("↑↓ scroll  Esc close").into_owned(),
+            ChromeKind::Hint,
+        ));
 
-        let dimensions = term_window.dimensions;
         let size = term_window.terminal_size;
         let desired_width = (size.cols / 2).max(100).min(size.cols);
         let avail_pixel_width =
@@ -232,63 +161,26 @@ impl KeybindsOverlay {
         let desired_pixel_width =
             desired_width as f32 * term_window.render_metrics.cell_size.width as f32;
 
-        let element = Element::new(&font, ElementContent::Children(rows))
-            .colors(ElementColors {
-                border: BorderColor::new(
-                    term_window
-                        .config
-                        .command_palette_bg_color
-                        .to_linear()
-                        .into(),
-                ),
-                bg: term_window
-                    .config
-                    .command_palette_bg_color
-                    .to_linear()
-                    .into(),
-                text: term_window
-                    .config
-                    .command_palette_fg_color
-                    .to_linear()
-                    .into(),
-            })
-            .margin(BoxDimension {
-                left: Dimension::Cells(0.25),
-                right: Dimension::Cells(0.25),
-                top: Dimension::Cells(0.25),
-                bottom: Dimension::Cells(0.25),
-            })
-            .padding(BoxDimension::new(Dimension::Cells(0.25)))
-            .border(BoxDimension::new(Dimension::Pixels(1.)))
-            .min_width(Some(Dimension::Pixels(desired_pixel_width)))
-            // 外框自己也进 hit map：内边距/边框/外边距那一圈不属于任何行，
-            // 点在那里会被「点浮层外即关闭」误判成点外面（WZ-06）
-            .item_type(UIItemType::Modal(MODAL_CHROME_ROW));
+        // 外框自己也进 hit map（`container` 挂 MODAL_CHROME_ROW）：内边距/
+        // 边框/外边距那一圈不属于任何行，点在那里会被「点浮层外即关闭」
+        // 误判成点外面（WZ-06）
+        let element = style
+            .container(&font, rows)
+            .min_width(Some(Dimension::Pixels(desired_pixel_width)));
 
         let x_adjust = ((avail_pixel_width - padding_left) - desired_pixel_width) / 2.;
 
         let computed = term_window.compute_element(
-            &LayoutContext {
-                height: DimensionContext {
-                    dpi: dimensions.dpi as f32,
-                    pixel_max: dimensions.pixel_height as f32,
-                    pixel_cell: metrics.cell_size.height as f32,
-                },
-                width: DimensionContext {
-                    dpi: dimensions.dpi as f32,
-                    pixel_max: dimensions.pixel_width as f32,
-                    pixel_cell: metrics.cell_size.width as f32,
-                },
-                bounds: euclid::rect(
+            &overlay_layout_context(
+                term_window,
+                &metrics,
+                euclid::rect(
                     padding_left + x_adjust,
                     top_pixel_y,
                     desired_pixel_width,
                     size.rows as f32 * term_window.render_metrics.cell_size.height as f32,
                 ),
-                metrics: &metrics,
-                gl_state: term_window.render_state.as_ref().unwrap(),
-                zindex: 100,
-            },
+            ),
             &element,
         )?;
 

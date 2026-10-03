@@ -38,7 +38,10 @@
 
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW, MODAL_SECTION_BASE, MODAL_SECTION_MAX};
-use crate::termwindow::{DimensionContext, TermWindow, TermWindowNotif, UIItemType};
+use crate::termwindow::overlay_style::{
+    chrome_px, overlay_layout_context, rows_that_fit, ChromeKind, OverlayStyle,
+};
+use crate::termwindow::{TermWindow, TermWindowNotif, UIItemType};
 use anyhow::Context;
 use config::gui_settings::DEFAULT_SHELL_KEY;
 use config::i18n::{tr, UiLanguage};
@@ -379,15 +382,23 @@ impl SettingsOverlay {
             + usize::from(self.error.borrow().is_some())
     }
 
-    /// 数据行可视区的行数，按传入度量（渲染实际使用的那份）计算
+    /// 数据行可视区的行数，按传入度量（渲染实际使用的那份）计算。按渲染
+    /// 出的行高（`overlay_style::row_px`，含行内边距）折算，外框一圈先扣
+    /// 掉；chrome 行不比数据行高，各按一行算
     fn max_rows_on_screen(
         &self,
         term_window: &TermWindow,
         metrics: &crate::utilsprites::RenderMetrics,
         items_len: usize,
     ) -> usize {
-        let cell_height = (metrics.cell_size.height as usize).max(1);
-        ((term_window.dimensions.pixel_height * VISIBLE_ROWS_HEIGHT_PERMILLE / 1000) / cell_height)
+        let (_, chrome_height) = chrome_px(
+            metrics.cell_size.width as f32,
+            metrics.cell_size.height as f32,
+        );
+        let avail = (term_window.dimensions.pixel_height * VISIBLE_ROWS_HEIGHT_PERMILLE / 1000)
+            as f32
+            - chrome_height;
+        rows_that_fit(avail, metrics)
             .saturating_sub(self.chrome_rows(items_len))
             .max(MIN_VISIBLE_ROWS)
     }
@@ -830,17 +841,10 @@ impl SettingsOverlay {
             .expect("to resolve command palette font");
         let metrics = crate::utilsprites::RenderMetrics::with_font_metrics(&font.metrics())
             .scale_line_height(term_window.config.command_palette_line_height);
-
-        let bg: InheritableColor = term_window
-            .config
-            .command_palette_bg_color
-            .to_linear()
-            .into();
-        let fg: InheritableColor = term_window
-            .config
-            .command_palette_fg_color
-            .to_linear()
-            .into();
+        // 浮层外观（圆角描边外框、选中行强调条、分区 tab 下划线）走共享
+        // 样式，配色读窗口那份配置与（可能处于预览中的）窗口调色板
+        let window_config = term_window.config.clone();
+        let style = OverlayStyle::from_config(&window_config, term_window.palette());
 
         let items = self.visible_items();
         // 行里显示的设置值读刚落地的全局配置，与 `activate` 推导下一个值
@@ -856,72 +860,28 @@ impl SettingsOverlay {
         let top_row = *self.top_row.borrow();
         let selected = *self.selected.borrow();
 
-        let mut rows = vec![];
-
-        // Title
-        rows.push(
-            Element::new(&font, ElementContent::Text(tr("Settings").into_owned()))
-                .colors(ElementColors {
-                    border: BorderColor::default(),
-                    bg: LinearRgba::TRANSPARENT.into(),
-                    text: fg.clone(),
-                })
-                .padding(BoxDimension {
-                    left: Dimension::Cells(0.5),
-                    right: Dimension::Cells(0.5),
-                    top: Dimension::Cells(0.1),
-                    bottom: Dimension::Cells(0.1),
-                })
-                .min_width(Some(Dimension::Percent(1.)))
-                .display(DisplayType::Block)
-                .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-        );
+        let mut rows = vec![style.chrome(&font, tr("Settings").into_owned(), ChromeKind::Title)];
 
         // Section tab row (WZ-09): one child element per section so each
         // tab is individually addressable (click targets via the
-        // MODAL_SECTION_BASE sentinel band) and the active section is
-        // rendered with the same inverted colors as a selected data row.
+        // MODAL_SECTION_BASE sentinel band); the active section is marked
+        // by an accent underline.
         let section = *self.section.borrow();
-        let mut tab_children = vec![];
-        for (idx, s) in Section::ALL.iter().enumerate() {
-            if idx > 0 {
-                tab_children.push(
-                    Element::new(&font, ElementContent::Text("  |  ".to_string())).colors(
-                        ElementColors {
-                            border: BorderColor::default(),
-                            bg: LinearRgba::TRANSPARENT.into(),
-                            text: fg.clone(),
-                        },
-                    ),
-                );
-            }
-            let active = *s == section;
-            tab_children.push(
-                Element::new(&font, ElementContent::Text(tr(s.title()).into_owned()))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: if active {
-                            fg.clone()
-                        } else {
-                            LinearRgba::TRANSPARENT.into()
-                        },
-                        text: if active { bg.clone() } else { fg.clone() },
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .item_type(UIItemType::Modal(MODAL_SECTION_BASE + idx)),
-            );
-        }
+        let tab_children = Section::ALL
+            .iter()
+            .enumerate()
+            .map(|(idx, s)| {
+                style
+                    .section_tab(&font, tr(s.title()).into_owned(), *s == section)
+                    .item_type(UIItemType::Modal(MODAL_SECTION_BASE + idx))
+            })
+            .collect();
         rows.push(
             Element::new(&font, ElementContent::Children(tab_children))
                 .colors(ElementColors {
                     border: BorderColor::default(),
                     bg: LinearRgba::TRANSPARENT.into(),
-                    text: fg.clone(),
+                    text: style.text.into(),
                 })
                 .padding(BoxDimension {
                     left: Dimension::Cells(0.),
@@ -939,131 +899,40 @@ impl SettingsOverlay {
         // 与「可打印字符进过滤框」永远同时成立（批 4 审查 minor）
         if self.filter_is_active() {
             let filter = self.filter.borrow().clone();
-            rows.push(
-                Element::new(&font, ElementContent::Text(format!("> {filter}_")))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: fg.clone(),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.1),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-            );
+            rows.push(style.chrome(&font, format!("> {filter}_"), ChromeKind::Input));
         }
 
         if items.is_empty() {
             let hint = tr(empty_hint(section)).into_owned();
-            rows.push(
-                Element::new(&font, ElementContent::Text(hint))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: fg.clone(),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-            );
+            rows.push(style.chrome(&font, hint, ChromeKind::Hint));
         }
 
         for (display_idx, item) in items.iter().enumerate().skip(top_row).take(max_rows) {
             let label = self.row_label(item, &settings_config);
-            let is_selected = display_idx == selected;
-            let (row_bg, row_fg) = if is_selected {
-                (fg.clone(), bg.clone())
-            } else {
-                (LinearRgba::TRANSPARENT.into(), fg.clone())
-            };
-            rows.push(
-                Element::new(&font, ElementContent::Text(label))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: row_bg,
-                        text: row_fg,
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.75),
-                        right: Dimension::Cells(0.75),
-                        top: Dimension::Cells(0.1),
-                        bottom: Dimension::Cells(0.1),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(display_idx)),
-            );
+            rows.push(style.row(
+                &font,
+                ElementContent::Text(label),
+                display_idx == selected,
+                display_idx,
+            ));
         }
 
         // 应用失败的原因，与壁纸浮层的行内错误同一形态（不关浮层）
         if let Some(err) = self.error.borrow().as_ref() {
-            rows.push(
-                Element::new(&font, ElementContent::Text(format!("! {err}")))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: fg.clone(),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-            );
+            rows.push(style.chrome(&font, format!("! {err}"), ChromeKind::Error));
         }
 
         // Footer hints
-        rows.push(
-            Element::new(
-                &font,
-                ElementContent::Text(
-                    tr("↑↓ select  Tab section  Enter apply  Esc cancel").into_owned(),
-                ),
-            )
-            .colors(ElementColors {
-                border: BorderColor::default(),
-                bg: LinearRgba::TRANSPARENT.into(),
-                text: fg.clone(),
-            })
-            .padding(BoxDimension {
-                left: Dimension::Cells(0.5),
-                right: Dimension::Cells(0.5),
-                top: Dimension::Cells(0.1),
-                bottom: Dimension::Cells(0.1),
-            })
-            .min_width(Some(Dimension::Percent(1.)))
-            .display(DisplayType::Block)
-            .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-        );
+        rows.push(style.chrome(
+            &font,
+            tr("↑↓ select  Tab section  Enter apply  Esc cancel").into_owned(),
+            ChromeKind::Hint,
+        ));
 
-        let element = Element::new(&font, ElementContent::Children(rows))
-            .colors(ElementColors {
-                border: BorderColor::default(),
-                bg: bg.clone(),
-                text: fg.clone(),
-            })
-            .padding(BoxDimension::new(Dimension::Cells(0.25)))
-            .border(BoxDimension::new(Dimension::Pixels(1.)))
-            .margin(BoxDimension::new(Dimension::Cells(0.25)))
-            .display(DisplayType::Block)
-            // 外框自己也进 hit map：内边距/边框/外边距那一圈不属于任何行，
-            // 点在那里会被「点浮层外即关闭」误判成点外面（WZ-06）
-            .item_type(UIItemType::Modal(MODAL_CHROME_ROW));
+        // 外框自己也进 hit map（`container` 挂 MODAL_CHROME_ROW）：内边距/
+        // 边框/外边距那一圈不属于任何行，点在那里会被「点浮层外即关闭」
+        // 误判成点外面（WZ-06）
+        let element = style.container(&font, rows);
 
         let (padding_left, padding_top) = term_window.padding_left_top();
         let border = term_window.get_os_border();
@@ -1089,22 +958,7 @@ impl SettingsOverlay {
         let y = top_bar_height + padding_top + border.top.get() as f32;
 
         let computed = term_window.compute_element(
-            &LayoutContext {
-                width: DimensionContext {
-                    dpi: term_window.dimensions.dpi as f32,
-                    pixel_max: term_window.dimensions.pixel_width as f32,
-                    pixel_cell: metrics.cell_size.width as f32,
-                },
-                height: DimensionContext {
-                    dpi: term_window.dimensions.dpi as f32,
-                    pixel_max: term_window.dimensions.pixel_height as f32,
-                    pixel_cell: metrics.cell_size.height as f32,
-                },
-                bounds: euclid::rect(x, y, width, height),
-                metrics: &metrics,
-                gl_state: term_window.render_state.as_ref().unwrap(),
-                zindex: 100,
-            },
+            &overlay_layout_context(term_window, &metrics, euclid::rect(x, y, width, height)),
             &element,
         )?;
 

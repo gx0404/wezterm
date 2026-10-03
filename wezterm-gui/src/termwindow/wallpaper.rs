@@ -19,7 +19,10 @@ use crate::termwindow::background::{
 };
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::{Modal, MODAL_CHROME_ROW};
-use crate::termwindow::{DimensionContext, TermWindow, TermWindowNotif, UIItemType};
+use crate::termwindow::overlay_style::{
+    chrome_px, overlay_layout_context, rows_that_fit, ChromeKind, OverlayStyle,
+};
+use crate::termwindow::{TermWindow, TermWindowNotif};
 use config::i18n::tr;
 use config::keyassignment::KeyAssignment;
 use config::{BackgroundLayer, BackgroundSource, Dimension, ImageFileSource, ImageFileSourceWrap};
@@ -30,7 +33,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use wezterm_dynamic::Value;
 use wezterm_term::{KeyCode, KeyModifiers};
-use window::color::LinearRgba;
 use window::{Clipboard, WindowOps};
 
 /// 壁纸图片的扩展名白名单（与 dotfiles `utils/backdrops.lua` 的 glob 一致）
@@ -690,17 +692,8 @@ impl WallpaperOverlay {
             .expect("to resolve command palette font");
         let metrics = crate::utilsprites::RenderMetrics::with_font_metrics(&font.metrics())
             .scale_line_height(term_window.config.command_palette_line_height);
-
-        let bg: InheritableColor = term_window
-            .config
-            .command_palette_bg_color
-            .to_linear()
-            .into();
-        let fg: InheritableColor = term_window
-            .config
-            .command_palette_fg_color
-            .to_linear()
-            .into();
+        let config = term_window.config.clone();
+        let style = OverlayStyle::from_config(&config, term_window.palette());
 
         let top_bar_height = if term_window.show_tab_bar && !term_window.config.tab_bar_at_bottom {
             term_window.tab_bar_pixel_height_lossy()
@@ -711,32 +704,23 @@ impl WallpaperOverlay {
         let border = term_window.get_os_border();
         let top_pixel_y = top_bar_height + padding_top + border.top.get() as f32;
 
-        let mut max_rows_on_screen = ((term_window.dimensions.pixel_height * 8 / 10)
-            / metrics.cell_size.height as usize)
-            .saturating_sub(6);
+        // 行数按渲染出的行高（`row_px`）算：外框一圈先扣掉，再给 chrome 行
+        // （标题、页脚、模式提示行、错误行）各留一行
+        let (_, chrome_height) = chrome_px(
+            metrics.cell_size.width as f32,
+            metrics.cell_size.height as f32,
+        );
+        let mut max_rows_on_screen = rows_that_fit(
+            term_window.dimensions.pixel_height as f32 * 0.8 - chrome_height,
+            &metrics,
+        )
+        .saturating_sub(4);
         if let Some(size) = term_window.config.command_palette_rows {
             max_rows_on_screen = max_rows_on_screen.min(size);
         }
         *self.max_rows_on_screen.borrow_mut() = max_rows_on_screen;
 
-        let mut rows =
-            vec![
-                Element::new(&font, ElementContent::Text(tr("Wallpapers").into_owned()))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: fg.clone(),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.1),
-                        bottom: Dimension::Cells(0.1),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-            ];
+        let mut rows = vec![style.chrome(&font, tr("Wallpapers").into_owned(), ChromeKind::Title)];
 
         let mode = self.mode.borrow().clone();
         let selected = *self.selected.borrow();
@@ -754,23 +738,7 @@ impl WallpaperOverlay {
                     } else {
                         tr("(empty — press 'a' to add a wallpaper)").into_owned()
                     };
-                    rows.push(
-                        Element::new(&font, ElementContent::Text(text))
-                            .colors(ElementColors {
-                                border: BorderColor::default(),
-                                bg: LinearRgba::TRANSPARENT.into(),
-                                text: fg.clone(),
-                            })
-                            .padding(BoxDimension {
-                                left: Dimension::Cells(0.5),
-                                right: Dimension::Cells(0.5),
-                                top: Dimension::Cells(0.),
-                                bottom: Dimension::Cells(0.),
-                            })
-                            .min_width(Some(Dimension::Percent(1.)))
-                            .display(DisplayType::Block)
-                            .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-                    );
+                    rows.push(style.chrome(&font, text, ChromeKind::Hint));
                 }
                 for (display_idx, entry) in entries
                     .iter()
@@ -780,122 +748,42 @@ impl WallpaperOverlay {
                 {
                     let is_current = current.as_deref() == Some(entry.name.as_str());
                     let label = Self::row_label(entry, is_current);
-                    let (row_bg, row_fg) = if display_idx == selected {
-                        (fg.clone(), bg.clone())
-                    } else {
-                        (LinearRgba::TRANSPARENT.into(), fg.clone())
-                    };
-                    rows.push(
-                        Element::new(&font, ElementContent::Text(label))
-                            .colors(ElementColors {
-                                border: BorderColor::default(),
-                                bg: row_bg,
-                                text: row_fg,
-                            })
-                            .padding(BoxDimension {
-                                left: Dimension::Cells(0.5),
-                                right: Dimension::Cells(0.5),
-                                top: Dimension::Cells(0.),
-                                bottom: Dimension::Cells(0.),
-                            })
-                            .min_width(Some(Dimension::Percent(1.)))
-                            .display(DisplayType::Block)
-                            .item_type(UIItemType::Modal(display_idx)),
-                    );
+                    rows.push(style.row(
+                        &font,
+                        ElementContent::Text(label),
+                        display_idx == selected,
+                        display_idx,
+                    ));
                 }
             }
             Mode::Adding(input) => {
-                rows.push(
-                    Element::new(
-                        &font,
-                        ElementContent::Text(format!("{}: {input}_", tr("Add path"))),
-                    )
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: fg.clone(),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-                );
+                rows.push(style.chrome(
+                    &font,
+                    format!("{}: {input}_", tr("Add path")),
+                    ChromeKind::Input,
+                ));
             }
             Mode::ConfirmDelete(idx) => {
                 let name = entries.get(*idx).map(|e| e.name.as_str()).unwrap_or("?");
-                rows.push(
-                    Element::new(
-                        &font,
-                        ElementContent::Text(tr("Delete").into_owned() + " " + name + "? [y]"),
-                    )
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: fg.clone(),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-                );
+                rows.push(style.chrome(
+                    &font,
+                    tr("Delete").into_owned() + " " + name + "? [y]",
+                    ChromeKind::Input,
+                ));
             }
         }
 
         // 行内错误（不关浮层）
         if let Some(err) = self.error.borrow().as_ref() {
-            rows.push(
-                Element::new(&font, ElementContent::Text(format!("! {err}")))
-                    .colors(ElementColors {
-                        border: BorderColor::default(),
-                        bg: LinearRgba::TRANSPARENT.into(),
-                        text: fg.clone(),
-                    })
-                    .padding(BoxDimension {
-                        left: Dimension::Cells(0.5),
-                        right: Dimension::Cells(0.5),
-                        top: Dimension::Cells(0.),
-                        bottom: Dimension::Cells(0.),
-                    })
-                    .min_width(Some(Dimension::Percent(1.)))
-                    .display(DisplayType::Block)
-                    .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-            );
+            rows.push(style.chrome(&font, format!("! {err}"), ChromeKind::Error));
         }
 
-        rows.push(
-            Element::new(
-                &font,
-                ElementContent::Text(
-                    tr("↑↓ preview  Enter apply  a add  d del  r random  Esc cancel").into_owned(),
-                ),
-            )
-            .colors(ElementColors {
-                border: BorderColor::default(),
-                bg: LinearRgba::TRANSPARENT.into(),
-                text: fg.clone(),
-            })
-            .padding(BoxDimension {
-                left: Dimension::Cells(0.5),
-                right: Dimension::Cells(0.5),
-                top: Dimension::Cells(0.1),
-                bottom: Dimension::Cells(0.1),
-            })
-            .min_width(Some(Dimension::Percent(1.)))
-            .display(DisplayType::Block)
-            .item_type(UIItemType::Modal(MODAL_CHROME_ROW)),
-        );
+        rows.push(style.chrome(
+            &font,
+            tr("↑↓ preview  Enter apply  a add  d del  r random  Esc cancel").into_owned(),
+            ChromeKind::Hint,
+        ));
 
-        let dimensions = term_window.dimensions;
         let size = term_window.terminal_size;
         let desired_width = (size.cols / 2).max(72).min(size.cols);
         let avail_pixel_width =
@@ -903,62 +791,25 @@ impl WallpaperOverlay {
         let desired_pixel_width =
             desired_width as f32 * term_window.render_metrics.cell_size.width as f32;
 
-        let element = Element::new(&font, ElementContent::Children(rows))
-            .colors(ElementColors {
-                border: BorderColor::new(
-                    term_window
-                        .config
-                        .command_palette_bg_color
-                        .to_linear()
-                        .into(),
-                ),
-                bg: term_window
-                    .config
-                    .command_palette_bg_color
-                    .to_linear()
-                    .into(),
-                text: term_window
-                    .config
-                    .command_palette_fg_color
-                    .to_linear()
-                    .into(),
-            })
-            .margin(BoxDimension {
-                left: Dimension::Cells(0.25),
-                right: Dimension::Cells(0.25),
-                top: Dimension::Cells(0.25),
-                bottom: Dimension::Cells(0.25),
-            })
-            .padding(BoxDimension::new(Dimension::Cells(0.25)))
-            .border(BoxDimension::new(Dimension::Pixels(1.)))
-            .min_width(Some(Dimension::Pixels(desired_pixel_width)))
-            // 外框自己也进 hit map：点 padding 一圈不会被当成点外面（WZ-06）
-            .item_type(UIItemType::Modal(MODAL_CHROME_ROW));
+        // 外框自己也进 hit map（`container`）：点 padding 一圈不会被当成点
+        // 外面（WZ-06）
+        let element = style
+            .container(&font, rows)
+            .min_width(Some(Dimension::Pixels(desired_pixel_width)));
 
         let x_adjust = ((avail_pixel_width - padding_left) - desired_pixel_width) / 2.;
 
         let computed = term_window.compute_element(
-            &LayoutContext {
-                height: DimensionContext {
-                    dpi: dimensions.dpi as f32,
-                    pixel_max: dimensions.pixel_height as f32,
-                    pixel_cell: metrics.cell_size.height as f32,
-                },
-                width: DimensionContext {
-                    dpi: dimensions.dpi as f32,
-                    pixel_max: dimensions.pixel_width as f32,
-                    pixel_cell: metrics.cell_size.width as f32,
-                },
-                bounds: euclid::rect(
+            &overlay_layout_context(
+                term_window,
+                &metrics,
+                euclid::rect(
                     padding_left + x_adjust,
                     top_pixel_y,
                     desired_pixel_width,
                     size.rows as f32 * term_window.render_metrics.cell_size.height as f32,
                 ),
-                metrics: &metrics,
-                gl_state: term_window.render_state.as_ref().unwrap(),
-                zindex: 100,
-            },
+            ),
             &element,
         )?;
 

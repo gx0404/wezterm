@@ -13,8 +13,6 @@
 //! 边界：只产出 Element，不碰 hit map 语义——外框与 chrome 行挂
 //! `UIItemType::Modal(MODAL_CHROME_ROW)`（WZ-06），数据行挂调用方给的行号。
 //! 文本浮层（termwiz 内存终端）的行样式在 `overlay/style.rs`，两边互不引用。
-// 五个浮层在下一步改走这里；接入前先压住未使用告警
-#![allow(dead_code)]
 
 use crate::termwindow::box_model::*;
 use crate::termwindow::modal::MODAL_CHROME_ROW;
@@ -133,8 +131,12 @@ fn zero() -> Dimension {
 /// 一行数据行的像素高度：内容一格 + 上下行内边距。`metrics` 必须是浮层
 /// 渲染实际用的那份（命令面板字体，已乘 `command_palette_line_height`）
 pub fn row_px(metrics: &RenderMetrics) -> f32 {
-    let cell = metrics.cell_size.height as f32;
-    cell + 2. * cells_px(ROW_PAD_V_CELLS, cell)
+    row_height_px(metrics.cell_size.height as f32)
+}
+
+/// `row_px` 的单元格高度版本（右键菜单按格子尺寸推外框时用）
+pub fn row_height_px(cell_h: f32) -> f32 {
+    cell_h + 2. * cells_px(ROW_PAD_V_CELLS, cell_h)
 }
 
 /// 外框在两个方向上占用的像素（两侧内边距 + 外边距 + 描边之和），
