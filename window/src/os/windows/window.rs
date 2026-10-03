@@ -1213,23 +1213,27 @@ impl WindowOps for Window {
     }
 
     fn get_clipboard(&self, _clipboard: Clipboard) -> Future<String> {
-        Future::result(
-            clipboard_win::get_clipboard_string()
-                .map(|s| s.replace("\r\n", "\n"))
-                .context("Error getting clipboard"),
-        )
+        let mut promise = Promise::new();
+        let future = promise.get_future().unwrap();
+        // fork: read on the clipboard thread, which retries while another
+        // process holds the clipboard open
+        run_on_clipboard_thread(move || {
+            promise.result(read_clipboard_text());
+        });
+        future
     }
 
     fn set_clipboard(&self, _clipboard: Clipboard, text: String) {
-        clipboard_win::set_clipboard_string(&text).ok();
+        // fork: write on the clipboard thread with backoff instead of giving
+        // up silently after ten Sleep(0) attempts
+        run_on_clipboard_thread(move || write_clipboard_text(&text));
     }
 
     fn get_clipboard_image(&self, _clipboard: Clipboard) -> Future<Option<ClipboardImage>> {
         let mut promise = Promise::new();
         let future = promise.get_future().unwrap();
-        // fork: 图片载荷可达数 MB，读取放后台线程后再 resolve；文本
-        // get_clipboard 是调用线程 eager 的，图片刻意不 eager
-        std::thread::spawn(move || {
+        // fork: 图片载荷可达数 MB，与文本读写一样排进剪贴板线程，读完再 resolve
+        run_on_clipboard_thread(move || {
             promise.ok(read_clipboard_image());
         });
         future
@@ -1311,9 +1315,128 @@ impl WindowOps for Window {
     }
 }
 
+type ClipboardJob = Box<dyn FnOnce() + Send>;
+
+lazy_static! {
+    /// fork: every clipboard access runs on this one background thread, in
+    /// the order it was requested. Opening the clipboard can block while
+    /// another process holds it, which must not stall the GUI thread, and a
+    /// single FIFO keeps "copy, then paste" from being reordered by thread
+    /// scheduling.
+    static ref CLIPBOARD_THREAD: Mutex<std::sync::mpsc::Sender<ClipboardJob>> = {
+        let (tx, rx) = std::sync::mpsc::channel::<ClipboardJob>();
+        std::thread::Builder::new()
+            .name("clipboard".to_string())
+            .spawn(move || {
+                for job in rx {
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).is_err() {
+                        log::error!("clipboard job panicked");
+                    }
+                }
+            })
+            .expect("failed to spawn clipboard thread");
+        Mutex::new(tx)
+    };
+}
+
+/// fork: queue a job on the clipboard thread
+fn run_on_clipboard_thread(job: impl FnOnce() + Send + 'static) {
+    let job: ClipboardJob = Box::new(job);
+    let sent = match CLIPBOARD_THREAD.lock() {
+        Ok(tx) => tx.send(job).is_ok(),
+        Err(_) => false,
+    };
+    if !sent {
+        log::error!("clipboard thread is gone; clipboard request dropped");
+    }
+}
+
+/// fork: number of OpenClipboard attempts before giving up. Clipboard
+/// managers, rdpclip and password managers keep the clipboard open for a
+/// few milliseconds after every change, longer than the Sleep(0) retries in
+/// clipboard-win last.
+const CLIPBOARD_OPEN_ATTEMPTS: u32 = 16;
+
+/// fork: wait before retrying after failed attempt `attempt` (0-based):
+/// 10ms, growing by 1ms per attempt up to 20ms
+fn clipboard_retry_delay(attempt: u32) -> std::time::Duration {
+    std::time::Duration::from_millis(10 + u64::from(attempt.min(10)))
+}
+
+/// fork: open the clipboard, backing off while another process holds it.
+/// The returned guard closes it again. Blocks; clipboard thread only.
+fn open_clipboard_with_retry() -> Option<clipboard_win::Clipboard> {
+    for attempt in 0..CLIPBOARD_OPEN_ATTEMPTS {
+        match clipboard_win::Clipboard::new() {
+            Ok(clipboard) => return Some(clipboard),
+            Err(err) if attempt + 1 == CLIPBOARD_OPEN_ATTEMPTS => {
+                log::warn!(
+                    "unable to open clipboard after {} attempts: {}",
+                    CLIPBOARD_OPEN_ATTEMPTS,
+                    err
+                );
+            }
+            Err(_) => std::thread::sleep(clipboard_retry_delay(attempt)),
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod clipboard_retry_tests {
+    use super::{clipboard_retry_delay, CLIPBOARD_OPEN_ATTEMPTS};
+    use std::time::Duration;
+
+    #[test]
+    fn delay_backs_off_from_10_to_20_ms() {
+        assert_eq!(clipboard_retry_delay(0), Duration::from_millis(10));
+        assert_eq!(clipboard_retry_delay(5), Duration::from_millis(15));
+        assert_eq!(clipboard_retry_delay(10), Duration::from_millis(20));
+        assert_eq!(clipboard_retry_delay(u32::MAX), Duration::from_millis(20));
+    }
+
+    #[test]
+    fn total_wait_stays_bounded() {
+        // the last failed attempt does not sleep
+        let total: Duration = (0..CLIPBOARD_OPEN_ATTEMPTS - 1)
+            .map(clipboard_retry_delay)
+            .sum();
+        assert!(
+            (10..=20).contains(&CLIPBOARD_OPEN_ATTEMPTS),
+            "{CLIPBOARD_OPEN_ATTEMPTS}"
+        );
+        assert!(total >= Duration::from_millis(150), "{total:?}");
+        assert!(total <= Duration::from_millis(400), "{total:?}");
+    }
+}
+
+fn read_clipboard_text() -> anyhow::Result<String> {
+    let _clipboard = open_clipboard_with_retry()
+        .ok_or_else(|| anyhow::anyhow!("clipboard is held by another process"))
+        .context("Error getting clipboard")?;
+    let text: String = clipboard_win::get(clipboard_win::formats::Unicode)
+        .map_err(|err| anyhow::anyhow!("{}", err))
+        .context("Error getting clipboard")?;
+    Ok(text.replace("\r\n", "\n"))
+}
+
+fn write_clipboard_text(text: &str) {
+    let Some(_clipboard) = open_clipboard_with_retry() else {
+        log::warn!(
+            "clipboard write of {} bytes dropped: clipboard is busy",
+            text.len()
+        );
+        return;
+    };
+    if let Err(err) = clipboard_win::raw::set_string(text) {
+        log::warn!("failed to set clipboard text: {}", err);
+    }
+}
+
 // fork: 按 注册PNG → CF_DIBV5 → CF_DIB 优先级探测剪贴板图片并取原始字节。
 // 探测走 GetPriorityClipboardFormat（无需打开剪贴板）；读取需独占打开，
-// 剪贴板被其他进程短暂占用时重试几次。返回 None 表示无可用图片格式
+// 剪贴板被其他进程短暂占用时按 open_clipboard_with_retry 退避重试。
+// 返回 None 表示无可用图片格式
 fn read_clipboard_image() -> Option<ClipboardImage> {
     let mut candidates: Vec<(u32, ClipboardImageFormat)> = Vec::new();
     if let Some(png) = clipboard_win::raw::register_format("PNG") {
@@ -1332,25 +1455,14 @@ fn read_clipboard_image() -> Option<ClipboardImage> {
         .find(|(id, _)| *id == format.get())
         .copied()?;
 
-    // 剪贴板是全局互斥资源，被其他进程占用时 OpenClipboard 会失败
-    let mut opened = false;
-    for _ in 0..10 {
-        if clipboard_win::raw::open().is_ok() {
-            opened = true;
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    if !opened {
+    let Some(clipboard) = open_clipboard_with_retry() else {
         log::warn!("unable to open clipboard to read image");
         return None;
-    }
+    };
 
     let mut data = Vec::new();
     let result = clipboard_win::raw::get_vec(format, &mut data);
-    if clipboard_win::raw::close().is_err() {
-        log::debug!("failed to close clipboard after image read");
-    }
+    drop(clipboard);
 
     match result {
         Ok(size) if size > 0 => Some(ClipboardImage { data, format: kind }),
