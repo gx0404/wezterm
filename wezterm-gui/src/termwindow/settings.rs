@@ -1,7 +1,9 @@
 //! fork 新增：herdr 式设置浮层（Modal）。
 //!
-//! 五个分区：语言（中文/English）、外观（内置配色方案，移动即预览、
-//! Esc 还原、Enter 应用）、交互（右键菜单/滚动条/响铃/关闭确认）、
+//! 五个分区：语言（中文/English）、外观（窗口材质：壁纸/Mica/Acrylic/
+//! 纯色，写 gui-settings.json 的 `window_material` 由 Lua 侧
+//! `utils/backdrops.lua` 读回；内置配色方案，移动即预览、Esc 还原、
+//! Enter 应用）、交互（右键菜单/滚动条/响铃/关闭确认）、
 //! 字体（字号步进与重置）、Shell（默认 Shell：列出 launch_menu 里带
 //! `GX_SHELL_ID` 标记的条目，选中后写 gui-settings.json 的 `default_shell`，
 //! 选 GX Zsh 则删键；重载成功后才发出 `gx-default-shell-changed` 窗口事件，
@@ -31,7 +33,7 @@
 //! 优先级高于全局配置且 `ReloadConfiguration` 清不掉的状态，一旦写入就会
 //! 把窗口钉死在设置页点过的值上。
 //! 不变量：「当前值」一律读 `current_config()`（全局 handle，`config::reload()`
-//! 同步换掉），不读 `TermWindow::config`——后者靠 SPAWN_QUEUE 异步回推，
+//! 返回前同步写回），不读 `TermWindow::config`——后者靠 SPAWN_QUEUE 异步回推，
 //! 长按确认时会连续读到同一份陈旧值（见 `current_config` 的说明）。
 //! 渲染复用命令面板的字体/配色与 box model；交互行经
 //! `UIItemType::Modal(row)` 进 hit map，与右键菜单共用鼠标通道。
@@ -43,7 +45,7 @@ use crate::termwindow::overlay_style::{
 };
 use crate::termwindow::{TermWindow, TermWindowNotif, UIItemType};
 use anyhow::Context;
-use config::gui_settings::DEFAULT_SHELL_KEY;
+use config::gui_settings::{DEFAULT_SHELL_KEY, WINDOW_MATERIAL_KEY};
 use config::i18n::{tr, UiLanguage};
 use config::keyassignment::{KeyAssignment, SpawnCommand};
 use config::{AudibleBell, Config, ConfigHandle, Dimension, Palette, WindowCloseConfirmation};
@@ -147,6 +149,61 @@ impl Section {
 // outgrowing MODAL_SECTION_MAX without widening it fails here.
 const _: () = assert!(Section::ALL.len() <= MODAL_SECTION_MAX);
 
+/// 窗口材质（gui-settings.json 的 `window_material`）。由 dotfiles 的
+/// `utils/backdrops.lua` 在配置求值时读回并换算成背景层 / 系统背景材质；
+/// Mica 与 Acrylic 只在 Windows 上有系统材质，其它平台由 Lua 侧回落为壁纸
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum WindowMaterial {
+    Wallpaper,
+    Mica,
+    Acrylic,
+    Solid,
+}
+
+impl WindowMaterial {
+    /// 设置页逐次确认的循环次序
+    const ALL: [WindowMaterial; 4] = [
+        WindowMaterial::Wallpaper,
+        WindowMaterial::Mica,
+        WindowMaterial::Acrylic,
+        WindowMaterial::Solid,
+    ];
+
+    /// 写进 gui-settings.json 的取值
+    fn key(self) -> &'static str {
+        match self {
+            WindowMaterial::Wallpaper => "wallpaper",
+            WindowMaterial::Mica => "mica",
+            WindowMaterial::Acrylic => "acrylic",
+            WindowMaterial::Solid => "solid",
+        }
+    }
+
+    /// 与 Lua 侧同一口径：缺省、未知取值（大小写敏感）一律按壁纸处理
+    fn parse(value: Option<&str>) -> Self {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|m| Some(m.key()) == value)
+            .unwrap_or(WindowMaterial::Wallpaper)
+    }
+
+    fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|m| *m == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    fn label(self) -> std::borrow::Cow<'static, str> {
+        match self {
+            WindowMaterial::Wallpaper => tr("Wallpaper"),
+            // 系统材质名不翻译（与 Windows 设置界面一致）
+            WindowMaterial::Mica => "Mica".into(),
+            WindowMaterial::Acrylic => "Acrylic".into(),
+            WindowMaterial::Solid => tr("Solid color"),
+        }
+    }
+}
+
 /// One selectable row in the current section
 #[derive(Clone)]
 enum Item {
@@ -174,6 +231,9 @@ enum Item {
         label: String,
         current: bool,
     },
+    /// 窗口材质四选一循环；`saved` 是构建行列表时 gui-settings.json 里
+    /// 已存的选择（行列表缓存随落地丢弃，见 `flush_pending`）
+    WindowMaterial { saved: WindowMaterial },
 }
 
 #[derive(Copy, Clone)]
@@ -258,8 +318,9 @@ fn press_applies(streak: usize, since_open: Duration) -> bool {
 
 /// 设置页读「当前值」的唯一来源：刚落地的全局配置。
 ///
-/// 不能读 `TermWindow::config`。落地走 `config::reload()`，它在锁内同步换掉
-/// 全局 CONFIG，但推给窗口的 `config_was_reloaded` 是经 `Window::notify` →
+/// 不能读 `TermWindow::config`。落地走 `config::reload()`，它返回前已把结果
+/// 同步写回全局 CONFIG（Lua 求值不持锁，只在写回时短暂持锁），但推给
+/// 窗口的 `config_was_reloaded` 是经 `Window::notify` →
 /// SPAWN_QUEUE 异步投递的，而 X11 主循环先把排队的 X 事件一次排干才轮到
 /// SPAWN_QUEUE。窗口那份 handle 因此要晚一拍；去抖窗口内的连续确认从
 /// `pending` 视图推进（见 `pending_write`），无积压时才回落到这里，两处
@@ -297,16 +358,25 @@ impl SettingsOverlay {
             Section::Appearance => {
                 let mut names = config::builtin_scheme_names();
                 let filter = self.filter.borrow();
+                // 窗口材质行只在未过滤时置顶：过滤是在找配色，输入后
+                // 选中行落在首行，Enter 应当应用命中的配色而不是切材质
+                let mut items = if filter.is_empty() {
+                    vec![Item::WindowMaterial {
+                        saved: WindowMaterial::parse(
+                            config::gui_settings::window_material().as_deref(),
+                        ),
+                    }]
+                } else {
+                    vec![]
+                };
                 if !filter.is_empty() {
                     let pattern = crate::overlay::selector::matcher_pattern(&filter);
                     names.retain(|name| {
                         crate::overlay::selector::matcher_score(&pattern, name).is_some()
                     });
                 }
-                names
-                    .into_iter()
-                    .map(|name| Item::Scheme(name.to_string()))
-                    .collect()
+                items.extend(names.into_iter().map(|name| Item::Scheme(name.to_string())));
+                items
             }
             Section::Interaction => vec![
                 Item::BoolToggle {
@@ -733,6 +803,11 @@ impl SettingsOverlay {
         // 唯一真源（与旧确认路径同款次序）
         self.clear_preview(term_window);
         let touches_shell = pending.iter().any(|w| w.key == DEFAULT_SHELL_KEY);
+        // 窗口材质行的「已存选择」在行列表缓存里，落地后（无论成败）丢掉
+        // 缓存，下一帧按文件重读
+        if pending.iter().any(|w| w.key == WINDOW_MATERIAL_KEY) {
+            self.items_cache.replace(None);
+        }
         let mut applied = Ok(());
         for write in &pending {
             let result = match &write.value {
@@ -830,6 +905,10 @@ impl SettingsOverlay {
             Item::ShellChoice { label, current, .. } => {
                 let marker = if *current { "✓ " } else { "  " };
                 format!("{marker}{label}")
+            }
+            Item::WindowMaterial { saved } => {
+                let material = current_material(&pending, *saved);
+                format!("  {}: {}", tr("Window material"), material.label())
             }
         }
     }
@@ -1041,6 +1120,18 @@ fn pending_write(item: &Item, config: &Config, pending: &[PendingWrite]) -> (&'s
         // Shell 行不走这里：`activate` 交给待落地确认（选 GX Zsh 时删键
         // 而不是写入，见 `shell_setting`）
         Item::ShellChoice { id, .. } => (DEFAULT_SHELL_KEY, Value::String(id.clone())),
+        Item::WindowMaterial { saved } => (
+            WINDOW_MATERIAL_KEY,
+            Value::String(current_material(pending, *saved).next().key().to_string()),
+        ),
+    }
+}
+
+/// 当前窗口材质：pending 优先，行列表构建时读到的已存选择兜底
+fn current_material(pending: &[PendingWrite], saved: WindowMaterial) -> WindowMaterial {
+    match pending_value(pending, WINDOW_MATERIAL_KEY) {
+        Some(Value::String(s)) => WindowMaterial::parse(Some(s.as_str())),
+        _ => saved,
     }
 }
 
@@ -1588,7 +1679,7 @@ mod tests {
 
     #[test]
     fn consecutive_activations_step_from_the_freshly_persisted_value() {
-        // WZ-20 回归护栏：落地后 `config::reload()` 在锁内同步换掉全局
+        // WZ-20 回归护栏：落地后 `config::reload()` 返回前已同步写回全局
         // 配置，无积压时下一次确认从刚落地的值再推一格
         let mut config = Config::default_config();
         config.font_size = 12.0;
@@ -1739,8 +1830,8 @@ mod tests {
 
     #[test]
     fn current_config_tracks_the_globally_reloaded_handle() {
-        // `activate` 的「当前值」必须落在 `config::reload()` 在锁内同步
-        // 换掉的那份全局 handle 上。先读一次让任何快照式实现在这里定格，
+        // `activate` 的「当前值」必须落在 `config::reload()` 返回前同步
+        // 写回的那份全局 handle 上。先读一次让任何快照式实现在这里定格，
         // 再模拟一次落地——第二次读还是旧值就等于窗口那份要等 SPAWN_QUEUE
         // 才刷新的 ConfigHandle，连续确认会读到陈旧值。
         let before = current_config().font_size;
@@ -2100,6 +2191,65 @@ mod tests {
         overlay.report(Err(anyhow::anyhow!("again")));
         overlay.select_section(1);
         assert!(overlay.error.borrow().is_none());
+    }
+
+    #[test]
+    fn window_material_parses_like_the_lua_side_and_cycles() {
+        assert_eq!(WindowMaterial::parse(None), WindowMaterial::Wallpaper);
+        assert_eq!(WindowMaterial::parse(Some("mica")), WindowMaterial::Mica);
+        assert_eq!(
+            WindowMaterial::parse(Some("acrylic")),
+            WindowMaterial::Acrylic
+        );
+        assert_eq!(WindowMaterial::parse(Some("solid")), WindowMaterial::Solid);
+        // 未知、空串与大小写不符都回落壁纸（backdrops.lua 同口径）
+        for odd in ["glass", "", "Mica"] {
+            assert_eq!(WindowMaterial::parse(Some(odd)), WindowMaterial::Wallpaper);
+        }
+        let mut m = WindowMaterial::Wallpaper;
+        let mut seen = vec![];
+        for _ in 0..4 {
+            m = m.next();
+            seen.push(m.key());
+        }
+        assert_eq!(seen, ["mica", "acrylic", "solid", "wallpaper"]);
+    }
+
+    #[test]
+    fn window_material_row_steps_from_the_pending_view() {
+        let config = Config::default_config();
+        let item = Item::WindowMaterial {
+            saved: WindowMaterial::Acrylic,
+        };
+        let (key, value) = pending_write(&item, &config, &[]);
+        assert_eq!(key, WINDOW_MATERIAL_KEY);
+        assert_eq!(value, Value::String("solid".into()));
+        // 去抖窗口内的连续确认沿 pending 继续推
+        let pending = vec![PendingWrite {
+            key: WINDOW_MATERIAL_KEY,
+            value: Some(value),
+        }];
+        let (_, value) = pending_write(&item, &config, &pending);
+        assert_eq!(value, Value::String("wallpaper".into()));
+
+        let overlay = SettingsOverlay::new();
+        overlay.pending.replace(pending);
+        let label = overlay.row_label(&item, &config);
+        assert!(label.ends_with(&*WindowMaterial::Solid.label()), "{label}");
+    }
+
+    #[test]
+    fn window_material_row_leads_the_unfiltered_appearance_section() {
+        let overlay = SettingsOverlay::new();
+        overlay.select_section(1); // Language -> Appearance
+        let items = overlay.visible_items();
+        assert!(matches!(items[0], Item::WindowMaterial { .. }));
+        assert!(items[1..].iter().all(|i| matches!(i, Item::Scheme(_))));
+        // 过滤时只剩配色：首行 Enter 应用命中的配色
+        overlay.filter.borrow_mut().push_str("batman");
+        let items = overlay.visible_items();
+        assert!(!items.is_empty());
+        assert!(items.iter().all(|i| matches!(i, Item::Scheme(_))));
     }
 
     #[test]

@@ -235,13 +235,29 @@ pub fn default_shell_in_dir(dir: Option<&Path>) -> Option<String> {
     root.get(DEFAULT_SHELL_KEY)?.as_str().map(str::to_string)
 }
 
+/// fork: the settings overlay's window material choice (`wallpaper`,
+/// `mica`, `acrylic` or `solid`), read back by the lua config
+/// (`utils/backdrops.lua`). Absent or unknown means `wallpaper`.
+pub const WINDOW_MATERIAL_KEY: &str = "window_material";
+
+/// The saved window material, read without executing any Lua.
+pub fn window_material() -> Option<String> {
+    window_material_in_dir(None)
+}
+
+/// `window_material` against an explicit config directory (WEZ-CFG-01).
+pub fn window_material_in_dir(dir: Option<&Path>) -> Option<String> {
+    let root = read_file(&settings_file_in_dir(dir))?;
+    root.get(WINDOW_MATERIAL_KEY)?.as_str().map(str::to_string)
+}
+
 /// fork: keys owned by fork GUI overlays rather than the Config struct
 /// (e.g. the wallpaper overlay's `wallpaper` key, batch 13, and the
-/// settings overlay's `default_shell`). They are persisted in the sidecar
-/// but consumed by the overlay / the lua config modules; applying them
-/// onto the lua config would warn about an invalid key on every load, so
-/// skip them silently here.
-const GUI_OWNED_KEYS: &[&str] = &["wallpaper", DEFAULT_SHELL_KEY];
+/// settings overlay's `default_shell` and `window_material`). They are
+/// persisted in the sidecar but consumed by the overlay / the lua config
+/// modules; applying them onto the lua config would warn about an invalid
+/// key on every load, so skip them silently here.
+const GUI_OWNED_KEYS: &[&str] = &["wallpaper", DEFAULT_SHELL_KEY, WINDOW_MATERIAL_KEY];
 
 /// Remove a single settings key, preserving the others (atomic write
 /// like `store_key`). Missing file / missing key is a no-op; an unreadable
@@ -358,6 +374,12 @@ mod tests {
         let dir = temp_dir("owned-keys");
         store_key_in_dir(Some(&dir), DEFAULT_SHELL_KEY, &Value::String("pwsh".into())).unwrap();
         store_key_in_dir(Some(&dir), "wallpaper", &Value::String("a.jpg".into())).unwrap();
+        store_key_in_dir(
+            Some(&dir),
+            WINDOW_MATERIAL_KEY,
+            &Value::String("mica".into()),
+        )
+        .unwrap();
         store_key_in_dir(Some(&dir), "font_size", &Value::U64(13)).unwrap();
 
         let lua = Lua::new();
@@ -371,6 +393,28 @@ mod tests {
         // and warn on every load; a plain table would accept them silently
         assert!(!table.contains_key(DEFAULT_SHELL_KEY).unwrap());
         assert!(!table.contains_key("wallpaper").unwrap());
+        assert!(!table.contains_key(WINDOW_MATERIAL_KEY).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn window_material_is_stored_and_read_back() {
+        let dir = temp_dir("window-material");
+        assert_eq!(window_material_in_dir(Some(&dir)), None);
+        store_key_in_dir(Some(&dir), "language", &Value::String("en".into())).unwrap();
+        store_key_in_dir(
+            Some(&dir),
+            WINDOW_MATERIAL_KEY,
+            &Value::String("acrylic".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            window_material_in_dir(Some(&dir)).as_deref(),
+            Some("acrylic")
+        );
+        // 非字符串值不算已存选择
+        store_key_in_dir(Some(&dir), WINDOW_MATERIAL_KEY, &Value::U64(3)).unwrap();
+        assert_eq!(window_material_in_dir(Some(&dir)), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
