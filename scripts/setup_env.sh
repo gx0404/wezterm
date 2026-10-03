@@ -10,6 +10,8 @@
 #   .local/tools/lua/bin/lua54                 # scripts/tests/*.lua 纯 Lua 单测的运行器
 #                                             #（dotfiles tests/pure_fn_test.lua 不走它，
 #                                             # 经 wezterm mlua 跑）
+#   .local/tools/nasm/bin/nasm.exe           # 仅 Windows：MSVC 打包的 vendored OpenSSL 汇编器
+#   .local/tools/perl/{perl,c}/bin            # 仅 Windows：Strawberry Perl portable（OpenSSL Configure）
 #
 # Windows（uname -s 为 MINGW*/MSYS*/CYGWIN*）：nextest 与 stylua 换装 Windows 预编译包
 # （bin 下为 cargo-nextest.exe / stylua.exe）；lua 用 LuaBinaries 预编译包；框架 venv
@@ -55,6 +57,16 @@ LUA_SHA256_WINDOWS="20321e893509e575d2454dd7bbf05342c1f3cb1b3788c0ec5a55ae4279dd
 # 官方源码包：Linux 直接编译（posix 无 readline 依赖），Windows 预编译失败时回退 mingw 编译。
 LUA_TARBALL_URL="https://www.lua.org/ftp/lua-${LUA_VERSION}.tar.gz"
 LUA_TARBALL_SHA256="4f18ddae154e793e46eeab727c59ef1c0c0c2b744e7b94219710d76f530629ae"
+# NASM（仅 Windows 用）：官方 releasebuilds 目录不发布 sha256 校验文件，
+# 以下值为 2026-10-03 从官方 URL 下载后自行计算（来源 nasm.us 本身，非第三方镜像）。
+NASM_VERSION="3.02"
+NASM_URL_WINDOWS="https://www.nasm.us/pub/nasm/releasebuilds/${NASM_VERSION}/win64/nasm-${NASM_VERSION}-win64.zip"
+NASM_SHA256_WINDOWS="161d0bfaff53c2f9e9f3e69fd0672323ebabafd1268976a5cec11be92a19aee7"
+# Strawberry Perl portable（仅 Windows 用）：sha256 取自 GitHub release SP_54231_64bit
+# 资产 digest（2026-10-03 读取）。zip 约 290 MB，解压后保留 perl/bin 与 c/bin 布局。
+PERL_VERSION="5.42.3.1"
+PERL_URL_WINDOWS="https://github.com/StrawberryPerl/Perl-Dist-Strawberry/releases/download/SP_54231_64bit/strawberry-perl-${PERL_VERSION}-64bit-portable.zip"
+PERL_SHA256_WINDOWS="6a081a811781c30aca51dbc036afd93092af91e3297901f02c17043795a10690"
 
 # ---- 平台分支：Windows（Git Bash/MSYS2/Cygwin）换用 Windows 预编译包 ----
 IS_WINDOWS=0
@@ -170,6 +182,18 @@ check_all() {
     else
         miss lua54 "运行 scripts/setup_env.sh 安装项目钉版（scripts/tests 的 lua 单测运行器）"
     fi
+    if [ "${IS_WINDOWS}" = 1 ]; then
+        if [ -x "${TOOLS}/nasm/bin/nasm.exe" ]             && "${TOOLS}/nasm/bin/nasm.exe" -v 2>/dev/null | grep -q "version ${NASM_VERSION}"; then
+            ok "nasm ${NASM_VERSION}（项目钉版，MSVC 打包用）"
+        else
+            miss nasm "运行 scripts/setup_env.sh 安装项目钉版 ${NASM_VERSION}（MSVC 打包用）"
+        fi
+        if [ -x "${TOOLS}/perl/perl/bin/perl.exe" ]             && "${TOOLS}/perl/perl/bin/perl.exe" -v 2>/dev/null | grep -q "v${PERL_VERSION%.*.*}"; then
+            ok "perl ${PERL_VERSION}（Strawberry portable，项目钉版，MSVC 打包用）"
+        else
+            miss perl "运行 scripts/setup_env.sh 安装项目钉版 Strawberry Perl ${PERL_VERSION}（MSVC 打包用）"
+        fi
+    fi
     [ "$fail" -eq 0 ] && echo "[setup-env] 诊断通过" || echo "[setup-env] 存在缺项（见上）"
     return "$fail"
 }
@@ -283,6 +307,49 @@ install_lua() {
     ok "lua ${LUA_VERSION}（源码编译）-> ${dest}/bin/"
 }
 
+# 仅 Windows：NASM 钉版装到 ${TOOLS}/nasm/bin/。
+install_nasm() {
+    [ "${IS_WINDOWS}" = 1 ] || return 0
+    local dest="${TOOLS}/nasm"
+    if [ -x "${dest}/bin/nasm.exe" ]         && "${dest}/bin/nasm.exe" -v 2>/dev/null | grep -q "version ${NASM_VERSION}"; then
+        note "nasm ${NASM_VERSION} 已是钉版，跳过"
+        return 0
+    fi
+    mkdir -p "${dest}/bin"
+    local tmp
+    tmp="$(new_tmpdir)"
+    trap 'rm -rf "${tmp}"' RETURN
+    note "下载 nasm ${NASM_VERSION}（Windows x64）"
+    download "${NASM_URL_WINDOWS}" "${tmp}/nasm.zip"         || { echo "[setup-env] nasm 下载失败（${NASM_URL_WINDOWS}）；检查网络后重跑 scripts/setup_env.sh" >&2; return 1; }
+    echo "${NASM_SHA256_WINDOWS}  ${tmp}/nasm.zip" | sha256sum -c -         || { echo "[setup-env] nasm sha256 校验失败，拒绝安装" >&2; return 1; }
+    unzip -o -q "${tmp}/nasm.zip" -d "${tmp}/nasm-x"
+    install -m 0755 "${tmp}/nasm-x/nasm-${NASM_VERSION}/nasm.exe"         "${tmp}/nasm-x/nasm-${NASM_VERSION}/ndisasm.exe" "${dest}/bin/"
+    ok "nasm ${NASM_VERSION} -> ${dest}/bin/"
+}
+
+# 仅 Windows：Strawberry Perl portable 钉版解压到 ${TOOLS}/perl/（perl/bin、c/bin 布局）。
+install_perl() {
+    [ "${IS_WINDOWS}" = 1 ] || return 0
+    local dest="${TOOLS}/perl"
+    if [ -x "${dest}/perl/bin/perl.exe" ] && [ -f "${dest}/.version" ]         && [ "$(cat "${dest}/.version")" = "${PERL_VERSION}" ]; then
+        note "perl ${PERL_VERSION} 已是钉版，跳过"
+        return 0
+    fi
+    mkdir -p "${TOOLS}"
+    local tmp
+    tmp="$(new_tmpdir)"
+    trap 'rm -rf "${tmp}"' RETURN
+    note "下载 Strawberry Perl ${PERL_VERSION} portable（约 290 MB，请耐心等待）"
+    download "${PERL_URL_WINDOWS}" "${tmp}/perl.zip"         || { echo "[setup-env] perl 下载失败（${PERL_URL_WINDOWS}）；检查网络后重跑 scripts/setup_env.sh" >&2; return 1; }
+    echo "${PERL_SHA256_WINDOWS}  ${tmp}/perl.zip" | sha256sum -c -         || { echo "[setup-env] perl sha256 校验失败，拒绝安装" >&2; return 1; }
+    rm -rf "${dest}"
+    mkdir -p "${dest}"
+    unzip -o -q "${tmp}/perl.zip" -d "${dest}"         || { echo "[setup-env] perl 解压失败" >&2; rm -rf "${dest}"; return 1; }
+    [ -x "${dest}/perl/bin/perl.exe" ]         || { echo "[setup-env] 解压后缺少 perl/bin/perl.exe，布局异常" >&2; return 1; }
+    printf '%s' "${PERL_VERSION}" > "${dest}/.version"
+    ok "perl ${PERL_VERSION} -> ${dest}/"
+}
+
 install_venv() {
     if venv_ready; then
         note "框架 venv（tomli + graphifyy ${GRAPHIFY_VERSION}）已就绪，跳过"
@@ -331,5 +398,7 @@ else
     install_venv
     install_stylua
     install_lua
+    install_nasm
+    install_perl
     echo "[setup-env] 完成：make test / make graph / make generated-check / make framework-check 现在使用项目钉版工具"
 fi

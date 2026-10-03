@@ -5,9 +5,11 @@ rem
 rem 解决的坑：
 rem   1) MSYS2 的 git 若排在 PATH 前面，`git rev-parse --show-toplevel` 返回 POSIX 路径，
 rem      gx_package.py 会误报「must be an independent Git checkout」——这里把 Git for Windows 提前。
-rem   2) vendored OpenSSL 的 MSVC 构建需要 Windows 版 Perl（Strawberry）与 NASM >= 3.02
-rem      （中文仓库路径的汇编调试信息），MSYS perl / Strawberry 自带的旧 nasm 都不行。
-rem   3) 中文仓库路径 + 非 UTF-8 代码页：C/C++ 编译参数追加 /utf-8。
+rem   2) vendored OpenSSL 的 MSVC 构建需要 Windows 版 Perl（Strawberry）与 NASM；
+rem      两者只认仓内 .local/tools/（make setup 即 scripts/setup_env.sh 钉版安装），
+rem      不再读系统路径，MSYS perl 与 Strawberry 自带的旧 nasm 也不会被选中。
+rem   3) 仓库路径必须纯 ASCII 是硬前提（非 ASCII 路径会让 Perl/nmake 把 OpenSSL 产物
+rem      写进乱码目录，2026-10-03 实测）；追加 /utf-8 与 NASM 3.02 只是双保险。
 rem   4) 产物目录固定为 target-gx-msvc（已 gitignore），不与 gnu 工具链的 target/ 混用。
 setlocal
 set "REPO=%~dp0.."
@@ -26,10 +28,16 @@ if errorlevel 1 (
   echo [gx_msvc_env] VsDevCmd 初始化失败
   exit /b 1
 )
-set "PATH=%LOCALAPPDATA%\bin\NASM;C:\Strawberry\perl\bin;C:\Strawberry\c\bin;C:\msys64\mingw64\bin;%PATH%"
+if not exist "%REPO%\.local\tools\nasm\bin\nasm.exe" goto :no_tools
+if not exist "%REPO%\.local\tools\perl\perl\bin\perl.exe" goto :no_tools
+set "PATH=%REPO%\.local\tools\nasm\bin;%REPO%\.local\tools\perl\perl\bin;%REPO%\.local\tools\perl\c\bin;C:\msys64\mingw64\bin;%PATH%"
 if not defined RUSTUP_TOOLCHAIN set "RUSTUP_TOOLCHAIN=1.96.1-x86_64-pc-windows-msvc"
 if not defined CARGO_TARGET_DIR set "CARGO_TARGET_DIR=%REPO%\target-gx-msvc"
 set "CFLAGS=%CFLAGS% /utf-8"
 set "CXXFLAGS=%CXXFLAGS% /utf-8"
 cd /d "%REPO%"
 %*
+exit /b %errorlevel%
+:no_tools
+echo [gx_msvc_env] 先运行 make setup（scripts/setup_env.sh）安装仓内 NASM/Perl（.local/tools/nasm、.local/tools/perl）
+exit /b 1
