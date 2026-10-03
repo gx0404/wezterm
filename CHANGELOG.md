@@ -322,6 +322,9 @@
   阻塞 GUI 线程。
 - Windows 滚轮行数改读系统设置并在 `WM_SETTINGCHANGE` 时刷新，「一次滚动一屏」不再反向滚一
   行；累加计算改 i32 不再溢出。`WM_SETTINGCHANGE` 不再每次整份解析系统标题字体（改为按需）。
+- 开发：`make generated-check` 的比对忽略行尾 CR，Windows（core.autocrlf）检出不再把补全/键表/
+  译表误报为漂移；本机 `scripts/dev_framework.py evidence` 分配的证据批次见 `.ui-evidence/`
+  （perf-baseline / perf-after1 / perf-after1-follow / ui-after1 / ui-fluent2 / ui-fluent3）。
 
 
 ## 0.3.0(TBD)
