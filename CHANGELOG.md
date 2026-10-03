@@ -96,6 +96,14 @@
 - dotfiles：Windows 界面字体链（Segoe UI 半粗 → 微软雅黑 UI → Segoe UI Emoji，字体文件
   存在才启用）用于标题栏、命令面板、字符选择与窗格选择；新增 `utils/font-files.lua`、
   `utils/cache.lua`。
+- Fluent 外观（dotfiles）：Windows 上 `window_decorations = 'INTEGRATED_BUTTONS|RESIZE'` 集成标题栏
+  按钮（`integrated_title_button_style = 'Windows'`）+ fancy 圆角标签栏，`window_frame` 用 crust 底色、
+  1px surface1 边框与非粗体 Segoe UI/微软雅黑 UI；新增窗口材质 `window_material`（gui-settings.json，
+  取值 wallpaper/mica/acrylic/solid，云母 0.3 / 亚克力 0.75 不透明度，非 Windows 降级为壁纸）；
+  `config/fluent.lua` 把 fork 新增配置键按二进制能力探测后写入，旧二进制不再弹 Configuration Error。
+- 盒模型圆角改为「底色扇形 + 边框色弧线」（`box_model.rs`），边框色与底色不同时四角不再变成实心
+  色块，可实现 Fluent 风格的异色细边框圆角；新增 `rounded_corners`/`top_rounded_corners` 工具，
+  `Pixels`/`Points` 半径在任意 dpi 与字体格子比例下均为正圆。
 
 
 ### Changed
@@ -207,6 +215,10 @@
   NuGet 包 `Microsoft.Windows.Console.ConPTY` 1.24.261001001（签名有效，SHA256 登记在
   `assets/windows/conhost/README.md`），规避 pwsh 退出全屏 TUI 时 conhost FailFast 闪退；
   升级后需删除 `target/<profile>/` 下旧副本再构建。
+- dotfiles：`animation_fps` 提到 60 且闪烁文字缓动改 Constant（空闲零重绘）；浮层、copy mode、
+  quick select、分割线（1px）、滚动条（3pt 细线）、视觉铃声（150ms EaseOut）配色与尺寸对齐
+  Catppuccin Mocha；集成按钮模式下 herdr 应用模式与手动切换不再隐藏标签栏（否则窗口失去标题栏按钮
+  且不可拖动）；删除无人引用的 `events/right-status.lua` 与 `utils/math.lua`。
 
 
 ### Fixed
@@ -271,6 +283,11 @@
 - `WinChild` 作为 Future 等待时不再等在已关闭或被复用的句柄上。
 - dotfiles：tab 标题首帧被截成「pw…」；手动重命名改存在 mux 里，配置重载后不再丢失；
   前台进程名按 tab 限频 2 秒读取，已关闭 tab 与窗口的状态按窗口回收。
+- GL 上下文丢失（睡眠唤醒、独显重上电、驱动更新、TDR）后重建渲染状态而不再直接关闭窗口（指数退避
+  最多 8 次才退回关窗）；Windows 睡眠唤醒（`WM_POWERBROADCAST`）后主动失效窗口并重绘；WGL 重建上
+  下文时复用窗口已设置的像素格式。
+- `QuitApplication` 在 `AlwaysPrompt` 下复用空闲 Shell 名单判定，全部窗格空闲时不再弹确认。
+- 盒模型右边框宽度误用左边框宽度（上游问题）。
 
 
 ## 0.3.0(TBD)
