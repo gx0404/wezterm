@@ -954,7 +954,12 @@ impl FontConfigInner {
         *self.font_scale.borrow_mut() = font_scale;
         self.fonts.borrow_mut().clear();
         self.metrics.borrow_mut().take();
+        // DPI/缩放变化后四个专用实体字体都要重新按新 dpi 加载，
+        // 否则 fork 的右键菜单/设置/壁纸/快捷键速查/命令面板字号错误。
         self.title_font.borrow_mut().take();
+        self.pane_select_font.borrow_mut().take();
+        self.char_select_font.borrow_mut().take();
+        self.command_palette_font.borrow_mut().take();
 
         (prior_font, prior_dpi)
     }
