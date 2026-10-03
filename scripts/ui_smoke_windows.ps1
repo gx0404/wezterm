@@ -30,7 +30,7 @@
 .PARAMETER NoConfig
   用 -n 基线配置（跳过用户配置），忽略 -ConfigFile。
 .PARAMETER Overlay
-  none | palette | settings | keybinds | menu | wallpaper | context-menu | confirm
+  none | palette | settings | keybinds | menu | wallpaper | context-menu | confirm | launcher | copy-mode
 .PARAMETER Label
   文件名前缀；输出为 <Label>.png 或 <Label>-<overlay>.png。
 .PARAMETER Keymap
@@ -60,7 +60,7 @@ param(
     [string]$Exe,
     [string]$ConfigFile,
     [switch]$NoConfig,
-    [ValidateSet('none', 'palette', 'settings', 'keybinds', 'menu', 'wallpaper', 'context-menu', 'confirm')]
+    [ValidateSet('none', 'palette', 'settings', 'keybinds', 'menu', 'wallpaper', 'context-menu', 'confirm', 'launcher', 'copy-mode')]
     [string]$Overlay = 'none',
     [string]$Label = 'before',
     [ValidateSet('auto', 'default', 'gx')][string]$Keymap = 'auto',
@@ -246,6 +246,8 @@ $KeyMaps = @{
         keybinds = @(@{ m = @($CTRL, $SHIFT); k = 0xBF })
         menu     = @(@{ m = @($CTRL, $SHIFT); k = 0x4D })
         confirm  = @(@{ m = @($CTRL, $SHIFT); k = 0x57 })
+        launcher = @(@{ m = @($CTRL, $SHIFT); k = 0x4C })
+        'copy-mode' = @(@{ m = @($CTRL, $SHIFT); k = 0x58 })
     }
     gx      = @{
         palette   = @(@{ m = @(); k = 0x71 })
@@ -254,6 +256,8 @@ $KeyMaps = @{
         menu      = @($Leader, @{ m = @(); k = 0x4D })
         wallpaper = @($Leader, @{ m = @(); k = 0x57 })
         confirm   = @(@{ m = @($CTRL, $SHIFT); k = 0x57 })
+        launcher  = @(@{ m = @(); k = 0x72 })
+        'copy-mode' = @(@{ m = @(); k = 0x70 })
     }
 }
 

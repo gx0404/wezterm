@@ -88,7 +88,7 @@ cargo nextest run --locked -p wezterm-escape-parser
    `--out` 必须是证据根下的仓库相对路径，缺省为 `.ui-evidence/smoke/<时间戳>-<pid>`。
    要选浮层/配置/可执行文件时直接调脚本：`pwsh -File scripts/ui_smoke_windows.ps1
    -Out <批次目录> [-Exe ..] [-ConfigFile ..|-NoConfig] [-Overlay
-   none|palette|settings|keybinds|menu|wallpaper|context-menu|confirm] [-Label ..]`，
+   none|palette|settings|keybinds|menu|wallpaper|context-menu|confirm|launcher|copy-mode] [-Label ..]`，
    输出 `<Label>[-<overlay>].png`，result.json 的 `captures`（抓图方式、键位表、
    抓图时是否前台）与 `skipped`（浮层在该配置下不可达，不算失败）逐项登记。
    键盘浮层只在前台窗口属于被测 wezterm 时发键，否则记 skipped、不向别的程序发键；
