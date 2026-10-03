@@ -28,16 +28,33 @@ local function declared(is_win)
       scroll_bar_thumb_width = '3pt',
       -- 分割线粗细与下划线粗细解耦（underline_thickness 保持 1.5pt）。
       split_thickness = '1px',
+      -- Element 浮层（命令面板/设置/快捷键/壁纸/右键菜单）的 Fluent 外框：8px 正圆角 + 细描边。
+      overlay_corner_radius = '8px',
+      overlay_border_color = mocha.surface1,
+      -- 选中行柔和底色 + 强调条；次要文字与强调色对齐 Mocha。
+      command_palette_selection_bg_color = mocha.surface1,
+      command_palette_selection_fg_color = mocha.text,
+      command_palette_secondary_fg_color = mocha.overlay1,
+      command_palette_accent_color = mocha.lavender,
    }
    local colors = palette.fluent_chrome
+   -- window_frame 的子键：与 config/appearance.lua 已设的 window_frame 表合并后整表探测。
+   local window_frame = {
+      -- fancy 标签 8px 正圆角（Cells 单位会成椭圆）。
+      tab_corner_radius = '8px',
+      -- 关闭按钮悬停色（Windows 11 标题栏红）。
+      close_button_hover_bg = '#c42b1c',
+   }
 
    -- 帧率上限跟随窗口所在显示器的刷新率（config.rs::max_fps_follows_display，目前只有
    -- Windows 实现，其他平台忽略，所以只在 Windows 写入）。max_fps 仍是读不到刷新率时的兜底。
    if is_win then
       top.max_fps_follows_display = true
+      -- DWM 标题栏/边框跟随 window_frame 配色（window.rs::apply_theme，Win11 22000+ 生效）。
+      top.win32_frame_follow_colors = true
    end
 
-   return { top = top, colors = colors }
+   return { top = top, colors = colors, window_frame = window_frame }
 end
 
 ---用严格模式的 config_builder 探测当前二进制认不认得某个配置键（含值的类型）。
@@ -104,6 +121,20 @@ function M.apply(options, opts)
    end
    if next(accepted) ~= nil then
       options.colors = merged(options.colors, accepted)
+   end
+
+   -- window_frame 子键：逐键与现有 window_frame 合并后整表探测，认得才写入。
+   local frame_accepted = {}
+   for key, value in pairs(entries.window_frame or {}) do
+      local candidate = merged(options.window_frame, { [key] = value })
+      if supports('window_frame', candidate) then
+         frame_accepted[key] = value
+      else
+         table.insert(skipped, 'window_frame.' .. key)
+      end
+   end
+   if next(frame_accepted) ~= nil then
+      options.window_frame = merged(options.window_frame, frame_accepted)
    end
 
    if #skipped > 0 then

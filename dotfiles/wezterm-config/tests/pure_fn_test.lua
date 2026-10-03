@@ -1490,30 +1490,11 @@ do
    check('startup.spawn_bad_font', startup.spawn_geometry(screen, 0.8, 0), nil)
 end
 
--- 帧率与动画（utils/display.lua、config/appearance.lua）：max_fps 60 兜底、活动屏幕刷新率
--- 更高时跟随；动画帧率 60，光标与闪烁文字缓动都是 Constant（空闲零重绘）。
+-- 帧率与动画（config/appearance.lua）：max_fps 固定 60 兜底（刷新率跟随在 Rust 侧）；
+-- 动画帧率 60，光标与闪烁文字缓动都是 Constant（空闲零重绘）。
 do
-   local max_fps = require('utils.display').max_fps
-   local function reads(value)
-      return function()
-         return value
-      end
-   end
-   check('display.follows_higher', max_fps(60, reads(165)), 165)
-   check('display.equal_base', max_fps(60, reads(60)), 60)
-   check('display.below_base', max_fps(60, reads(30)), 60)
-   check('display.unknown_rate', max_fps(60, reads(nil)), 60)
-   check('display.not_a_number', max_fps(60, reads('144')), 60)
-   check('display.read_error', max_fps(60, error), 60)
-   check('display.nan', max_fps(60, reads(0 / 0)), 60)
-   check('display.float_floored', max_fps(60, reads(143.9)), 143)
-   -- 超过 Rust 侧 validate_max_fps 的上限 1000 会让整份配置报错
-   check('display.clamped', max_fps(60, reads(5000)), 1000)
-   check('display.infinite_clamped', max_fps(60, reads(math.huge)), 1000)
-
    local appearance = require('config.appearance')
-   -- 测试环境读不到屏幕（或屏幕刷新率不高于 60），退回 60 兜底
-   check('appearance.max_fps_floor', appearance.max_fps >= 60, true)
+   check('appearance.max_fps_fallback', appearance.max_fps, 60)
    check('appearance.animation_fps', appearance.animation_fps, 60)
    for _, key in ipairs({
       'cursor_blink_ease_in',
@@ -1558,6 +1539,19 @@ do
    )
    check('fluent.declared.thumb_width', declared.top.scroll_bar_thumb_width, '3pt')
    check('fluent.declared.split_thickness', declared.top.split_thickness, '1px')
+   check('fluent.declared.overlay_radius', declared.top.overlay_corner_radius, '8px')
+   check('fluent.declared.overlay_border', declared.top.overlay_border_color, '#45475a')
+   check('fluent.declared.palette_accent', declared.top.command_palette_accent_color, '#b4befe')
+   check('fluent.declared.win_frame_follow', declared.top.win32_frame_follow_colors, true)
+   check('fluent.declared.non_win_frame_follow', fluent.declared(false).top.win32_frame_follow_colors, nil)
+   check('fluent.declared.tab_radius', declared.window_frame.tab_corner_radius, '8px')
+   -- window_frame 子键与已有 window_frame 合并写入；被拒绝时原表不变
+   local framed = fluent.apply({ window_frame = { font_size = 10 } }, { supports = accept_all, is_win = true })
+   check('fluent.frame_merged_keeps', framed.window_frame.font_size, 10)
+   check('fluent.frame_merged_radius', framed.window_frame.tab_corner_radius, '8px')
+   local unframed = fluent.apply({ window_frame = { font_size = 10 } }, { supports = reject_all, is_win = true })
+   check('fluent.frame_rejected', unframed.window_frame.tab_corner_radius, nil)
+   check('fluent.frame_rejected_keeps', unframed.window_frame.font_size, 10)
    check(
       'fluent.declared.non_win_no_follows',
       fluent.declared(false).top.max_fps_follows_display,

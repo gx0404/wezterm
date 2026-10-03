@@ -3,7 +3,6 @@ local platform = require('utils.platform')
 local backdrops = require('utils.backdrops')
 local colors = require('colors.custom')
 local font_files = require('utils.font-files')
-local display = require('utils.display')
 
 -- 各平台的渲染后端只在这里调整。GNOME X11 下优先稳定性；Windows 未经实机 A/B
 -- （paint 日志）前同样保持 OpenGL。WebGPU 仅在隔离配置中做 A/B 测试。
@@ -31,12 +30,11 @@ if platform.is_win then
 end
 
 local options = {
-   -- 帧率上限：60 兜底，活动屏幕刷新率更高时跟随它。首次加载配置时 GUI 还没起来、读不到
-   -- 屏幕，配置重载后才生效；Windows 上另由 config/fluent.lua 的 max_fps_follows_display
-   -- 让每个窗口按自己所在显示器的刷新率限速，这里的值只是读不到刷新率时的兜底。
-   max_fps = display.max_fps(60, function()
-      return wezterm.gui.screens().active.max_fps
-   end),
+   -- 帧率上限兜底值。Windows 上由 config/fluent.lua 的 max_fps_follows_display 让每个窗口按
+   -- 自己所在显示器的刷新率限速（Rust 侧运行时探测，任意机器自适应），这里只在读不到刷新率
+   -- 或旧二进制上生效。不要在配置求值期调用 wezterm.gui.screens()：旧二进制在 Lua 求值期
+   -- 持有全局配置锁，screens() 内部再取锁会死锁、窗口永远不出现。
+   max_fps = 60,
    front_end = front_end[platform.os],
    underline_thickness = '1.5pt',
    cursor_thickness = '2px',
