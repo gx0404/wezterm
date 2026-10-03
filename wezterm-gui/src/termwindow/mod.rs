@@ -1427,7 +1427,12 @@ impl TermWindow {
                         // active tab; rebuild the title once it settles
                         self.live_resize.defer_title();
                     } else {
-                        self.update_title_post_status();
+                        // fork: one notification arrives per resized tab
+                        // (every tab on a maximize, every step of a split
+                        // drag); fold them into one coalesced rebuild. A
+                        // window resize already refreshed the title
+                        // synchronously in apply_dimensions.
+                        self.request_title_update(false);
                     }
                 }
                 MuxNotification::TabTitleChanged { .. } => {
