@@ -893,8 +893,21 @@ pub fn best_matching_font(
 ) -> anyhow::Result<Option<ParsedFont>> {
     let mut font_info = vec![];
     parse_and_collect_font_info(source, &mut font_info, origin)?;
+    Ok(best_match_by_name(font_attr, pixel_size, font_info))
+}
+
+// fork: keep only the parsed faces whose names match `font_attr`, then
+// pick the nearest stretch/style/weight per CSS Fonts Level 3 and flag
+// synthetic bold/italic/dim. Platform locators that parse several
+// files/faces of one family funnel through here so all backends agree;
+// it touches no platform API and is unit tested.
+pub fn best_match_by_name(
+    font_attr: &FontAttributes,
+    pixel_size: u16,
+    mut font_info: Vec<ParsedFont>,
+) -> Option<ParsedFont> {
     font_info.retain(|font| font.matches_name(font_attr));
-    Ok(ParsedFont::best_match(font_attr, pixel_size, font_info))
+    ParsedFont::best_match(font_attr, pixel_size, font_info)
 }
 
 pub(crate) fn parse_and_collect_font_info(
@@ -939,4 +952,92 @@ pub(crate) fn parse_and_collect_font_info(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    // Built-in fonts: 16 JetBrains Mono faces (8 weights x upright/italic)
+    // plus Roboto, Noto Color Emoji and Nerd Symbols, modelling "many faces
+    // of one family mixed with other families".
+    fn built_in_fonts() -> Vec<ParsedFont> {
+        let mut fonts = vec![];
+        load_built_in_fonts(&mut fonts).unwrap();
+        fonts
+    }
+
+    fn make_attr(family: &str, weight: FontWeight, style: FontStyle) -> FontAttributes {
+        let mut attr = FontAttributes::new(family);
+        attr.weight = weight;
+        attr.style = style;
+        attr
+    }
+
+    #[test]
+    fn family_multi_face_picks_exact_weight() {
+        let attr = make_attr("JetBrains Mono", FontWeight::BOLD, FontStyle::Normal);
+        let parsed = best_match_by_name(&attr, 16, built_in_fonts()).expect("JetBrains Mono Bold");
+        assert_eq!(parsed.names().family, "JetBrains Mono");
+        assert_eq!(parsed.weight(), FontWeight::BOLD);
+        assert_eq!(parsed.style(), FontStyle::Normal);
+        assert!(!parsed.synthesize_bold);
+        assert!(!parsed.synthesize_italic);
+    }
+
+    #[test]
+    fn family_multi_face_picks_nearest_weight() {
+        // Request Black(900); the heaviest face is ExtraBold(800):
+        // nearest weight wins, no synthetic bold
+        let attr = make_attr("JetBrains Mono", FontWeight::BLACK, FontStyle::Normal);
+        let parsed = best_match_by_name(&attr, 16, built_in_fonts()).unwrap();
+        assert_eq!(parsed.weight(), FontWeight::EXTRABOLD);
+        assert!(!parsed.synthesize_bold);
+
+        // Request DemiLight(350), absent from the family: lighter is
+        // preferred -> Light(300)
+        let attr = make_attr("JetBrains Mono", FontWeight::DEMILIGHT, FontStyle::Normal);
+        let parsed = best_match_by_name(&attr, 16, built_in_fonts()).unwrap();
+        assert_eq!(parsed.weight(), FontWeight::LIGHT);
+        assert!(!parsed.synthesize_dim);
+    }
+
+    #[test]
+    fn family_multi_face_picks_bold_italic_face() {
+        let attr = make_attr("JetBrains Mono", FontWeight::BOLD, FontStyle::Italic);
+        let parsed = best_match_by_name(&attr, 16, built_in_fonts()).unwrap();
+        assert_eq!(parsed.weight(), FontWeight::BOLD);
+        assert_eq!(parsed.style(), FontStyle::Italic);
+        assert!(!parsed.synthesize_italic);
+        assert!(!parsed.synthesize_bold);
+    }
+
+    #[test]
+    fn family_without_bold_face_synthesizes_bold() {
+        // Keep only Regular (upright + italic) to model a family that
+        // ships regular faces only
+        let fonts: Vec<_> = built_in_fonts()
+            .into_iter()
+            .filter(|f| f.weight() == FontWeight::REGULAR)
+            .collect();
+        let attr = make_attr("JetBrains Mono", FontWeight::BOLD, FontStyle::Normal);
+        let parsed = best_match_by_name(&attr, 16, fonts).unwrap();
+        assert_eq!(parsed.names().family, "JetBrains Mono");
+        assert_eq!(parsed.weight(), FontWeight::REGULAR);
+        assert_eq!(parsed.style(), FontStyle::Normal);
+        assert!(parsed.synthesize_bold);
+    }
+
+    #[test]
+    fn family_name_filter_rejects_other_families() {
+        // No face from another family may be picked, even with an exact weight
+        let attr = make_attr("No Such Family", FontWeight::REGULAR, FontStyle::Normal);
+        assert!(best_match_by_name(&attr, 16, built_in_fonts()).is_none());
+
+        // With Roboto and JetBrains Mono mixed, only the requested family is chosen
+        let attr = make_attr("Roboto", FontWeight::BOLD, FontStyle::Normal);
+        let parsed = best_match_by_name(&attr, 16, built_in_fonts()).unwrap();
+        assert_eq!(parsed.names().family, "Roboto");
+        assert_eq!(parsed.weight(), FontWeight::BOLD);
+    }
 }
