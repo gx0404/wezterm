@@ -352,29 +352,43 @@ install_perl() {
     ok "perl ${PERL_VERSION} -> ${dest}/"
 }
 
+# 找真实解释器：跳过 WindowsApps 别名，返回 sys.executable（Git Bash 下转成 POSIX 路径）。
+find_real_python() {
+    local cand path real root
+    for cand in python3 python; do
+        path="$(command -v "${cand}" 2>/dev/null || true)"
+        [ -n "${path}" ] || continue
+        case "${path}" in *WindowsApps*) continue ;; esac
+        "${path}" -c "" </dev/null >/dev/null 2>&1 || continue
+        real="$("${path}" -c 'import sys; print(sys.executable)' </dev/null 2>/dev/null || true)"
+        [ -n "${real}" ] || real="${path}"
+        if command -v cygpath >/dev/null 2>&1; then real="$(cygpath -u "${real}")"; fi
+        printf '%s\n' "${real}"
+        return 0
+    done
+    if [ "${IS_WINDOWS}" = 1 ] && [ -n "${LOCALAPPDATA:-}" ]; then
+        root="${LOCALAPPDATA}"
+        if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -u "${root}")"; fi
+        for path in "${root}"/Python/pythoncore-3.*-64/python.exe; do
+            [ -x "${path}" ] || continue
+            printf '%s\n' "${path}"
+            return 0
+        done
+    fi
+    return 1
+}
+
 install_venv() {
     if venv_ready; then
         note "框架 venv（tomli + graphifyy ${GRAPHIFY_VERSION}）已就绪，跳过"
         return 0
     fi
     local venv="${TOOLS}/venv"
-    # WindowsApps 下的 python3 可能是占位符：必须先验证可运行；Windows 上回退 py 启动器。
+    # WindowsApps 下的 python3/python/py 是 Python 安装管理器（pymanager）的别名：找不到匹配
+    # 运行时会自动把 Python 装进「当前目录\Python」（2026-10-03 实测把 153 MB 运行时写进仓库根），
+    # 所以一律跳过这些别名，只用真实解释器路径；Windows 上再回退到 pymanager 自己的安装根。
     local pyexe=""
-    local cand
-    for cand in python3 python; do
-        if command -v "${cand}" >/dev/null 2>&1 && "${cand}" -c "" </dev/null >/dev/null 2>&1; then
-            # 取解释器真实路径：WindowsApps 下的 python3 是应用执行别名，uv 无法按该路径识别
-            pyexe="$("${cand}" -c 'import sys; print(sys.executable)' </dev/null 2>/dev/null)"
-            if command -v cygpath >/dev/null 2>&1; then
-                pyexe="$(cygpath -u "${pyexe}")"
-            fi
-            [ -n "${pyexe}" ] || pyexe="$(command -v "${cand}")"
-            break
-        fi
-    done
-    if [ -z "${pyexe}" ] && command -v py >/dev/null 2>&1 && py -3 -c "" </dev/null >/dev/null 2>&1; then
-        pyexe="$(py -3 -c 'import sys; print(sys.executable)')"
-    fi
+    pyexe="$(find_real_python || true)"
     [ -n "${pyexe}" ] || { echo "[setup-env] 没有可运行的 Python>=3.11，无法建框架 venv" >&2; return 1; }
     if command -v uv >/dev/null 2>&1; then
         uv venv --python "${pyexe}" "${venv}" >/dev/null
