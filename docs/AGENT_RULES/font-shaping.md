@@ -22,6 +22,12 @@ fontconfig、freetype、harfbuzz 的构建辅助 crate 与上游子模块）。
 - 属性表：`wezterm-char-props/src/{emoji_variation,nerdfonts_data,widechar_width,
   emoji_presentation}.rs`——emoji_variation/nerdfonts_data 是 codegen 产物
   （`wezterm-char-props/codegen`：`cargo run > ../src/emoji_variation.rs`）。
+- Windows 字体解析（fork）：`locator/gdi.rs` 对非 Regular 样式按族枚举
+  DirectWrite 全部字体面（OnDisk 路径去重）→ `parser.rs::best_match_by_name`
+  按 CSS 规则选最近字重并 `synthesize()`；GDI `GetFontData` 只作最后兜底且
+  映射器替换族名时视为未命中；系统字体回退按 UTF-16 代理对查询。
+  `rasterizer/harfbuzz.rs` 应用 per-font `scale`。`ls-fonts` 不应再出现
+  `<imported to RAM>, Gdi`。
 - deps/：`deps/cairo` 是 cairo-sys-rs 补丁版（[patch.crates-io] 指向）；
   其余为静态链接系统图形库的 build 辅助；子模块内容不手改。
 

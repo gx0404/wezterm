@@ -66,6 +66,20 @@ Lua gui 命名空间。平台窗口与事件抽象在 platform-window 域（`win
   `ATLAS_SIZE` 初值 1024。文本浮层共享行样式在 `overlay/style.rs`
   （`overlay_selected_*`、`copy_mode_status_*`），滚动条 thumb 在
   `render/scroll_thumb.rs`（`scroll_bar_thumb_width`，命中区仍整宽）。
+- **Element 浮层统一样式**（fork）：命令面板/设置/快捷键/壁纸/右键菜单五个
+  Modal 一律经 `termwindow/overlay_style.rs::OverlayStyle` 构造外框（圆角
+  `overlay_corner_radius` + 描边 `overlay_border_color`）、行（选中 =
+  `command_palette_selection_*` 底色 + 左侧 `command_palette_accent_color`
+  强调条）、chrome 行与分隔线；可见行数用 `row_px()`，`context_menu.rs::
+  menu_box_size` 用 `chrome_px()` 同步内边距，不得各自硬编码尺寸/颜色。
+  圆角由 `box_model.rs` 画「底色扇形 + 边框色弧线」，半径用 `Pixels/Points`
+  才是正圆（`render/corners.rs::rounded_corners`）。fancy tab bar 标签圆角读
+  `window_frame.tab_corner_radius`，关闭按钮悬停色读 `close_button_hover_bg`。
+- GL 上下文丢失走 `termwindow/gpu_recovery.rs`：`do_paint` 只记录并
+  `notify(RebuildRenderState)`，主线程两段式重建（释放 shape 缓存/RenderState
+  → `enable_opengl()` → `RenderState::new` → 代数递增），指数退避最多 8 次。
+- 设置浮层写入 `gui-settings.json` 的键必须登记进 `gui_settings::GUI_OWNED_KEYS`
+  （现有：wallpaper、color_scheme、default_shell、window_material 等）。
 - **纹理耗尽降级链**：`AllowImage::Yes→Scale(2/4/8)→No`；新图像路径要接进
   该链而不是自行吞错。
 - **wezterm.gui 只在 GUI 进程注册**（window-funcs crate 由 main.rs 单独

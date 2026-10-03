@@ -37,6 +37,14 @@
 
 ## 不变量
 
+- fork 新增配置键只能经 `config/fluent.lua::declared()` 登记（顶层键、
+  `colors` 子键、`window_frame` 子键三类），由 `wezterm.lua` 最后 `apply()`
+  用严格 `config_builder` 逐键探测当前二进制认不认得，认得才写入——旧二进制
+  不弹 Configuration Error；**不得直接写进 `config/*.lua` 静态表**。
+  `gui-startup` 里不能调用 `window:gui_window()`（GUI 窗口尚未创建会阻塞主
+  线程），首窗几何经 `mux.spawn_window` 的 `width/height/position` 传入。
+  配置求值期间调用 `wezterm.gui.screens()` 依赖 Rust 侧 `reload_lock`
+  （A5e）不持 `CONFIG` 锁，旧于该修复的二进制会死锁。
 - 本机 `~/.config/wezterm` 保持独立目录（不 symlink 进仓库）；仓库快照是
   移植真源，本机改动经 `make gx-sync` 回收（默认只读对比，
   `GX_SYNC_WRITE=1` 写回）。
