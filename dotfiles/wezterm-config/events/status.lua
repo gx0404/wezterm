@@ -116,14 +116,16 @@ end
 ---（见 tests/pure_fn_test.lua）。
 ---
 ---decorations 含 INTEGRATED_BUTTONS 时一律不隐藏：集成标题栏按钮画在 tab bar 里，隐藏后
----窗口没有关闭/最大化按钮也拖不动。
+---窗口没有关闭/最大化按钮也拖不动。force_with_integrated 为 true 时跳过这条保护，
+---即使含集成按钮也按 herdr 单 tab 规则隐藏（用户明确选择隐藏 tab bar 时使用）。
 ---@param herdr_app_mode boolean
 ---@param tab_count number
 ---@param process_name string 已经过 clean_process_name 清洗的前台进程名
 ---@param decorations? string window_decorations 的字符串形式，如 'RESIZE|INTEGRATED_BUTTONS'；缺省按没有集成按钮处理
+---@param force_with_integrated? boolean 为 true 时忽略集成按钮保护；缺省 false
 ---@return boolean
-local function should_hide_tab_bar(herdr_app_mode, tab_count, process_name, decorations)
-   if tab_title.has_integrated_buttons(decorations) then
+local function should_hide_tab_bar(herdr_app_mode, tab_count, process_name, decorations, force_with_integrated)
+   if force_with_integrated ~= true and tab_title.has_integrated_buttons(decorations) then
       return false
    end
    return herdr_app_mode == true and tab_count == 1 and process_name == 'herdr'
@@ -243,7 +245,8 @@ end
 ---@param pane any? WezTerm Pane，可能为 nil（窗口刚创建等边界情况）
 ---@param herdr_app_mode boolean
 ---@param now? integer os.time()，缺省取当前时间
-local function apply_herdr_app_mode(window, pane, herdr_app_mode, now)
+---@param force_with_integrated? boolean 透传给 should_hide_tab_bar；缺省 false
+local function apply_herdr_app_mode(window, pane, herdr_app_mode, now, force_with_integrated)
    now = now or os.time()
    local key = tostring(window:window_id())
    local tab_count = #window:mux_window():tabs()
@@ -256,7 +259,7 @@ local function apply_herdr_app_mode(window, pane, herdr_app_mode, now)
       decorations = window_decorations(key, window, now)
    end
 
-   local hide = should_hide_tab_bar(herdr_app_mode, tab_count, process_name, decorations)
+   local hide = should_hide_tab_bar(herdr_app_mode, tab_count, process_name, decorations, force_with_integrated)
    local state = load_tab_bar_state(key)
    -- 判定不变时不必取 overrides（每次 update-status 都会走到这里）。
    local overrides = nil
@@ -273,13 +276,15 @@ local function apply_herdr_app_mode(window, pane, herdr_app_mode, now)
    end
 end
 
----@param opts? { date_format?: string, herdr_app_mode?: boolean } Default: {date_format = '%a %H:%M', herdr_app_mode = true}
+---@param opts? { date_format?: string, herdr_app_mode?: boolean, integrated_hides_tab_bar?: boolean } Default: {date_format = '%a %H:%M', herdr_app_mode = true, integrated_hides_tab_bar = false}；integrated_hides_tab_bar 为 true 时，即使 window_decorations 含 INTEGRATED_BUTTONS 也按 herdr 单 tab 规则隐藏 tab bar
 M.setup = function(opts)
    local date_format = (opts and opts.date_format) or '%a %H:%M'
    local herdr_app_mode = true
    if opts and opts.herdr_app_mode ~= nil then
       herdr_app_mode = opts.herdr_app_mode
    end
+
+   local force_with_integrated = opts ~= nil and opts.integrated_hides_tab_bar == true
 
    wezterm.on('update-status', function(window, pane)
       local now = os.time()
@@ -297,7 +302,7 @@ M.setup = function(opts)
 
       last_status_by_window[window_id] = { left = left, right = right }
 
-      apply_herdr_app_mode(window, pane, herdr_app_mode, now)
+      apply_herdr_app_mode(window, pane, herdr_app_mode, now, force_with_integrated)
    end)
 end
 

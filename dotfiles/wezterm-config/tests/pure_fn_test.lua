@@ -55,6 +55,11 @@ check(
    status.should_hide_tab_bar(true, 1, 'herdr', 'INTEGRATED_BUTTONS'),
    false
 )
+-- force_with_integrated（integrated_hides_tab_bar）：true 时忽略集成按钮保护，false/缺省保持原行为
+check('hide.force_integrated_hides', status.should_hide_tab_bar(true, 1, 'herdr', 'RESIZE|INTEGRATED_BUTTONS', true), true)
+check('hide.force_false_keeps', status.should_hide_tab_bar(true, 1, 'herdr', 'RESIZE|INTEGRATED_BUTTONS', false), false)
+check('hide.force_still_needs_herdr', status.should_hide_tab_bar(true, 1, 'bash', 'INTEGRATED_BUTTONS', true), false)
+check('hide.force_multi_tab', status.should_hide_tab_bar(true, 2, 'herdr', 'INTEGRATED_BUTTONS', true), false)
 check('hide.native_decorations', status.should_hide_tab_bar(true, 1, 'herdr', 'TITLE|RESIZE'), true)
 check('hide.decorations_not_string', status.should_hide_tab_bar(true, 1, 'herdr', 42), true)
 check(
