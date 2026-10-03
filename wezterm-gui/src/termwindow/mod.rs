@@ -20,7 +20,10 @@ use crate::scripting::guiwin::GuiWin;
 use crate::scrollbar::*;
 use crate::selection::Selection;
 use crate::shapecache::*;
-use crate::tabbar::{TabBarItem, TabBarState};
+use crate::tabbar::{
+    cached_config_table, call_format_window_title, TabBarItem, TabBarState, TitleConfigTableCache,
+    TitleFormatArgs,
+};
 use crate::termwindow::background::{
     load_background_image, reload_background_image, LoadedBackgroundLayer,
 };
@@ -46,7 +49,7 @@ use config::{
     GeometryOrigin, GuiPosition, TermConfig, WindowCloseConfirmation,
 };
 use lfucache::*;
-use mlua::{FromLua, LuaSerdeExt, UserData, UserDataFields};
+use mlua::{LuaSerdeExt, UserData, UserDataFields};
 use mux::pane::{
     CachePolicy, CloseReason, Pane, PaneId, Pattern as MuxPattern, PerformAssignmentResult,
 };
@@ -478,6 +481,9 @@ pub struct TermWindow {
     /// fork: coalesces `update_title` requests into one rebuild per
     /// TITLE_UPDATE_COALESCE window (see `title_update.rs`).
     title_update: title_update::TitleUpdateCoalescer,
+    /// fork: config table shared by the format-* Lua callbacks; dropped
+    /// by `config_was_reloaded` (see `cached_config_table`).
+    title_config_cache: Option<TitleConfigTableCache>,
     cursor_blink_state: RefCell<ColorEase>,
     blink_state: RefCell<ColorEase>,
     rapid_blink_state: RefCell<ColorEase>,
@@ -830,6 +836,7 @@ impl TermWindow {
             )),
             last_status_call: Instant::now(),
             title_update: Default::default(),
+            title_config_cache: None,
             cursor_blink_state: RefCell::new(ColorEase::new(
                 config.cursor_blink_rate,
                 config.cursor_blink_ease_in,
@@ -2015,6 +2022,10 @@ impl TermWindow {
         };
         self.config = config.clone();
         self.palette.take();
+        // fork: the format-* callbacks must see the reloaded (or newly
+        // overridden) config; overrides keep the base generation, so the
+        // generation check in cached_config_table alone would miss them
+        self.title_config_cache = None;
 
         let mux = Mux::get();
         let window = match mux.get_window(self.mux_window_id) {
@@ -2351,8 +2362,10 @@ impl TermWindow {
 
     fn update_title_impl(&mut self) {
         let mux = Mux::get();
-        let window = match mux.get_window(self.mux_window_id) {
-            Some(window) => window,
+        // fork: only the tab count is needed from the mux window; release
+        // its guard before the Lua format callbacks run
+        let tabs_count = match mux.get_window(self.mux_window_id) {
+            Some(window) => window.count_tabs(),
             _ => return,
         };
         let tabs = self.get_tab_information();
@@ -2379,20 +2392,61 @@ impl TermWindow {
             None => false,
         };
 
-        let new_tab_bar = TabBarState::new(
-            self.dimensions.pixel_width / self.render_metrics.cell_size.width as usize,
-            if hovering_in_tab_bar {
-                Some(self.last_mouse_coords.0)
-            } else {
+        let title_width =
+            self.dimensions.pixel_width / self.render_metrics.cell_size.width as usize;
+        let mouse_x = if hovering_in_tab_bar {
+            Some(self.last_mouse_coords.0)
+        } else {
+            None
+        };
+
+        // fork: enter Lua once for the whole rebuild. The tabs/panes
+        // sequences and the config table are shared by all 2N+1
+        // format-tab-title/format-window-title calls (see TitleFormatArgs),
+        // and the config table itself is cached across rebuilds until
+        // config_was_reloaded drops `title_config_cache`.
+        let mut config_cache = self.title_config_cache.take();
+        let config = &self.config;
+        let colors = self.config.resolved_palette.tab_bar.as_ref();
+        let left_status = &self.left_status;
+        let right_status = &self.right_status;
+        let build_tab_bar = |lua_args: Option<&TitleFormatArgs>| {
+            TabBarState::new(
+                title_width,
+                mouse_x,
+                &tabs,
+                lua_args,
+                colors,
+                config,
+                left_status,
+                right_status,
+            )
+        };
+        let formatted = config::run_immediate_with_lua_config(|lua| {
+            let lua = match lua {
+                Some(lua) => lua,
+                None => return Ok(None),
+            };
+            let config_value = cached_config_table(&lua, &mut config_cache, config)?;
+            let args = TitleFormatArgs::new(&lua, &tabs, &panes, config_value)?;
+            let tab_bar = build_tab_bar(Some(&args));
+            let title = if tabs_count == 0 {
                 None
-            },
-            &tabs,
-            &panes,
-            self.config.resolved_palette.tab_bar.as_ref(),
-            &self.config,
-            &self.left_status,
-            &self.right_status,
-        );
+            } else {
+                call_format_window_title(&args, &active_tab, &active_pane)
+            };
+            Ok(Some((tab_bar, title)))
+        });
+        let (new_tab_bar, title) = match formatted {
+            Ok(Some(formatted)) => formatted,
+            Ok(None) => (build_tab_bar(None), None),
+            Err(err) => {
+                log::warn!("preparing title format callbacks: {:#}", err);
+                (build_tab_bar(None), None)
+            }
+        };
+        self.title_config_cache = config_cache;
+
         if new_tab_bar != self.tab_bar {
             self.tab_bar = new_tab_bar;
             self.invalidate_fancy_tab_bar();
@@ -2402,44 +2456,9 @@ impl TermWindow {
             }
         }
 
-        let tabs_count = window.count_tabs();
         if tabs_count == 0 {
             return;
         }
-        drop(window);
-
-        let title = match config::run_immediate_with_lua_config(|lua| {
-            if let Some(lua) = lua {
-                let tabs = lua.create_sequence_from(tabs.clone().into_iter())?;
-                let panes = lua.create_sequence_from(panes.clone().into_iter())?;
-
-                let v = config::lua::emit_sync_callback(
-                    &*lua,
-                    (
-                        "format-window-title".to_string(),
-                        (
-                            active_tab.clone(),
-                            active_pane.clone(),
-                            tabs,
-                            panes,
-                            (*self.config).clone(),
-                        ),
-                    ),
-                )?;
-                match &v {
-                    mlua::Value::Nil => Ok(None),
-                    _ => Ok(Some(String::from_lua(v, &*lua)?)),
-                }
-            } else {
-                Ok(None)
-            }
-        }) {
-            Ok(s) => s,
-            Err(err) => {
-                log::warn!("format-window-title: {}", err);
-                None
-            }
-        };
 
         let title = match title {
             Some(title) => title,

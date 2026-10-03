@@ -1,7 +1,7 @@
 use crate::termwindow::{PaneInformation, TabInformation, UIItem, UIItemType};
 use config::{ConfigHandle, TabBarColors};
 use finl_unicode::grapheme_clusters::Graphemes;
-use mlua::FromLua;
+use mlua::{FromLua, IntoLua};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use termwiz::cell::{unicode_column_width, Cell, CellAttributes};
@@ -67,61 +67,175 @@ struct TitleText {
     has_indeterminate: bool,
 }
 
-fn call_format_tab_title(
-    tab: &TabInformation,
-    tab_info: &[TabInformation],
-    pane_info: &[PaneInformation],
+/// fork: Lua arguments shared by every format-tab-title and
+/// format-window-title call of one title rebuild (2N+1 calls for N tabs).
+/// The tabs/panes sequences and the config table are built once; cloning
+/// an mlua Value only takes another reference. Previously every call
+/// rebuilt both sequences (O(N^2) per rebuild) and converted the whole
+/// Config into a fresh Lua table.
+///
+/// Handlers therefore all receive the *same* tables: they should treat
+/// them as read-only. A handler that mutates one is seen by the later
+/// calls of the rebuild, and for the config table by later rebuilds too
+/// (see `cached_config_table`). The TabInformation/PaneInformation
+/// elements are userdata without setters, so those cannot be modified.
+pub struct TitleFormatArgs<'lua> {
+    lua: &'lua mlua::Lua,
+    tabs: mlua::Table<'lua>,
+    panes: mlua::Table<'lua>,
+    config: mlua::Value<'lua>,
+}
+
+impl<'lua> TitleFormatArgs<'lua> {
+    pub fn new(
+        lua: &'lua mlua::Lua,
+        tab_info: &[TabInformation],
+        pane_info: &[PaneInformation],
+        config: mlua::Value<'lua>,
+    ) -> mlua::Result<Self> {
+        Ok(Self {
+            lua,
+            tabs: lua.create_sequence_from(tab_info.iter().cloned())?,
+            panes: lua.create_sequence_from(pane_info.iter().cloned())?,
+            config,
+        })
+    }
+
+    pub fn lua(&self) -> &'lua mlua::Lua {
+        self.lua
+    }
+
+    pub fn tabs(&self) -> mlua::Table<'lua> {
+        self.tabs.clone()
+    }
+
+    pub fn panes(&self) -> mlua::Table<'lua> {
+        self.panes.clone()
+    }
+
+    pub fn config(&self) -> mlua::Value<'lua> {
+        self.config.clone()
+    }
+}
+
+/// fork: the config table handed to the format-* callbacks, kept in the
+/// Lua registry so that it is converted once per configuration instead of
+/// on each of the 2N+1 calls of every title rebuild.
+/// The owner (one per TermWindow, so per-window overrides never share an
+/// entry) must drop it from `config_was_reloaded`; the generation check
+/// is a second line of defence. A replaced Lua state (config reload) does
+/// not own the key any more, which also forces a rebuild.
+pub struct TitleConfigTableCache {
+    generation: usize,
+    key: mlua::RegistryKey,
+}
+
+pub fn cached_config_table<'lua>(
+    lua: &'lua mlua::Lua,
+    cache: &mut Option<TitleConfigTableCache>,
     config: &ConfigHandle,
+) -> mlua::Result<mlua::Value<'lua>> {
+    if let Some(entry) = cache.as_ref() {
+        if entry.generation == config.generation() && lua.owns_registry_value(&entry.key) {
+            return lua.registry_value(&entry.key);
+        }
+    }
+    let value = (**config).clone().into_lua(lua)?;
+    let key = lua.create_registry_value(value.clone())?;
+    *cache = Some(TitleConfigTableCache {
+        generation: config.generation(),
+        key,
+    });
+    Ok(value)
+}
+
+/// fork: format-window-title over the shared `TitleFormatArgs`; errors
+/// are logged and fall back to the built-in title (None), as before.
+pub fn call_format_window_title(
+    args: &TitleFormatArgs,
+    active_tab: &Option<TabInformation>,
+    active_pane: &Option<PaneInformation>,
+) -> Option<String> {
+    let lua = args.lua();
+    let result = (|| -> anyhow::Result<Option<String>> {
+        let v = config::lua::emit_sync_callback(
+            lua,
+            (
+                "format-window-title".to_string(),
+                (
+                    active_tab.clone(),
+                    active_pane.clone(),
+                    args.tabs(),
+                    args.panes(),
+                    args.config(),
+                ),
+            ),
+        )?;
+        match &v {
+            mlua::Value::Nil => Ok(None),
+            _ => Ok(Some(String::from_lua(v, lua)?)),
+        }
+    })();
+    match result {
+        Ok(title) => title,
+        Err(err) => {
+            log::warn!("format-window-title: {}", err);
+            None
+        }
+    }
+}
+
+fn call_format_tab_title(
+    tab_idx: usize,
+    args: &TitleFormatArgs,
     hover: bool,
     tab_max_width: usize,
 ) -> Option<TitleText> {
-    match config::run_immediate_with_lua_config(|lua| {
-        if let Some(lua) = lua {
-            let tabs = lua.create_sequence_from(tab_info.iter().cloned())?;
-            let panes = lua.create_sequence_from(pane_info.iter().cloned())?;
-
-            let v = config::lua::emit_sync_callback(
-                &*lua,
+    let lua = args.lua();
+    let result = (|| -> anyhow::Result<Option<TitleText>> {
+        // The element of the shared tabs sequence is the same userdata a
+        // fresh conversion of tab_info[tab_idx] would produce
+        let tab: mlua::Value = args.tabs.raw_get(tab_idx + 1)?;
+        let v = config::lua::emit_sync_callback(
+            lua,
+            (
+                "format-tab-title".to_string(),
                 (
-                    "format-tab-title".to_string(),
-                    (
-                        tab.clone(),
-                        tabs,
-                        panes,
-                        (**config).clone(),
-                        hover,
-                        tab_max_width,
-                    ),
+                    tab,
+                    args.tabs(),
+                    args.panes(),
+                    args.config(),
+                    hover,
+                    tab_max_width,
                 ),
-            )?;
-            match &v {
-                mlua::Value::Nil => Ok(None),
-                mlua::Value::Table(_) => {
-                    let items = <Vec<FormatItem>>::from_lua(v, &*lua)?;
+            ),
+        )?;
+        match &v {
+            mlua::Value::Nil => Ok(None),
+            mlua::Value::Table(_) => {
+                let items = <Vec<FormatItem>>::from_lua(v, lua)?;
 
-                    let esc = format_as_escapes(items.clone())?;
-                    let line = parse_status_text(&esc, CellAttributes::default());
+                let esc = format_as_escapes(items.clone())?;
+                let line = parse_status_text(&esc, CellAttributes::default());
 
-                    Ok(Some(TitleText {
-                        items,
-                        len: line.len(),
-                        has_indeterminate: false,
-                    }))
-                }
-                _ => {
-                    let s = String::from_lua(v, &*lua)?;
-                    let line = parse_status_text(&s, CellAttributes::default());
-                    Ok(Some(TitleText {
-                        len: line.len(),
-                        items: vec![FormatItem::Text(s)],
-                        has_indeterminate: false,
-                    }))
-                }
+                Ok(Some(TitleText {
+                    items,
+                    len: line.len(),
+                    has_indeterminate: false,
+                }))
             }
-        } else {
-            Ok(None)
+            _ => {
+                let s = String::from_lua(v, lua)?;
+                let line = parse_status_text(&s, CellAttributes::default());
+                Ok(Some(TitleText {
+                    len: line.len(),
+                    items: vec![FormatItem::Text(s)],
+                    has_indeterminate: false,
+                }))
+            }
         }
-    }) {
+    })();
+    match result {
         Ok(s) => s,
         Err(err) => {
             log::warn!("format-tab-title: {}", err);
@@ -217,14 +331,16 @@ fn spinner_phase(tab_id: usize) -> u64 {
 }
 
 fn compute_tab_title(
-    tab: &TabInformation,
+    tab_idx: usize,
     tab_info: &[TabInformation],
-    pane_info: &[PaneInformation],
+    lua_args: Option<&TitleFormatArgs>,
     config: &ConfigHandle,
     hover: bool,
     tab_max_width: usize,
 ) -> TitleText {
-    let title = call_format_tab_title(tab, tab_info, pane_info, config, hover, tab_max_width);
+    let tab = &tab_info[tab_idx];
+    let title =
+        lua_args.and_then(|args| call_format_tab_title(tab_idx, args, hover, tab_max_width));
 
     match title {
         Some(title) => title,
@@ -436,11 +552,14 @@ impl TabBarState {
     /// mouse_x is some if the mouse is on the same row as the tab bar.
     /// title_width is the total number of cell columns in the window.
     /// window allows access to the tabs associated with the window.
+    /// fork: `lua_args` carries the shared Lua arguments for the
+    /// format-tab-title calls; None means there is no Lua config and
+    /// the built-in titles are used.
     pub fn new(
         title_width: usize,
         mouse_x: Option<usize>,
         tab_info: &[TabInformation],
-        pane_info: &[PaneInformation],
+        lua_args: Option<&TitleFormatArgs>,
         colors: Option<&TabBarColors>,
         config: &ConfigHandle,
         left_status: &str,
@@ -486,14 +605,15 @@ impl TabBarState {
         let tab_titles: Vec<TitleText> = if config.show_tabs_in_tab_bar {
             tab_info
                 .iter()
-                .map(|tab| {
+                .enumerate()
+                .map(|(tab_idx, tab)| {
                     if tab.is_active {
                         active_tab_no = tab.tab_index;
                     }
                     compute_tab_title(
-                        tab,
+                        tab_idx,
                         tab_info,
-                        pane_info,
+                        lua_args,
                         config,
                         false,
                         config.tab_max_width,
@@ -574,14 +694,8 @@ impl TabBarState {
 
             // Recompute the title so that it factors in both the hover state
             // and the adjusted maximum tab width based on available space.
-            let tab_title = compute_tab_title(
-                &tab_info[tab_idx],
-                tab_info,
-                pane_info,
-                config,
-                hover,
-                tab_title_len,
-            );
+            let tab_title =
+                compute_tab_title(tab_idx, tab_info, lua_args, config, hover, tab_title_len);
 
             let cell_attrs = if active {
                 &active_cell_attrs
@@ -892,5 +1006,114 @@ mod tests {
         // hover zone spans exactly the rendered cells
         assert!(is_tab_hover(Some(3), 0, menu_button_display_cells()));
         assert!(!is_tab_hover(Some(4), 0, menu_button_display_cells()));
+    }
+
+    fn pane_info(pane_id: usize, title: &str) -> PaneInformation {
+        PaneInformation {
+            pane_id,
+            pane_index: 0,
+            is_active: true,
+            is_zoomed: false,
+            has_unseen_output: false,
+            left: 0,
+            top: 0,
+            width: 80,
+            height: 24,
+            pixel_width: 640,
+            pixel_height: 384,
+            title: title.to_string(),
+            user_vars: Default::default(),
+            progress: Progress::None,
+        }
+    }
+
+    fn tab_info(tab_index: usize) -> TabInformation {
+        TabInformation {
+            tab_id: tab_index,
+            tab_index,
+            is_active: tab_index == 0,
+            is_last_active: false,
+            active_pane: Some(pane_info(tab_index, "shell")),
+            window_id: 0,
+            tab_title: String::new(),
+        }
+    }
+
+    #[test]
+    fn format_tab_title_calls_share_one_set_of_lua_values() {
+        // fork: every format-tab-title call of one rebuild must see the
+        // very same tabs/panes/config tables instead of fresh copies
+        let lua = mlua::Lua::new();
+        let handler: mlua::Function = lua
+            .load(
+                r#"
+                calls = 0
+                same = true
+                return function(tab, tabs, panes, config, hover, max_width)
+                  calls = calls + 1
+                  if first_tabs == nil then
+                    first_tabs, first_panes, first_config = tabs, panes, config
+                  elseif not (rawequal(tabs, first_tabs)
+                      and rawequal(panes, first_panes)
+                      and rawequal(config, first_config)) then
+                    same = false
+                  end
+                  -- the tab argument is the matching element of `tabs`
+                  if not rawequal(tab, tabs[tab.tab_index + 1]) then
+                    same = false
+                  end
+                  return "t" .. tab.tab_index
+                end
+                "#,
+            )
+            .eval()
+            .unwrap();
+        config::lua::register_event(&lua, ("format-tab-title".to_string(), handler)).unwrap();
+
+        let config = ConfigHandle::default_config();
+        let tabs: Vec<TabInformation> = (0..3).map(tab_info).collect();
+        let panes = vec![pane_info(0, "shell")];
+        let mut cache = None;
+        let config_value = cached_config_table(&lua, &mut cache, &config).unwrap();
+        let args = TitleFormatArgs::new(&lua, &tabs, &panes, config_value).unwrap();
+
+        let bar = TabBarState::new(80, None, &tabs, Some(&args), None, &config, "", "");
+
+        let globals = lua.globals();
+        // two passes over three tabs: the measuring pass and the final one
+        assert_eq!(globals.get::<_, i64>("calls").unwrap(), 6);
+        assert!(globals.get::<_, bool>("same").unwrap());
+        let titles: Vec<String> = bar
+            .items()
+            .iter()
+            .filter(|entry| matches!(entry.item, TabBarItem::Tab { .. }))
+            .map(|entry| entry.title.as_str().trim().to_string())
+            .collect();
+        assert_eq!(titles, vec!["t0", "t1", "t2"]);
+    }
+
+    #[test]
+    fn config_table_is_reused_until_the_cache_is_dropped() {
+        let lua = mlua::Lua::new();
+        let config = ConfigHandle::default_config();
+        let mut cache = None;
+
+        let first = cached_config_table(&lua, &mut cache, &config).unwrap();
+        let second = cached_config_table(&lua, &mut cache, &config).unwrap();
+        assert!(matches!(first, mlua::Value::Table(_)));
+        assert_eq!(first.to_pointer(), second.to_pointer());
+
+        // config_was_reloaded drops the cache: the next rebuild converts
+        // the (possibly overridden) config again
+        cache = None;
+        let third = cached_config_table(&lua, &mut cache, &config).unwrap();
+        assert_ne!(first.to_pointer(), third.to_pointer());
+
+        // a replaced Lua state (config reload) does not own the old key
+        let other_lua = mlua::Lua::new();
+        let fresh = cached_config_table(&other_lua, &mut cache, &config).unwrap();
+        assert!(matches!(fresh, mlua::Value::Table(_)));
+        let again = cached_config_table(&other_lua, &mut cache, &config).unwrap();
+        assert_eq!(fresh.to_pointer(), again.to_pointer());
     }
 }
