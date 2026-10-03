@@ -209,6 +209,20 @@ public static class SmokeWin32 {
         }
         return total == 0 ? 0.0 : (double)nonzero / total;
     }
+
+    // 最后 rows 行里近白像素（三通道都 > 240）的占比：PrintWindow 偶尔会在窗口底部留一条未绘制的白带。
+    public static double BottomWhiteRatio(byte[] bgra, int stride, int w, int h, int rows) {
+        long white = 0, total = 0;
+        for (int y = Math.Max(0, h - rows); y < h; y++) {
+            int row = y * stride;
+            for (int x = 0; x < w; x++) {
+                int i = row + x * 4;
+                total++;
+                if (bgra[i] > 240 && bgra[i + 1] > 240 && bgra[i + 2] > 240) { white++; }
+            }
+        }
+        return total == 0 ? 0.0 : (double)white / total;
+    }
 }
 '@
 }
@@ -319,6 +333,7 @@ function Write-Result($Shot, $Skip) {
 
 # ---------- 抓图 ----------
 function Get-Shot([IntPtr]$H, [string]$Mode) {
+    $defect = $null
     $frame = [SmokeWin32]::FrameBounds($H)
     $w = $frame.R - $frame.L; $ht = $frame.B - $frame.T
     if ($w -le 0 -or $ht -le 0) { throw "窗口矩形无效 ${w}x${ht}" }
@@ -340,10 +355,14 @@ function Get-Shot([IntPtr]$H, [string]$Mode) {
         [Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
         $bmp.UnlockBits($data)
         $ratio = [SmokeWin32]::NonBlackRatio($bytes, $data.Stride, $bmp.Width, $bmp.Height)
-        if ($ok -and $ratio -gt 0.005) { return @{ bmp = $bmp; method = 'printwindow' } }
+        $white = [SmokeWin32]::BottomWhiteRatio($bytes, $data.Stride, $bmp.Width, $bmp.Height, 12)
+        $defect = $null
+        if (-not $ok -or $ratio -le 0.005) { $defect = "黑图（ok=$ok 非零像素占比 $ratio）" }
+        elseif ($white -gt 0.6) { $defect = "底部残留白带（最后 12 行近白占比 $white）" }
+        if (-not $defect) { return @{ bmp = $bmp; method = 'printwindow' } }
         $bmp.Dispose()
-        if ($Mode -eq 'printwindow') { throw "PrintWindow 返回黑图（非零像素占比 $ratio）" }
-        Write-Host "PrintWindow 黑图（ok=$ok ratio=$ratio），改用临时 TOPMOST + CopyFromScreen"
+        if ($Mode -eq 'printwindow') { throw "PrintWindow 结果无效：$defect" }
+        Write-Host "PrintWindow $defect，改用临时 TOPMOST + CopyFromScreen"
     }
     # 临时置顶但不激活，抓屏后恢复；不调用 SetForegroundWindow。
     $flags = [uint32](0x0001 -bor 0x0002 -bor 0x0010 -bor 0x0040)   # NOSIZE|NOMOVE|NOACTIVATE|SHOWWINDOW
@@ -357,7 +376,7 @@ function Get-Shot([IntPtr]$H, [string]$Mode) {
         $g = [System.Drawing.Graphics]::FromImage($bmp)
         $g.CopyFromScreen($frame.L, $frame.T, 0, 0, $bmp.Size)
         $g.Dispose()
-        return @{ bmp = $bmp; method = 'screen' }
+        return @{ bmp = $bmp; method = 'screen'; fallback = $defect }
     }
     finally {
         [SmokeWin32]::SetWindowPos($H, $notop, 0, 0, 0, 0, $flags) | Out-Null
@@ -485,7 +504,7 @@ try {
         $shot.bmp.Dispose()
         Write-Host "SAVED $path $size method=$($shot.method) keymap=$keymap"
         Write-Result ([ordered]@{
-                file = $file; overlay = $Overlay; label = $Label; method = $shot.method; keymap = $keymap
+                file = $file; overlay = $Overlay; label = $Label; method = $shot.method; fallback = $shot.fallback; keymap = $keymap
                 leader = $(if ($LeaderKey) { $LeaderKey } else { 'config' })
                 extra_config = @($ExtraConfig)
                 foreground = $foreground; size = $size; marker = $marker; exe = $Exe
