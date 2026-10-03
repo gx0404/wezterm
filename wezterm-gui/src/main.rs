@@ -1221,7 +1221,6 @@ fn run() -> anyhow::Result<()> {
     config::lua::add_context_setup_func(crate::scripting::register);
     config::lua::add_context_setup_func(crate::stats::register);
 
-    stats::Stats::init()?;
     let _saver = umask::UmaskSaver::new();
 
     config::common_init(
@@ -1230,6 +1229,13 @@ fn run() -> anyhow::Result<()> {
         opts.skip_config,
     )?;
     let config = config::configuration();
+    // fork: only install the metrics recorder (and its stats thread) when
+    // periodic_stat_logging is non-zero. Without a recorder the metrics::*!
+    // macros are no-ops, which removes locks and histogram writes from hot
+    // paths. Changing 0 -> non-zero via hot reload needs a GUI restart.
+    if config.periodic_stat_logging > 0 {
+        stats::Stats::init()?;
+    }
     if let Some(value) = &config.default_ssh_auth_sock {
         std::env::set_var("SSH_AUTH_SOCK", value);
     }
