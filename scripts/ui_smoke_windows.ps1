@@ -17,7 +17,7 @@
   leader 层，见 dotfiles/wezterm-config/config/bindings.lua）。-Keymap 可显式覆盖。
 
   键盘输入只会发给前台窗口：发键前必须确认前台窗口属于本脚本启动的 wezterm 进程，否则记 skipped，
-  绝不把按键打到别的程序里。窗口不在前台时可加 -Activate 用 AppActivate 请求前台（默认不抢焦点）。
+  绝不把按键打到别的程序里。窗口不在前台时可加 -Activate 请求前台（AppActivate 失败则点一下 Alt 后 SetForegroundWindow，默认不抢焦点）。
 
   结果只是「已抓图」：执行者必须读回每张图核对后，再把 images_reviewed 置 true 并改写 status。
 
@@ -117,6 +117,10 @@ public static class SmokeWin32 {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    // 点一下 Alt：让本进程拿到前台授权，否则 SetForegroundWindow 会被 Windows 的前台锁拒绝（只在 -Activate 下用）。
+    public static void TapAlt() { keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero); }
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
@@ -465,8 +469,18 @@ try {
         }
         else {
             if ([SmokeWin32]::ForegroundPid() -ne $proc.Id -and $Activate) {
-                (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null
-                Start-Sleep -Milliseconds 400
+                # 调用进程不是前台时 AppActivate 常被前台锁拒绝（前台是桌面/别的程序）：
+                # 先点一下 Alt 取得授权，再 SetForegroundWindow，最多重试 3 次。
+                for ($try = 0; $try -lt 3 -and [SmokeWin32]::ForegroundPid() -ne $proc.Id; $try++) {
+                    (New-Object -ComObject WScript.Shell).AppActivate($proc.Id) | Out-Null
+                    Start-Sleep -Milliseconds 250
+                    if ([SmokeWin32]::ForegroundPid() -ne $proc.Id) {
+                        [SmokeWin32]::TapAlt()
+                        [SmokeWin32]::ShowWindow($h, 9) | Out-Null
+                        [SmokeWin32]::SetForegroundWindow($h) | Out-Null
+                        Start-Sleep -Milliseconds 400
+                    }
+                }
             }
             if ([SmokeWin32]::ForegroundPid() -ne $proc.Id) {
                 $skip = '前台窗口不属于本次启动的 wezterm，拒绝向其它程序发键（可加 -Activate）'
