@@ -1,12 +1,12 @@
 {
   "artifacts": {
-    "GRAPH_REPORT.md": "c3e69bc619c1a2b8b15c50c60f16dd58120697a249fab4e39189c717639eb64b",
-    "graph.json": "0b440dffeb982f75be88363b3e8e2746b77d77dc153f84d3310d5f09e809e3f8"
+    "GRAPH_REPORT.md": "c6e22306b28651a54a5fa1c68d70e6ba189afdb5867997487e9be22d098dfa2a",
+    "graph.json": "572c7f926ac75a528f39289593ee2b167c2b028239d3800109a361cfe55a2cb5"
   },
   "index_root": ".",
   "pipeline": {
     ".graphifyignore": "79bbd771655529edab1d222d22850bfea15775c3999ec7f9ed54f237a6c4cca0",
-    "scripts/graphify.sh": "47c8f48dd6b139791a30858d1f404d98256fd64798944de6986d2df2b3cf04bb",
+    "scripts/graphify.sh": "d5f70fabba602fe4b03ca6564f89cff8f7bebab704950b06c3517e0730875521",
     "scripts/graphify_fingerprint.py": "ad29abe16fa4f1ab9d70e1445fcb7fa546a87b00dbdeaa6439b6a5a034964f12"
   },
   "schema_version": 1,
@@ -17,7 +17,7 @@
       "wezterm-char-props/src/nerdfonts_data.rs",
       "wezterm-gui/src/unicode_names.rs"
     ],
-    "file_count": 456,
-    "sha256": "0131621f4a94e1626abfc693a30ae99773e3239f4968202b4b208afb13feac06"
+    "file_count": 457,
+    "sha256": "ff9a0346ef0d5f466926d00e29022d5c608eea0fcb501a29dbedf9685b6659e8"
   }
 }

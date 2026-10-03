@@ -9,7 +9,7 @@ ROOT="$(cd "${WRAPPER_DIR}/.." && pwd)"
 GRAPH_DIR="${ROOT}/graphify-out"
 GRAPH_JSON="${GRAPH_DIR}/graph.json"
 REPORT="${GRAPH_DIR}/GRAPH_REPORT.md"
-PINNED_VERSION="0.9.20"
+PINNED_VERSION="0.9.73"
 # 输出目录由项目控制，避免继承外部 GRAPHIFY_OUT。
 export GRAPHIFY_OUT=graphify-out
 
