@@ -632,8 +632,16 @@ impl Pane for QuickSelectOverlay {
                     self.renderer.dirty_results.remove(stable_idx);
                     if stable_idx == self.search_row {
                         // Replace with search UI
-                        let rev = CellAttributes::default().set_reverse(true).clone();
-                        line.fill_range(0..self.dims.cols, &Cell::new(' ', rev.clone()), SEQ_ZERO);
+                        // fork: colors.copy_mode_status_fg/bg, reverse video when unset
+                        let status_attr = crate::overlay::style::status_line_attrs(
+                            colors.copy_mode_status_bg,
+                            colors.copy_mode_status_fg,
+                        );
+                        line.fill_range(
+                            0..self.dims.cols,
+                            &Cell::new(' ', status_attr.clone()),
+                            SEQ_ZERO,
+                        );
                         line.overlay_text_with_attribute(
                             0,
                             &fill(
@@ -650,7 +658,7 @@ impl Pane for QuickSelectOverlay {
                                     ),
                                 ],
                             ),
-                            rev,
+                            status_attr,
                             SEQ_ZERO,
                         );
                         self.renderer.last_bar_pos = Some(self.search_row);
@@ -735,8 +743,12 @@ impl Pane for QuickSelectOverlay {
             renderer.dirty_results.remove(stable_idx);
             if stable_idx == search_row {
                 // Replace with search UI
-                let rev = CellAttributes::default().set_reverse(true).clone();
-                line.fill_range(0..dims.cols, &Cell::new(' ', rev.clone()), SEQ_ZERO);
+                // fork: colors.copy_mode_status_fg/bg, reverse video when unset
+                let status_attr = crate::overlay::style::status_line_attrs(
+                    colors.copy_mode_status_bg,
+                    colors.copy_mode_status_fg,
+                );
+                line.fill_range(0..dims.cols, &Cell::new(' ', status_attr.clone()), SEQ_ZERO);
                 line.overlay_text_with_attribute(
                     0,
                     &format!(
@@ -748,7 +760,7 @@ impl Pane for QuickSelectOverlay {
                             &renderer.args.label
                         },
                     ),
-                    rev,
+                    status_attr,
                     SEQ_ZERO,
                 );
                 renderer.last_bar_pos = Some(search_row);

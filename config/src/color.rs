@@ -175,6 +175,12 @@ pub struct Palette {
     pub copy_mode_mark_bg: Option<ColorSpec>,
     /// The foreground color for the copy mode mark cell.
     pub copy_mode_mark_fg: Option<ColorSpec>,
+    /// fork: background of the copy mode search status line and of the
+    /// quick select status line. When neither this nor
+    /// `copy_mode_status_fg` is set the line is shown in reverse video.
+    pub copy_mode_status_bg: Option<ColorSpec>,
+    /// fork: foreground of the copy mode / quick select status line.
+    pub copy_mode_status_fg: Option<ColorSpec>,
 
     pub quick_select_label_fg: Option<ColorSpec>,
     pub quick_select_label_bg: Option<ColorSpec>,
@@ -244,6 +250,8 @@ impl Palette {
             copy_mode_inactive_highlight_bg: overlay!(copy_mode_inactive_highlight_bg),
             copy_mode_mark_fg: overlay!(copy_mode_mark_fg),
             copy_mode_mark_bg: overlay!(copy_mode_mark_bg),
+            copy_mode_status_bg: overlay!(copy_mode_status_bg),
+            copy_mode_status_fg: overlay!(copy_mode_status_fg),
             quick_select_label_fg: overlay!(quick_select_label_fg),
             quick_select_label_bg: overlay!(quick_select_label_bg),
             quick_select_match_fg: overlay!(quick_select_match_fg),

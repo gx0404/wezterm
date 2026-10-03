@@ -4,11 +4,12 @@
 //! 用 termwiz `Change` 序列描述；本模块把「加粗标题行 + 分隔线」与
 //! 「选中行底色 + 左侧强调条」收敛成纯函数供各浮层共用，单测锁定序列。
 //! 选中行颜色取 `colors.overlay_selected_bg/fg`：两者都未配置时保持
-//! 上游的整行反色，默认视觉不变。
+//! 上游的整行反色，默认视觉不变。copy mode / quickselect 状态行的配色
+//! 选择（`colors.copy_mode_status_fg/bg`）同样收在这里。
 //! 边界：只产出 `Change`，不持有状态、不碰终端；行号↔条目映射也在这里，
 //! 保证渲染与鼠标命中对「标题占几行」的认知一致。
 
-use config::{ConfigHandle, RgbaColor};
+use config::{ColorSpec, ConfigHandle, RgbaColor};
 use termwiz::cell::{unicode_column_width, AttributeChange, CellAttributes, Intensity};
 use termwiz::color::ColorAttribute;
 use termwiz::surface::{Change, Position, SEQ_ZERO};
@@ -244,6 +245,24 @@ pub fn entry_at_row(y: usize, top_row: usize, num_entries: usize) -> Option<usiz
     (idx < num_entries).then_some(idx)
 }
 
+/// copy mode 搜索状态行与 quickselect 状态行的单元格属性：配了
+/// `colors.copy_mode_status_fg/bg` 就用（缺的一项保持终端默认色），
+/// 两者都未配置时保持上游的整行反色
+pub fn status_line_attrs(bg: Option<ColorSpec>, fg: Option<ColorSpec>) -> CellAttributes {
+    let mut attr = CellAttributes::default();
+    if bg.is_none() && fg.is_none() {
+        attr.set_reverse(true);
+    } else {
+        if let Some(bg) = bg {
+            attr.set_background(bg);
+        }
+        if let Some(fg) = fg {
+            attr.set_foreground(fg);
+        }
+    }
+    attr
+}
+
 fn bold() -> CellAttributes {
     CellAttributes::default()
         .set_intensity(Intensity::Bold)
@@ -432,5 +451,23 @@ mod tests {
         assert_eq!(entry_at_row(3, 4, 6), Some(5));
         // 越过最后一个条目不命中
         assert_eq!(entry_at_row(4, 4, 6), None);
+    }
+
+    #[test]
+    fn status_line_defaults_to_reverse_video() {
+        let attr = status_line_attrs(None, None);
+        assert!(attr.reverse());
+        assert_eq!(attr.background(), ColorAttribute::Default);
+
+        let bg = ColorSpec::Color(rgb(0x31, 0x32, 0x44));
+        let attr = status_line_attrs(Some(bg), None);
+        assert!(!attr.reverse());
+        assert_eq!(attr.background(), ColorAttribute::from(bg));
+        assert_eq!(attr.foreground(), ColorAttribute::Default);
+
+        let fg = ColorSpec::AnsiColor(config::AnsiColor::Yellow);
+        let attr = status_line_attrs(Some(bg), Some(fg));
+        assert!(!attr.reverse());
+        assert_eq!(attr.foreground(), ColorAttribute::from(fg));
     }
 }

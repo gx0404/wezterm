@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
-use termwiz::cell::{Cell, CellAttributes};
+use termwiz::cell::Cell;
 use termwiz::color::AnsiColor;
 use termwiz::lineedit::{LineEditBuffer, Movement};
 use termwiz::surface::{CursorVisibility, SequenceNo, SEQ_ZERO};
@@ -1651,8 +1651,16 @@ impl Pane for CopyOverlay {
                         && (self.renderer.editing_search || !pattern.is_empty())
                     {
                         // Replace with search UI
-                        let rev = CellAttributes::default().set_reverse(true).clone();
-                        line.fill_range(0..self.dims.cols, &Cell::new(' ', rev.clone()), SEQ_ZERO);
+                        // fork: colors.copy_mode_status_fg/bg, reverse video when unset
+                        let status_attr = crate::overlay::style::status_line_attrs(
+                            colors.copy_mode_status_bg,
+                            colors.copy_mode_status_fg,
+                        );
+                        line.fill_range(
+                            0..self.dims.cols,
+                            &Cell::new(' ', status_attr.clone()),
+                            SEQ_ZERO,
+                        );
                         let mode = &match pattern {
                             Pattern::CaseSensitiveString(_) => tr("case-sensitive").into_owned(),
                             Pattern::CaseInSensitiveString(_) => tr("ignore-case").into_owned(),
@@ -1688,7 +1696,7 @@ impl Pane for CopyOverlay {
                                     ("remain", &remain),
                                 ],
                             ),
-                            rev,
+                            status_attr,
                             SEQ_ZERO,
                         );
                         self.renderer.last_bar_pos = Some(self.search_row);
@@ -1795,8 +1803,12 @@ impl Pane for CopyOverlay {
             let pattern = renderer.get_pattern();
             if stable_idx == search_row && (renderer.editing_search || !pattern.is_empty()) {
                 // Replace with search UI
-                let rev = CellAttributes::default().set_reverse(true).clone();
-                line.fill_range(0..dims.cols, &Cell::new(' ', rev.clone()), SEQ_ZERO);
+                // fork: colors.copy_mode_status_fg/bg, reverse video when unset
+                let status_attr = crate::overlay::style::status_line_attrs(
+                    colors.copy_mode_status_bg,
+                    colors.copy_mode_status_fg,
+                );
+                line.fill_range(0..dims.cols, &Cell::new(' ', status_attr.clone()), SEQ_ZERO);
                 let mode = match pattern {
                     Pattern::CaseSensitiveString(_) => tr("case-sensitive").into_owned(),
                     Pattern::CaseInSensitiveString(_) => tr("ignore-case").into_owned(),
@@ -1817,7 +1829,7 @@ impl Pane for CopyOverlay {
                             ("mode", &mode),
                         ],
                     ),
-                    rev,
+                    status_attr,
                     SEQ_ZERO,
                 );
                 renderer.last_bar_pos = Some(search_row);
