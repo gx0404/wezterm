@@ -83,6 +83,10 @@ Lua gui 命名空间。平台窗口与事件抽象在 platform-window 域（`win
 - 统计记录器（fork）：`stats::Stats::init` 只在 `config::common_init` 之后、
   `periodic_stat_logging > 0` 时安装；未安装时 `metrics::*!` 宏是 no-op，热路径不加
   锁。新增统计点不要假设 recorder 一定存在；从 0 改非 0 需重启 GUI。
+- IME 预编辑光标（fork）：整段预编辑块的画法不变；`Composing.cursor` 为 Some 时
+  `render_screen_line` 的光标段在 `cursor.x + cursor` 列额外画一条细光标（layer 2，
+  夹在预编辑与行宽内）。光标列只进 `LineQuadCacheKey::composing_cursor`，不得进
+  `LineToEleShapeCacheKey`，以免移动光标触发重新 shaping。
 - **纹理耗尽降级链**：`AllowImage::Yes→Scale(2/4/8)→No`；新图像路径要接进
   该链而不是自行吞错。
 - **wezterm.gui 只在 GUI 进程注册**（window-funcs crate 由 main.rs 单独

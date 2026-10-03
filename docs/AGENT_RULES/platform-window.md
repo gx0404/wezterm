@@ -59,6 +59,11 @@
   按 MSDN 返回 TRUE；按住状态只取 wparam 低字（`mouse_buttons_from_wparam`），高字
   是发生变化的 X 键或滚轮增量；`WM_NCXBUTTON*` 不处理。其它平台目前不产生侧键
   按下事件（macOS 只置 `MouseButtons::X1/X2` 位；Wayland 的穷举 match 已补分支）。
+- IME 预编辑（fork）：`DeadKeyStatus::Composing { text, cursor }` 的 `cursor` 是
+  `text` 内的终端列偏移（不是字节或 UTF-16 单元），平台不提供时为 None。Windows 由
+  `ImmContext::composing_status` 读 `GCS_CURSORPOS`，经 `utf16_offset_to_columns`
+  换算（列宽规则与 GUI 一致，只为此在 Windows 目标依赖 `wezterm-cell` 的
+  `unicode_column_width`，不引入 Cell/Grid 模型）；x11、wayland、macOS 目前为 None。
 - 纹理契约：`window/src/bitmaps/atlas.rs::Atlas`（`allocate()` 失败给
   `OutOfTextureSpace`）+ `bitmaps/mod.rs::Texture2d` trait——GUI 的 atlas
   降级链依赖该契约。

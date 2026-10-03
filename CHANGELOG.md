@@ -132,6 +132,10 @@
   xterm 按钮 8/9 上报（SGR 码 128/129，拖动 160/161，X10 与 1005 UTF-8 编码与 xterm 一致）。
   经 mux 客户端连接的远端 pane 与 termwiz 浮层不转发侧键（对端可能是上游 codec 45 的 server）；
   X11/Wayland/macOS 暂不产生侧键事件。文档见 `docs/config/mouse.md`。
+- Windows 内置 IME 预编辑（`ime_preedit_rendering = "Builtin"`）按 IME 报告的光标位置
+  （`GCS_CURSORPOS`）在预编辑块内画一条细光标，在预编辑里用方向键移动时能看到位置；
+  `DeadKeyStatus::Composing` 改为携带 `{ text, cursor }`（`cursor` 为预编辑串内的列偏移，
+  其它平台为 None、行为不变）。
 - dotfiles：`events/status.lua` 的 `setup` 新增可选项 `integrated_hides_tab_bar`（默认 false），
   为 true 时集成标题栏按钮模式下 herdr 应用模式仍可隐藏标签栏。
 - Windows UI 冒烟脚本 `scripts/ui_smoke_windows.ps1` 新增 `launcher` 与 `copy-mode` 两个浮层页面
