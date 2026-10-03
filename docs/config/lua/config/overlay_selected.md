@@ -10,15 +10,20 @@ tags:
 Fork addition: colors of the selected row in the text overlays — the
 [Launcher](../keyassignment/ShowLauncherArgs.md),
 [InputSelector](../keyassignment/InputSelector.md) and the
-[Confirmation](../keyassignment/Confirmation.md) buttons.
+[Confirmation](../keyassignment/Confirmation.md) buttons — and in
+[CharSelect](../keyassignment/CharSelect.md).
 
 When either color is set, the selected row is painted with the
 `overlay_selected_bg` background across the full width of the overlay,
 and a `▌` accent bar in the `overlay_selected_fg` color is drawn at its
 left edge. A color that is left unset falls back to the terminal default.
 
+In CharSelect the selected row gets the `overlay_selected_bg` background
+and an accent bar in the `overlay_selected_fg` color (falling back to
+[char_select_fg_color](char_select_fg_color.md)) at its left edge.
+
 When neither color is set, the selected row keeps the historical
-reverse video style.
+reverse video style (in CharSelect: foreground and background swapped).
 
 These overlays also render their title line in bold, followed by a
 dimmed separator line.

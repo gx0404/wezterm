@@ -13,6 +13,9 @@ use mux::Mux;
 use std::cell::{Ref, RefCell};
 use wezterm_term::{KeyCode, KeyModifiers};
 
+// fork: a fixed corner radius that does not grow with the font size
+const CORNER_RADIUS: Dimension = Dimension::Pixels(6.);
+
 pub struct PaneSelector {
     element: RefCell<Option<Vec<ComputedElement>>>,
     labels: RefCell<Vec<String>>,
@@ -98,23 +101,23 @@ impl PaneSelector {
                 .border(BoxDimension::new(Dimension::Pixels(1.)))
                 .border_corners(Some(Corners {
                     top_left: SizedPoly {
-                        width: Dimension::Cells(0.25),
-                        height: Dimension::Cells(0.25),
+                        width: CORNER_RADIUS,
+                        height: CORNER_RADIUS,
                         poly: TOP_LEFT_ROUNDED_CORNER,
                     },
                     top_right: SizedPoly {
-                        width: Dimension::Cells(0.25),
-                        height: Dimension::Cells(0.25),
+                        width: CORNER_RADIUS,
+                        height: CORNER_RADIUS,
                         poly: TOP_RIGHT_ROUNDED_CORNER,
                     },
                     bottom_left: SizedPoly {
-                        width: Dimension::Cells(0.25),
-                        height: Dimension::Cells(0.25),
+                        width: CORNER_RADIUS,
+                        height: CORNER_RADIUS,
                         poly: BOTTOM_LEFT_ROUNDED_CORNER,
                     },
                     bottom_right: SizedPoly {
-                        width: Dimension::Cells(0.25),
-                        height: Dimension::Cells(0.25),
+                        width: CORNER_RADIUS,
+                        height: CORNER_RADIUS,
                         poly: BOTTOM_RIGHT_ROUNDED_CORNER,
                     },
                 }));

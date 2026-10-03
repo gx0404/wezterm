@@ -25,6 +25,36 @@ use termwiz::input::Modifiers;
 use wezterm_term::{KeyCode, KeyModifiers};
 use window::color::LinearRgba;
 
+// fork: a fixed corner radius that does not grow with the font size
+const CORNER_RADIUS: Dimension = Dimension::Pixels(6.);
+
+// fork: width of the accent bar drawn left of the selected row when
+// `colors.overlay_selected_*` is configured
+const ACCENT_BAR_WIDTH: Dimension = Dimension::Pixels(3.);
+
+/// fork: colors of one CharSelect row as `(bg, text, accent bar)`.
+/// Without `overlay_selected_bg/fg` the selected row swaps the
+/// foreground and background colors, as upstream does; with either of
+/// them set it gets its own background plus an accent bar instead.
+fn row_colors(
+    selected: bool,
+    fg: LinearRgba,
+    bg: LinearRgba,
+    selected_bg: Option<LinearRgba>,
+    selected_accent: Option<LinearRgba>,
+) -> (LinearRgba, LinearRgba, Option<LinearRgba>) {
+    let highlight = selected_bg.is_some() || selected_accent.is_some();
+    match (selected, highlight) {
+        (false, _) => (LinearRgba::TRANSPARENT, fg, None),
+        (true, false) => (fg, bg, None),
+        (true, true) => (
+            selected_bg.unwrap_or(LinearRgba::TRANSPARENT),
+            fg,
+            Some(selected_accent.unwrap_or(fg)),
+        ),
+    }
+}
+
 struct MatchResults {
     selection: String,
     matches: Vec<usize>,
@@ -429,6 +459,11 @@ impl CharSelector {
         })
         .display(DisplayType::Block)];
 
+        let palette = &term_window.config.resolved_palette;
+        let selected_bg = palette.overlay_selected_bg.map(|c| c.to_linear());
+        let selected_accent = palette.overlay_selected_fg.map(|c| c.to_linear());
+        let highlight = selected_bg.is_some() || selected_accent.is_some();
+
         for (display_idx, alias) in matches
             .matches
             .iter()
@@ -437,46 +472,59 @@ impl CharSelector {
             .skip(top_row)
             .take(max_rows_on_screen)
         {
-            let (bg, text) = if display_idx == selected_row {
-                (
-                    term_window.config.char_select_fg_color.to_linear().into(),
-                    term_window.config.char_select_bg_color.to_linear().into(),
-                )
-            } else {
-                (
-                    LinearRgba::TRANSPARENT.into(),
-                    term_window.config.char_select_fg_color.to_linear().into(),
-                )
-            };
-            elements.push(
-                Element::new(
-                    &font,
-                    ElementContent::Text(format!(
-                        "{} {} ({})",
-                        alias.glyph(),
-                        alias.name(),
-                        alias.codepoints()
-                    )),
-                )
-                .colors(ElementColors {
-                    border: BorderColor::default(),
-                    bg,
-                    text,
-                })
-                .padding(BoxDimension {
-                    left: Dimension::Cells(0.25),
-                    right: Dimension::Cells(0.25),
-                    top: Dimension::Cells(0.),
-                    bottom: Dimension::Cells(0.),
-                })
-                .display(DisplayType::Block),
+            let (bg, text, accent) = row_colors(
+                display_idx == selected_row,
+                term_window.config.char_select_fg_color.to_linear(),
+                term_window.config.char_select_bg_color.to_linear(),
+                selected_bg,
+                selected_accent,
             );
+            let mut row = Element::new(
+                &font,
+                ElementContent::Text(format!(
+                    "{} {} ({})",
+                    alias.glyph(),
+                    alias.name(),
+                    alias.codepoints()
+                )),
+            )
+            .colors(ElementColors {
+                border: BorderColor {
+                    left: accent.unwrap_or(LinearRgba::TRANSPARENT),
+                    ..BorderColor::default()
+                },
+                bg: bg.into(),
+                text: text.into(),
+            })
+            .padding(BoxDimension {
+                left: Dimension::Cells(0.25),
+                right: Dimension::Cells(0.25),
+                top: Dimension::Cells(0.),
+                bottom: Dimension::Cells(0.),
+            })
+            .display(DisplayType::Block);
+            if highlight {
+                // Every row reserves the accent bar width so that the
+                // selected row does not shift horizontally
+                row = row.border(BoxDimension {
+                    left: ACCENT_BAR_WIDTH,
+                    right: Dimension::Pixels(0.),
+                    top: Dimension::Pixels(0.),
+                    bottom: Dimension::Pixels(0.),
+                });
+            }
+            elements.push(row);
         }
 
         let element = Element::new(&font, ElementContent::Children(elements))
             .colors(ElementColors {
                 border: BorderColor::new(
-                    term_window.config.char_select_bg_color.to_linear().into(),
+                    term_window
+                        .config
+                        .char_select_border_color
+                        .unwrap_or(term_window.config.char_select_bg_color)
+                        .to_linear()
+                        .into(),
                 ),
                 bg: term_window.config.char_select_bg_color.to_linear().into(),
                 text: term_window.config.char_select_fg_color.to_linear().into(),
@@ -496,23 +544,23 @@ impl CharSelector {
             .border(BoxDimension::new(Dimension::Pixels(1.)))
             .border_corners(Some(Corners {
                 top_left: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
+                    width: CORNER_RADIUS,
+                    height: CORNER_RADIUS,
                     poly: TOP_LEFT_ROUNDED_CORNER,
                 },
                 top_right: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
+                    width: CORNER_RADIUS,
+                    height: CORNER_RADIUS,
                     poly: TOP_RIGHT_ROUNDED_CORNER,
                 },
                 bottom_left: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
+                    width: CORNER_RADIUS,
+                    height: CORNER_RADIUS,
                     poly: BOTTOM_LEFT_ROUNDED_CORNER,
                 },
                 bottom_right: SizedPoly {
-                    width: Dimension::Cells(0.25),
-                    height: Dimension::Cells(0.25),
+                    width: CORNER_RADIUS,
+                    height: CORNER_RADIUS,
                     poly: BOTTOM_RIGHT_ROUNDED_CORNER,
                 },
             }));
@@ -754,5 +802,42 @@ impl Modal for CharSelector {
 
     fn reconfigure(&self, _term_window: &mut TermWindow) {
         self.element.borrow_mut().take();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FG: LinearRgba = LinearRgba(0.75, 0.75, 0.75, 1.0);
+    const BG: LinearRgba = LinearRgba(0.03, 0.03, 0.03, 1.0);
+    const SEL: LinearRgba = LinearRgba(0.1, 0.1, 0.2, 1.0);
+    const ACCENT: LinearRgba = LinearRgba(0.2, 0.4, 0.9, 1.0);
+
+    #[test]
+    fn selected_row_swaps_colors_without_overlay_selected() {
+        assert_eq!(row_colors(true, FG, BG, None, None), (FG, BG, None));
+        assert_eq!(
+            row_colors(false, FG, BG, None, None),
+            (LinearRgba::TRANSPARENT, FG, None)
+        );
+    }
+
+    #[test]
+    fn overlay_selected_gives_highlight_and_accent() {
+        assert_eq!(
+            row_colors(true, FG, BG, Some(SEL), Some(ACCENT)),
+            (SEL, FG, Some(ACCENT))
+        );
+        // A missing accent color falls back to the text color
+        assert_eq!(
+            row_colors(true, FG, BG, Some(SEL), None),
+            (SEL, FG, Some(FG))
+        );
+        // Unselected rows stay transparent and carry no accent
+        assert_eq!(
+            row_colors(false, FG, BG, Some(SEL), Some(ACCENT)),
+            (LinearRgba::TRANSPARENT, FG, None)
+        );
     }
 }

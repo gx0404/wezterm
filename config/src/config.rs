@@ -156,6 +156,11 @@ pub struct Config {
     #[dynamic(default = "default_char_select_bg_color")]
     pub char_select_bg_color: RgbaColor,
 
+    /// fork: border color of the CharSelect box. When unset the border
+    /// uses `char_select_bg_color` and is therefore invisible.
+    #[dynamic(default)]
+    pub char_select_border_color: Option<RgbaColor>,
+
     /// Font to use for ActivateCommandPalette
     #[dynamic(default)]
     pub command_palette_font: Option<TextStyle>,
@@ -2370,6 +2375,42 @@ fn validate_line_height(value: &f64) -> Result<(), String> {
         ))
     } else {
         Ok(())
+    }
+}
+
+// fork: defaults and strict validation of the overlay, scroll bar and
+// split appearance options
+#[cfg(test)]
+mod overlay_chrome_tests {
+    use super::*;
+    use wezterm_dynamic::{FromDynamicOptions, UnknownFieldAction, Value};
+
+    fn parse(key: &str, value: Value) -> Result<Config, wezterm_dynamic::Error> {
+        let mut obj = std::collections::BTreeMap::new();
+        obj.insert(Value::String(key.into()), value);
+        Config::from_dynamic(
+            &Value::Object(obj.into()),
+            FromDynamicOptions {
+                unknown_fields: UnknownFieldAction::Deny,
+                deprecated_fields: UnknownFieldAction::Warn,
+            },
+        )
+    }
+
+    #[test]
+    fn char_select_border_color_defaults_to_unset() {
+        assert_eq!(Config::default_config().char_select_border_color, None);
+        let cfg = parse("char_select_border_color", Value::String("#45475a".into()))
+            .expect("valid color");
+        assert_eq!(
+            cfg.char_select_border_color,
+            Some((0x45, 0x47, 0x5a).into())
+        );
+        assert!(parse(
+            "char_select_border_color",
+            Value::String("not-a-color".into())
+        )
+        .is_err());
     }
 }
 

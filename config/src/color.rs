@@ -194,9 +194,9 @@ pub struct Palette {
     pub launcher_label_bg: Option<ColorSpec>,
 
     /// fork: background of the selected row in the launcher,
-    /// InputSelector and confirmation overlays. When neither this nor
-    /// `overlay_selected_fg` is set, the selected row keeps the
-    /// historical reverse video style.
+    /// InputSelector and confirmation overlays and in CharSelect. When
+    /// neither this nor `overlay_selected_fg` is set, the selected row
+    /// keeps the historical reverse video style.
     pub overlay_selected_bg: Option<RgbaColor>,
     /// fork: color of the accent bar drawn at the left edge of the
     /// selected overlay row.
