@@ -208,18 +208,7 @@ impl ScreenInfoHelper {
             mi.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
             GetMonitorInfoW(mon, &mut mi as *mut MONITORINFOEXW as *mut MONITORINFO);
 
-            let mut devmode: DEVMODEW = std::mem::zeroed();
-            devmode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
-            let max_fps =
-                if EnumDisplaySettingsW(mi.szDevice.as_ptr(), ENUM_CURRENT_SETTINGS, &mut devmode)
-                    != 0
-                    && (devmode.dmFields & DM_DISPLAYFREQUENCY) != 0
-                    && devmode.dmDisplayFrequency > 1
-                {
-                    Some(devmode.dmDisplayFrequency as usize)
-                } else {
-                    None
-                };
+            let max_fps = display_refresh_rate(&mi).map(|hz| hz as usize);
 
             let monitor_name = info.monitor_name(&mi);
 
@@ -310,6 +299,38 @@ impl ScreenInfoHelper {
 
             monitor_name
         }
+    }
+}
+
+/// fork: 读取显示器当前模式的刷新率（Hz）。驱动给的 0/1 是「默认/未知」
+/// 占位值，与读取失败一样按 None 处理，由调用方回退 max_fps
+pub(crate) fn display_refresh_rate(mi: &MONITORINFOEXW) -> Option<u32> {
+    unsafe {
+        let mut devmode: DEVMODEW = std::mem::zeroed();
+        devmode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+        if EnumDisplaySettingsW(mi.szDevice.as_ptr(), ENUM_CURRENT_SETTINGS, &mut devmode) != 0
+            && (devmode.dmFields & DM_DISPLAYFREQUENCY) != 0
+            && devmode.dmDisplayFrequency > 1
+        {
+            Some(devmode.dmDisplayFrequency)
+        } else {
+            None
+        }
+    }
+}
+
+/// fork: 按 HMONITOR 读取刷新率；mon 为空或 GetMonitorInfoW 失败时为 None
+pub(crate) fn monitor_refresh_rate(mon: HMONITOR) -> Option<u32> {
+    if mon.is_null() {
+        return None;
+    }
+    unsafe {
+        let mut mi: MONITORINFOEXW = std::mem::zeroed();
+        mi.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+        if GetMonitorInfoW(mon, &mut mi as *mut MONITORINFOEXW as *mut MONITORINFO) == 0 {
+            return None;
+        }
+        display_refresh_rate(&mi)
     }
 }
 

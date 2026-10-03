@@ -879,6 +879,15 @@ pub struct Config {
     #[dynamic(default = "default_max_fps")]
     pub max_fps: u64,
 
+    /// fork: 为 true 时帧率上限跟随窗口所在显示器的刷新率（跨显示器拖动、
+    /// 显示模式变化时重新读取），读不到刷新率时回退 `max_fps`；目前仅
+    /// Windows 实现，其它平台忽略。
+    /// When enabled, the repaint rate cap follows the refresh rate of the
+    /// monitor the window is on, falling back to `max_fps` when the rate
+    /// cannot be determined. Currently implemented on Windows only.
+    #[dynamic(default)]
+    pub max_fps_follows_display: bool,
+
     #[dynamic(default = "default_shape_cache_size")]
     pub shape_cache_size: usize,
     #[dynamic(default = "default_line_state_cache_size")]

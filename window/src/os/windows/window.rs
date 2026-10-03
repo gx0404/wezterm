@@ -131,6 +131,10 @@ pub(crate) struct WindowInner {
     config: ConfigHandle,
     paint_throttled: bool,
     invalidated: bool,
+    /// fork: 窗口当前所在显示器及其刷新率，供 max_fps_follows_display
+    /// 决定帧间隔；在创建后、WM_DISPLAYCHANGE 与跨显示器移动时刷新
+    monitor: HMONITOR,
+    monitor_refresh_hz: Option<u32>,
     /// fork: 首帧 present 之前不执行 ShowWindow，避免 DWM 合成未初始化的
     /// 表面产生白帧；挂起的 show 命令存在 pending_show，兜底定时器由
     /// show_fallback_armed 保证只装一次
@@ -296,10 +300,39 @@ impl WindowInner {
         }
     }
 
+    /// fork: 记录窗口所在显示器与刷新率。force 为 false 时仅在显示器句柄
+    /// 变化（跨显示器移动）后重新读取；WM_DISPLAYCHANGE 等模式变化须 force
+    fn refresh_monitor_info(&mut self, force: bool) {
+        let mon = unsafe { MonitorFromWindow(self.hwnd.0, MONITOR_DEFAULTTONEAREST) };
+        if !force && mon == self.monitor {
+            return;
+        }
+        self.monitor = mon;
+        self.monitor_refresh_hz = super::connection::monitor_refresh_rate(mon);
+        log::trace!(
+            "window {:?} now on monitor {:?} refresh={:?}Hz",
+            self.hwnd,
+            mon,
+            self.monitor_refresh_hz
+        );
+    }
+
+    /// 本窗口当前生效的最小帧间隔
+    fn frame_interval(&self) -> std::time::Duration {
+        effective_frame_interval(
+            self.config.max_fps,
+            self.config.max_fps_follows_display,
+            self.monitor_refresh_hz,
+        )
+    }
+
     /// Check if we need to generate a resize callback.
     /// Calls resize if needed.
     /// Returns true if we did.
     fn check_and_call_resize_if_needed(&mut self) -> bool {
+        // 窗口移动/尺寸变化都经此处，顺带检测是否换了显示器
+        self.refresh_monitor_info(false);
+
         /*
         if self.gl_state.is_none() {
             // Don't cache state or generate resize callbacks until
@@ -557,6 +590,8 @@ impl Window {
             config: config.clone(),
             paint_throttled: false,
             invalidated: true,
+            monitor: null_mut(),
+            monitor_refresh_hz: None,
             first_frame_presented: false,
             pending_show: None,
             show_fallback_armed: false,
@@ -578,10 +613,11 @@ impl Window {
             }
         };
         let window_handle = Window(hwnd);
-        inner
-            .borrow_mut()
-            .events
-            .assign_window(window_handle.clone());
+        {
+            let mut inner = inner.borrow_mut();
+            inner.events.assign_window(window_handle.clone());
+            inner.refresh_monitor_info(true);
+        }
 
         apply_theme(hwnd.0);
         enable_blur_behind(hwnd.0);
@@ -1819,6 +1855,110 @@ fn fill_unpresented_background(config: &ConfigHandle, hdc: HDC, rc: &RECT) {
     }
 }
 
+/// fork: 显示模式（分辨率/刷新率/显示器增减）变化后重新读取刷新率。
+/// 返回 None 让 DefWindowProc 照常处理
+unsafe fn wm_displaychange(
+    hwnd: HWND,
+    _msg: UINT,
+    _wparam: WPARAM,
+    _lparam: LPARAM,
+) -> Option<LRESULT> {
+    if let Some(inner) = rc_from_hwnd(hwnd) {
+        // 广播消息可能在别的分支持有借用时同步送达，借不到就留给下次
+        // 移动/尺寸变化时的 refresh_monitor_info(false) 兜底
+        if let Ok(mut inner) = inner.try_borrow_mut() {
+            inner.refresh_monitor_info(true);
+        }
+    }
+    None
+}
+
+/// 帧率上下限：0 会除零，超过 1000 已无意义且会让定时器空转
+const MIN_FPS: u64 = 1;
+const MAX_FPS: u64 = 1000;
+
+/// fork: 计算节流用的最小帧间隔。`follows_display` 打开且读到有效刷新率
+/// （>1Hz，0/1 是驱动的占位值）时用显示器刷新率，否则用 config.max_fps；
+/// 两者都 clamp 到 1..=1000。用浮点求倒数，避免整除毫秒把 60fps 截成
+/// 16ms（实际 62.5fps）、144fps 截成 6ms（166fps）
+pub(crate) fn effective_frame_interval(
+    config_max_fps: u64,
+    follows_display: bool,
+    monitor_hz: Option<u32>,
+) -> std::time::Duration {
+    let fps = match monitor_hz {
+        Some(hz) if follows_display && hz > 1 => hz as u64,
+        _ => config_max_fps,
+    };
+    let fps = fps.clamp(MIN_FPS, MAX_FPS);
+    std::time::Duration::from_secs_f64(1.0 / fps as f64)
+}
+
+#[cfg(test)]
+mod frame_interval_tests {
+    use super::effective_frame_interval;
+    use std::time::Duration;
+
+    fn close_to(actual: Duration, expected: Duration) -> bool {
+        let a = actual.as_secs_f64();
+        let e = expected.as_secs_f64();
+        (a - e).abs() < 1e-9
+    }
+
+    #[test]
+    fn uses_config_when_switch_is_off() {
+        let d = effective_frame_interval(60, false, Some(165));
+        assert!(close_to(d, Duration::from_secs_f64(1.0 / 60.0)), "{d:?}");
+    }
+
+    #[test]
+    fn follows_display_when_available() {
+        let d = effective_frame_interval(60, true, Some(165));
+        assert!(close_to(d, Duration::from_secs_f64(1.0 / 165.0)), "{d:?}");
+    }
+
+    #[test]
+    fn falls_back_to_config_when_display_rate_unknown() {
+        let d = effective_frame_interval(144, true, None);
+        assert!(close_to(d, Duration::from_secs_f64(1.0 / 144.0)), "{d:?}");
+    }
+
+    #[test]
+    fn placeholder_display_rates_are_ignored() {
+        for hz in [0, 1] {
+            let d = effective_frame_interval(60, true, Some(hz));
+            assert!(
+                close_to(d, Duration::from_secs_f64(1.0 / 60.0)),
+                "{hz}: {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn zero_config_fps_clamps_to_one_frame_per_second() {
+        let d = effective_frame_interval(0, false, None);
+        assert!(close_to(d, Duration::from_secs(1)), "{d:?}");
+    }
+
+    #[test]
+    fn huge_values_clamp_to_one_millisecond() {
+        let d = effective_frame_interval(u64::MAX, false, None);
+        assert!(close_to(d, Duration::from_millis(1)), "{d:?}");
+        let d = effective_frame_interval(60, true, Some(u32::MAX));
+        assert!(close_to(d, Duration::from_millis(1)), "{d:?}");
+    }
+
+    #[test]
+    fn interval_is_not_truncated_to_whole_milliseconds() {
+        // 1000/60 整除会得到 16ms；真实间隔应是 16.666…ms
+        let d = effective_frame_interval(60, false, None);
+        assert!(
+            d > Duration::from_millis(16) && d < Duration::from_millis(17),
+            "{d:?}"
+        );
+    }
+}
+
 unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> Option<LRESULT> {
     let inner = rc_from_hwnd(hwnd)?;
     let mut inner = inner.borrow_mut();
@@ -1857,9 +1997,9 @@ unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> 
 
     inner.paint_throttled = true;
     let window_id = inner.hwnd;
-    let max_fps = inner.config.max_fps;
+    let interval = inner.frame_interval();
     promise::spawn::spawn(async move {
-        async_io::Timer::after(std::time::Duration::from_millis(1000 / max_fps as u64)).await;
+        async_io::Timer::after(interval).await;
         Connection::with_window_inner(window_id, move |inner| {
             inner.paint_throttled = false;
             if inner.invalidated {
@@ -3180,6 +3320,7 @@ unsafe fn do_wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> 
             None
         }
         WM_SETTINGCHANGE | WM_DWMCOMPOSITIONCHANGED => apply_theme(hwnd),
+        WM_DISPLAYCHANGE => wm_displaychange(hwnd, msg, wparam, lparam),
         WM_IME_SETCONTEXT => ime_set_context(hwnd, msg, wparam, lparam),
         WM_IME_COMPOSITION => ime_composition(hwnd, msg, wparam, lparam),
         WM_IME_ENDCOMPOSITION => ime_end_composition(hwnd, msg, wparam, lparam),
