@@ -766,6 +766,118 @@ do
    check('skip_close.linux_upstream_default', load_general('linux').skip_close_confirmation_for_processes_named, nil)
 end
 
+-- Windows 字体文件探测（utils/font-files.lua）、终端字体回退链（config/fonts.lua）与
+-- 界面字体（config/appearance.lua）：回退项只在字体文件存在时加入。
+do
+   local font_files = require('utils.font-files')
+   local function env_of(values)
+      return function(name)
+         return values[name]
+      end
+   end
+   local gx_exe_dir = 'C:\\Users\\x\\AppData\\Local\\Programs\\GXShell\\wezterm'
+   local dirs = font_files.windows_font_dirs(
+      env_of({ SystemRoot = 'D:\\Win', LOCALAPPDATA = 'C:\\Users\\x\\AppData\\Local' }),
+      gx_exe_dir
+   )
+   check('font_dirs.count', #dirs, 3)
+   check('font_dirs.system', dirs[1], 'D:\\Win\\Fonts\\')
+   check('font_dirs.user', dirs[2], 'C:\\Users\\x\\AppData\\Local\\Microsoft\\Windows\\Fonts\\')
+   check('font_dirs.gx', dirs[3], 'C:\\Users\\x\\AppData\\Local\\Programs\\GXShell\\fonts\\')
+   dirs = font_files.windows_font_dirs(env_of({}), nil)
+   check('font_dirs.default_count', #dirs, 1)
+   check('font_dirs.default_system', dirs[1], 'C:\\Windows\\Fonts\\')
+   dirs = font_files.windows_font_dirs(error, nil)
+   check('font_dirs.getenv_error', #dirs, 1)
+
+   local present = {}
+   local function exists(path)
+      return present[path] == true
+   end
+   local dir_a, dir_b = 'C:\\Windows\\Fonts\\', 'C:\\Users\\x\\Fonts\\'
+   local function any_exists(name)
+      return font_files.any_exists({ dir_a, dir_b }, { name }, exists)
+   end
+   check('font_files.none', any_exists('msyh.ttc'), false)
+   present[dir_b .. 'msyh.ttc'] = true
+   check('font_files.second_dir', any_exists('msyh.ttc'), true)
+   check('font_files.other_name', any_exists('a.ttf'), false)
+
+   local function chain_of(files)
+      present = {}
+      for _, name in ipairs(files) do
+         present[dir_a .. name] = true
+      end
+      return font_files.ui_font_chain({ dir_a }, exists)
+   end
+   local chain = chain_of({ 'segoeuisb.ttf', 'msyh.ttc', 'seguiemj.ttf' })
+   check('ui_chain.full_count', #chain, 3)
+   check('ui_chain.semibold', chain[1].family .. ':' .. chain[1].weight, 'Segoe UI:DemiBold')
+   check('ui_chain.yahei_ui', chain[2], 'Microsoft YaHei UI')
+   check('ui_chain.emoji', chain[3], 'Segoe UI Emoji')
+   chain = chain_of({ 'segoeui.ttf' })
+   check('ui_chain.regular_only', #chain == 1 and chain[1].weight, 'Regular')
+   check('ui_chain.empty', #chain_of({}), 0)
+
+   -- 把平台伪装成 Windows、字体文件系统换成 files 清单，加载一个配置模块
+   local function load_windows(module_name, files)
+      local saved_platform, saved_readable = package.loaded['utils.platform'], font_files.readable
+      package.loaded['utils.platform'] =
+         { os = 'windows', is_win = true, is_linux = false, is_mac = false }
+      font_files.readable = function(path)
+         return files[path] == true
+      end
+      package.loaded[module_name] = nil
+      local loaded, options = pcall(require, module_name)
+      package.loaded[module_name] = nil
+      package.loaded['utils.platform'] = saved_platform
+      font_files.readable = saved_readable
+      check('windows_fonts.load.' .. module_name, loaded, true)
+      return loaded and options or { font = { font = {} }, window_frame = {} }
+   end
+   local function families_of(options)
+      local families = {}
+      for _, entry in ipairs(options.font.font) do
+         table.insert(families, entry.family)
+      end
+      return table.concat(families, '|')
+   end
+   local sys = (os.getenv('SystemRoot') or 'C:\\Windows') .. '\\Fonts\\'
+   local function in_sys(...)
+      local files = {}
+      for _, name in ipairs({ ... }) do
+         files[sys .. name] = true
+      end
+      return files
+   end
+
+   -- 终端字体回退链：JetBrainsMono NF → Noto Sans CJK SC → Segoe UI Emoji；
+   -- 微软雅黑只在找不到 Noto Sans CJK 文件时补进来（排在 emoji 前）
+   local noto, yahei, emoji = 'NotoSansCJK-Regular.ttc', 'msyh.ttc', 'seguiemj.ttf'
+   local base = 'JetBrainsMono NF|Noto Sans CJK SC'
+   local fonts = load_windows('config.fonts', in_sys(yahei, emoji))
+   check('fonts.win_without_noto', families_of(fonts), base .. '|Microsoft YaHei|Segoe UI Emoji')
+   fonts = load_windows('config.fonts', in_sys(noto, yahei, emoji))
+   check('fonts.win_with_noto', families_of(fonts), base .. '|Segoe UI Emoji')
+   check('fonts.win_no_system_fonts', families_of(load_windows('config.fonts', {})), base)
+   check('fonts.emoji_presentation', fonts.font.font[3].assume_emoji_presentation, true)
+   -- 与默认值相同的 freetype 目标不再显式设置
+   check('fonts.no_freetype_load_target', fonts.freetype_load_target, nil)
+   check('fonts.no_freetype_render_target', fonts.freetype_render_target, nil)
+
+   -- 界面字体：Windows 上有 Segoe UI 等字体文件才设置，一项都没有就保持上游默认
+   local ui = load_windows('config.appearance', in_sys('segoeuisb.ttf', yahei, emoji))
+   check('appearance_fonts.frame_font_first', ui.window_frame.font.font[1].family, 'Segoe UI')
+   check('appearance_fonts.frame_font_size', ui.window_frame.font_size, 10)
+   check('appearance_fonts.palette_font', ui.command_palette_font ~= nil, true)
+   check('appearance_fonts.char_select_font', ui.char_select_font ~= nil, true)
+   check('appearance_fonts.pane_select_font', ui.pane_select_font ~= nil, true)
+   ui = load_windows('config.appearance', {})
+   check('appearance_fonts.none_frame_font', ui.window_frame.font, nil)
+   check('appearance_fonts.none_frame_font_size', ui.window_frame.font_size, nil)
+   check('appearance_fonts.none_palette_font', ui.command_palette_font, nil)
+end
+
 -- 键位：Windows 与 Linux 同一套（除 Linux 专属的截图/AI 图片粘贴），不占裸 Alt，
 -- 不绑 Ctrl+B/C/V，翻页要 Shift。
 do

@@ -1,13 +1,27 @@
+local wezterm = require('wezterm')
 local platform = require('utils.platform')
 local backdrops = require('utils.backdrops')
 local colors = require('colors.custom')
+local font_files = require('utils.font-files')
 
 -- 各平台的渲染后端只在这里调整。GNOME X11 下优先稳定性；Windows 未经实机 A/B
 -- （paint 日志）前同样保持 OpenGL。WebGPU 仅在隔离配置中做 A/B 测试。
 ---@type table<PlatformType, 'WebGpu' | 'OpenGL' | 'Software'>
 local front_end = { linux = 'OpenGL', windows = 'OpenGL', mac = 'OpenGL' }
 
-return {
+-- 界面字体（标题栏、命令面板、字符选择、窗格选择）只在 Windows 设置：Segoe UI 半粗 →
+-- 微软雅黑 UI → Segoe UI Emoji，各项仅在字体文件存在时加入；一项都没有就保持上游默认。
+-- 终端正文字体在 config/fonts.lua，与这里无关。
+local ui_font = nil
+if platform.is_win then
+   local dirs = font_files.windows_font_dirs(os.getenv, wezterm.executable_dir)
+   local chain = font_files.ui_font_chain(dirs)
+   if #chain > 0 then
+      ui_font = wezterm.font_with_fallback(chain)
+   end
+end
+
+local options = {
    max_fps = 60,
    front_end = front_end[platform.os],
    underline_thickness = '1.5pt',
@@ -61,8 +75,8 @@ return {
    window_close_confirmation = 'AlwaysPrompt',
    window_frame = {
       active_titlebar_bg = '#090909',
-      -- font = fonts.font,
-      -- font_size = fonts.font_size,
+      font = ui_font,
+      font_size = ui_font and 10 or nil,
    },
    -- inactive_pane_hsb = {
    --    saturation = 0.9,
@@ -81,3 +95,11 @@ return {
       target = 'CursorColor',
    },
 }
+
+if ui_font then
+   options.command_palette_font = ui_font
+   options.char_select_font = ui_font
+   options.pane_select_font = ui_font
+end
+
+return options

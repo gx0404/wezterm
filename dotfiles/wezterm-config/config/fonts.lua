@@ -1,5 +1,6 @@
 local wezterm = require('wezterm')
 local platform = require('utils.platform')
+local font_files = require('utils.font-files')
 
 -- local font_family = 'Maple Mono NF'
 -- Windows：GDI/DirectWrite 对 "JetBrainsMono Nerd Font"（GDI legacy 族名）只认
@@ -29,17 +30,21 @@ if unifont then
    table.insert(fallback, { family = 'Unifont' })
 end
 
--- Windows 自带的中文与彩色 emoji 字体兜底（独立安装的 WezTerm 没有随包的 Noto CJK）；
--- 同样只在字体文件存在时加入。
+-- Windows 的彩色 emoji 与中文兜底，同样只在字体文件存在时加入。
+-- 回退链是 JetBrainsMono NF → Noto Sans CJK SC → Segoe UI Emoji：微软雅黑是比例字体，
+-- 字形风格与 Noto 不同，只在找不到 Noto Sans CJK 文件（独立安装的 WezTerm 没有随包的
+-- 那份）时才作为 CJK 兜底补进来，排在 emoji 之前。Noto 文件在系统字体目录、用户字体目录
+-- 或 GX Shell 安装包的 fonts 目录里任一处即可。
 if platform.is_win then
-   local ok, system_root = pcall(os.getenv, 'SystemRoot')
-   local fonts_dir = (ok and system_root or 'C:\\Windows') .. '\\Fonts\\'
-   for _, font in ipairs({ { 'msyh.ttc', 'Microsoft YaHei' }, { 'seguiemj.ttf', 'Segoe UI Emoji' } }) do
-      local file = io.open(fonts_dir .. font[1], 'rb')
-      if file then
-         file:close()
-         table.insert(fallback, { family = font[2] })
-      end
+   local dirs = font_files.windows_font_dirs(os.getenv, wezterm.executable_dir)
+   if
+      not font_files.any_exists(dirs, font_files.NOTO_CJK_FILES)
+      and font_files.any_exists(dirs, { 'msyh.ttc' })
+   then
+      table.insert(fallback, { family = 'Microsoft YaHei' })
+   end
+   if font_files.any_exists(dirs, { 'seguiemj.ttf' }) then
+      table.insert(fallback, { family = 'Segoe UI Emoji', assume_emoji_presentation = true })
    end
 end
 
@@ -51,8 +56,4 @@ end
 return {
    font = wezterm.font_with_fallback(fallback),
    font_size = font_size,
-
-   --ref: https://wezfurlong.org/wezterm/config/lua/config/freetype_pcf_long_family_names.html#why-doesnt-wezterm-use-the-distro-freetype-or-match-its-configuration
-   freetype_load_target = 'Normal', ---@type 'Normal'|'Light'|'Mono'|'HorizontalLcd'
-   freetype_render_target = 'Normal', ---@type 'Normal'|'Light'|'Mono'|'HorizontalLcd'
 }
