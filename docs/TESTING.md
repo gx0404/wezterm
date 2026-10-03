@@ -93,6 +93,16 @@ cargo nextest run --locked -p wezterm-escape-parser
    失败→ `status: FAIL` 并保留截图，修复后**另开批次**复测。
 5. 手动配色截图（上游流程）：`ci/make-color-screen-shots.sh`（xwininfo
    选窗 + ImageMagick），产物进 `docs/colorschemes/`，属上游文档链。
+6. Windows 性能探针（不进 CI，真实桌面窗口，运行期间别动键鼠）：
+   `pwsh -File scripts/perf_probe_windows.ps1 -Out <批次目录> -Scenario
+   idle|cat|loop|scroll|spinner [-Seconds 60] [-MaxFps <n>|follow] [-Exe ..]
+   [-ConfigFile ..|-NoConfig]`。以 `periodic_stat_logging=10` 启动，输出
+   `metrics-<场景>-<fps>.txt`（stderr 原文）、`cpu-<场景>.csv`（wezterm-gui 与其
+   子进程树的 CPU，按逻辑核数归一）、`gpu-engine-<场景>.csv`（GPU Engine 计数器）、
+   `gpu-<场景>.txt`（nvidia-smi pmon 原文，WDDM 下常无数值）与
+   `summary-<场景>.json`（绘制速率/时延、各缓存命中/未命中、atlas 分配失败率、
+   CPU/GPU 均值）。同名输出已存在时拒绝覆盖；批次 result.json 的 `probes`
+   登记各场景。性能对比必须同一机器、同一配置、同一 `-MaxFps` 才有意义。
 
 ## CI（GX）
 
