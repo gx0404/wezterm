@@ -76,6 +76,15 @@ pub struct Config {
     #[dynamic(try_from = "crate::units::OptPixelUnit", default)]
     pub strikethrough_position: Option<Dimension>,
 
+    /// fork: thickness of the line drawn between split panes. When unset
+    /// the line uses the underline thickness, as it historically did.
+    #[dynamic(
+        try_from = "crate::units::OptPixelUnit",
+        default,
+        validate = "validate_opt_positive_dimension"
+    )]
+    pub split_thickness: Option<Dimension>,
+
     #[dynamic(default)]
     pub allow_square_glyphs_to_overflow_width: AllowSquareGlyphOverflow,
 
@@ -2412,6 +2421,11 @@ fn validate_positive_dimension(value: &Dimension) -> Result<(), String> {
     }
 }
 
+// fork: like `validate_positive_dimension`, but unset is allowed
+fn validate_opt_positive_dimension(value: &Option<Dimension>) -> Result<(), String> {
+    value.as_ref().map_or(Ok(()), validate_positive_dimension)
+}
+
 // fork: defaults and strict validation of the overlay, scroll bar and
 // split appearance options
 #[cfg(test)]
@@ -2461,6 +2475,17 @@ mod overlay_chrome_tests {
         assert!(parse("scroll_bar_thumb_width", Value::U64(0)).is_err());
         assert!(parse("scroll_bar_thumb_width", Value::String("-2px".into())).is_err());
         assert!(parse("scroll_bar_thumb_width", Value::String("thin".into())).is_err());
+    }
+
+    #[test]
+    fn split_thickness_defaults_to_unset_and_must_be_positive() {
+        assert_eq!(Config::default_config().split_thickness, None);
+        let cfg = parse("split_thickness", Value::U64(2)).expect("pixels");
+        assert_eq!(cfg.split_thickness, Some(Dimension::Pixels(2.)));
+        let cfg = parse("split_thickness", Value::String("1pt".into())).expect("points");
+        assert_eq!(cfg.split_thickness, Some(Dimension::Points(1.)));
+        assert!(parse("split_thickness", Value::U64(0)).is_err());
+        assert!(parse("split_thickness", Value::String("-1px".into())).is_err());
     }
 }
 
