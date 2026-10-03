@@ -10,7 +10,6 @@ use std::io::Error as IoError;
 use std::os::windows::ffi::OsStringExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::Path;
-use std::sync::Mutex;
 use std::{mem, ptr};
 use windows_sys::core::HRESULT;
 use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, S_OK};
@@ -166,8 +165,6 @@ impl PseudoCon {
         let _main_thread = unsafe { OwnedHandle::from_raw_handle(pi.hThread as _) };
         let proc = unsafe { OwnedHandle::from_raw_handle(pi.hProcess as _) };
 
-        Ok(WinChild {
-            proc: Mutex::new(proc),
-        })
+        Ok(WinChild::new(proc))
     }
 }
