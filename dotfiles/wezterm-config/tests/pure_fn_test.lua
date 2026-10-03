@@ -544,6 +544,30 @@ do
    text = flatten(titles.render_tab(opts, busy, { tab, busy }, false, 32, 1000))
    check('tab_title.unseen_hidden_when_active', text:find(box_two, 1, true), nil)
 
+   -- 未读计数缓存：同一秒内复用，到期/时钟回拨/窗格数变化重算
+   busy.is_active = false
+   local box_one = wezterm.nerdfonts.md_numeric_1_box_multiple
+   local fresh = fake_tab(4, 700, 'zsh', 'c')
+   fresh.panes = { { has_unseen_output = true }, { has_unseen_output = false } }
+   text = flatten(titles.render_tab(opts, fresh, { tab, busy, fresh }, false, 32, 2000))
+   check('tab_title.unseen_cache.first', text:find(box_one, 1, true) ~= nil, true)
+   fresh.panes[1].has_unseen_output = false
+   text = flatten(titles.render_tab(opts, fresh, { tab, busy, fresh }, false, 32, 2000))
+   check('tab_title.unseen_cache.hit_same_second', text:find(box_one, 1, true) ~= nil, true)
+   text = flatten(titles.render_tab(opts, fresh, { tab, busy, fresh }, false, 32, 2001))
+   check('tab_title.unseen_cache.expired', text:find(box_one, 1, true), nil)
+   fresh.panes[1].has_unseen_output = true
+   text = flatten(titles.render_tab(opts, fresh, { tab, busy, fresh }, false, 32, 2001))
+   check('tab_title.unseen_cache.hit_again', text:find(box_one, 1, true), nil)
+   text = flatten(titles.render_tab(opts, fresh, { tab, busy, fresh }, false, 32, 1990))
+   check('tab_title.unseen_cache.clock_back', text:find(box_one, 1, true) ~= nil, true)
+   fresh.panes[1].has_unseen_output = false
+   table.insert(fresh.panes, { has_unseen_output = false })
+   text = flatten(titles.render_tab(opts, fresh, { tab, busy, fresh }, false, 32, 1990))
+   check('tab_title.unseen_cache.pane_count_changed', text:find(box_one, 1, true), nil)
+   -- 临时 tab 用完即回收，不影响后面的跟踪计数
+   titles.render_tab(opts, busy, { tab, busy }, false, 32, 1000)
+
    -- 回收：只清同一窗口里已不在 tabs 的 tab，别的窗口的状态不受影响
    local extra = fake_tab(3, 700, 'zsh', 'a')
    local other, other_reads = fake_tab(9, 800, 'zsh', 'b')

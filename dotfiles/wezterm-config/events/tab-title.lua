@@ -86,6 +86,11 @@ local TITLE_INSET = {
 -- 窗格的前台进程名最多每隔这么多秒查一次。
 local PROBE_INTERVAL_S = 2
 
+-- 未读输出计数同样每帧被多次调用（量宽、绘制）。os.time() 只有秒级精度，TTL 取 1 秒
+-- 即「同一秒内的重复调用复用结果」，既覆盖同一帧的多次调用，又让未读标记最多滞后不到
+-- 1 秒；再长会让新输出的提示明显变慢，而遍历窗格本身很便宜，没必要缓存更久。
+local UNSEEN_TTL_S = 1
+
 -- fancy 标签栏自己画圆角标签和底色，标题只管文字，所以没有两端的半圆字形。
 local RENDER_VARIANTS = {
    { 'title', 'padding' },
@@ -251,6 +256,8 @@ end
 ---@field probe_at integer? 上次查前台进程名的时刻（os.time()）
 ---@field probe_pane_id number? 上次查的是哪个窗格
 ---@field probe_name string 上次查到的（已清洗的）前台进程名
+---@field unseen_at integer? 上次统计未读输出的时刻（os.time()）
+---@field unseen_pane_count integer? 上次统计时 tab 的窗格数（窗格增减立即重算）
 ---@field is_wsl boolean
 ---@field is_admin boolean
 ---@field unseen_output boolean
@@ -291,6 +298,22 @@ function Tab:probe_process_name(pane, now)
    return self.probe_name
 end
 
+---未读输出统计；UNSEEN_TTL_S 秒内且窗格数不变时复用上次结果。
+---@param panes any[]
+---@param now integer os.time()
+function Tab:refresh_unseen(panes, now)
+   if
+      self.unseen_at
+      and self.unseen_pane_count == #panes
+      and cache.still_fresh(self.unseen_at, now, UNSEEN_TTL_S)
+   then
+      return
+   end
+   self.unseen_at = now
+   self.unseen_pane_count = #panes
+   self.unseen_output, self.unseen_output_count = check_unseen_output(panes)
+end
+
 ---@param event_opts Event.TabTitleOptions
 ---@param tab any WezTerm TabInformation https://wezfurlong.org/wezterm/config/lua/TabInformation.html
 ---@param max_width number
@@ -306,11 +329,12 @@ function Tab:set_info(event_opts, tab, max_width, now)
    self.is_admin = (
       base_title:match('^Administrator: ') or base_title:match('(Admin)')
    ) ~= nil
-   self.unseen_output = false
-   self.unseen_output_count = 0
-
-   if not event_opts.hide_active_tab_unseen or not tab.is_active then
-      self.unseen_output, self.unseen_output_count = check_unseen_output(tab.panes)
+   if event_opts.hide_active_tab_unseen and tab.is_active then
+      self.unseen_output = false
+      self.unseen_output_count = 0
+      self.unseen_at = nil
+   else
+      self:refresh_unseen(tab.panes, now or os.time())
    end
 
    local inset = (self.is_admin or self.is_wsl) and TITLE_INSET.ICON or TITLE_INSET.DEFAULT
