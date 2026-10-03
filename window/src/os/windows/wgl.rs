@@ -1,9 +1,11 @@
 use super::*;
 use glium::backend::Backend;
+use std::cell::RefCell;
 use std::ffi::CStr;
 use std::io::Error as IoError;
 use std::os::raw::c_void;
 use std::ptr::{null, null_mut};
+use std::rc::Rc;
 use winapi::shared::windef::*;
 use winapi::um::libloaderapi::{GetModuleHandleW, *};
 use winapi::um::wingdi::*;
@@ -31,8 +33,24 @@ impl Drop for WglWrapper {
     }
 }
 
+thread_local! {
+    /// fork: WGL 探测结果（opengl32 句柄、函数表、扩展表）每线程只做一次；
+    /// 原实现每建一个窗口都创建隐藏探测窗口且不销毁，泄漏 HWND + DC
+    static PROBED_WGL: RefCell<Option<Rc<WglWrapper>>> = RefCell::new(None);
+}
+
 impl WglWrapper {
-    fn load() -> anyhow::Result<Self> {
+    fn load() -> anyhow::Result<Rc<Self>> {
+        if let Some(wgl) = PROBED_WGL.with(|probed| probed.borrow().clone()) {
+            return Ok(wgl);
+        }
+        let wgl = Self::probe()?;
+        PROBED_WGL.with(|probed| probed.borrow_mut().replace(Rc::clone(&wgl)));
+        Ok(wgl)
+    }
+
+    /// 用一个临时隐藏窗口建基础上下文探测 WGL 扩展，探测完销毁窗口
+    fn probe() -> anyhow::Result<Rc<Self>> {
         let class_name = wide_string("wezterm wgl extension probing window");
         let h_inst = unsafe { GetModuleHandleW(null()) };
         let class = WNDCLASSW {
@@ -78,17 +96,33 @@ impl WglWrapper {
             anyhow::bail!("CreateWindowExW: {}", err);
         }
 
-        let mut state = GlState::create_basic(WglWrapper::create()?, hwnd)?;
+        let result = Self::probe_with_window(hwnd);
+        unsafe {
+            DestroyWindow(hwnd);
+        }
+        result
+    }
+
+    fn probe_with_window(hwnd: HWND) -> anyhow::Result<Rc<Self>> {
+        let mut state = GlState::create_basic(Rc::new(WglWrapper::create()?), hwnd)?;
 
         unsafe {
             state.make_current();
         }
 
-        let _ = state.wgl.as_mut().unwrap().load_ext();
+        // 探测阶段 GlState 是这个 Rc 的唯一持有者，可以就地装载扩展表
+        if let Some(wgl) = state.wgl.as_mut().and_then(Rc::get_mut) {
+            let _ = wgl.load_ext();
+        }
 
         state.make_not_current();
 
-        Ok(state.into_wrapper())
+        let hdc = state.hdc;
+        let wgl = state.into_wrapper();
+        unsafe {
+            ReleaseDC(hwnd, hdc);
+        }
+        Ok(wgl)
     }
 
     fn create() -> anyhow::Result<Self> {
@@ -160,9 +194,43 @@ impl WglWrapper {
 }
 
 pub struct GlState {
-    wgl: Option<WglWrapper>,
+    wgl: Option<Rc<WglWrapper>>,
     hdc: HDC,
     rc: ffi::types::HGLRC,
+}
+
+/// fork: 像素格式档位。纯 2D 文本渲染用不到多重采样与深度/模板缓冲，
+/// 先请求 Lean（0 样本、0 深度/模板，省显存带宽，部分驱动上 MSAA 还会
+/// 拖慢 SwapBuffers），驱动不给再回退上游原来的 Legacy 组合
+#[derive(Clone, Copy, Debug)]
+enum PixelFormatProfile {
+    Lean,
+    Legacy,
+}
+
+impl PixelFormatProfile {
+    const ORDER: [PixelFormatProfile; 2] = [PixelFormatProfile::Lean, PixelFormatProfile::Legacy];
+
+    fn depth_bits(self) -> i32 {
+        match self {
+            Self::Lean => 0,
+            Self::Legacy => 24,
+        }
+    }
+
+    fn stencil_bits(self) -> i32 {
+        match self {
+            Self::Lean => 0,
+            Self::Legacy => 8,
+        }
+    }
+
+    fn samples(self) -> i32 {
+        match self {
+            Self::Lean => 0,
+            Self::Legacy => 4,
+        }
+    }
 }
 
 fn has_extension(extensions: &str, wanted: &str) -> bool {
@@ -170,7 +238,7 @@ fn has_extension(extensions: &str, wanted: &str) -> bool {
 }
 
 impl GlState {
-    fn into_wrapper(mut self) -> WglWrapper {
+    fn into_wrapper(mut self) -> Rc<WglWrapper> {
         self.delete();
         self.wgl.take().unwrap()
     }
@@ -196,7 +264,7 @@ impl GlState {
             log::trace!("opengl extensions: {:?}", extensions);
 
             if has_extension(&extensions, "WGL_ARB_pixel_format") {
-                return match Self::create_ext(wgl, extensions, hdc) {
+                return match Self::create_ext(Rc::clone(&wgl), extensions, hdc) {
                     Ok(state) => Ok(state),
                     Err(err) => {
                         log::warn!(
@@ -204,7 +272,6 @@ impl GlState {
                             ({}), fall back to basic",
                             err
                         );
-                        let wgl = WglWrapper::load()?;
                         Self::create_basic(wgl, window)
                     }
                 };
@@ -214,7 +281,8 @@ impl GlState {
         Self::create_basic(wgl, window)
     }
 
-    fn create_ext(wgl: WglWrapper, extensions: String, hdc: HDC) -> anyhow::Result<Self> {
+    /// 按档位组装 ChoosePixelFormatARB 的属性表
+    fn pixel_format_attribs(extensions: &str, profile: PixelFormatProfile) -> Vec<i32> {
         use ffiextra::*;
 
         let mut attribs: Vec<i32> = vec![
@@ -231,47 +299,77 @@ impl GlState {
             ALPHA_BITS_ARB as i32,
             8,
             DEPTH_BITS_ARB as i32,
-            24,
+            profile.depth_bits(),
             STENCIL_BITS_ARB as i32,
-            8,
-            SAMPLE_BUFFERS_ARB as i32,
-            1,
-            SAMPLES_ARB as i32,
-            4,
+            profile.stencil_bits(),
         ];
 
-        if has_extension(&extensions, "WGL_ARB_framebuffer_sRGB") {
+        if profile.samples() > 0 {
+            attribs.extend_from_slice(&[
+                SAMPLE_BUFFERS_ARB as i32,
+                1,
+                SAMPLES_ARB as i32,
+                profile.samples(),
+            ]);
+        }
+
+        if has_extension(extensions, "WGL_ARB_framebuffer_sRGB") {
             log::trace!("will request FRAMEBUFFER_SRGB_CAPABLE_ARB");
             attribs.push(FRAMEBUFFER_SRGB_CAPABLE_ARB as i32);
             attribs.push(1);
-        } else if has_extension(&extensions, "WGL_EXT_framebuffer_sRGB") {
+        } else if has_extension(extensions, "WGL_EXT_framebuffer_sRGB") {
             log::trace!("will request FRAMEBUFFER_SRGB_CAPABLE_EXT");
             attribs.push(FRAMEBUFFER_SRGB_CAPABLE_EXT as i32);
             attribs.push(1);
         }
 
         attribs.push(0);
+        attribs
+    }
 
-        let mut format_id = 0;
-        let mut num_formats = 0;
+    /// 依次尝试各档位，返回第一个驱动接受的像素格式 id
+    fn choose_pixel_format_arb(
+        wgl: &WglWrapper,
+        extensions: &str,
+        hdc: HDC,
+    ) -> anyhow::Result<i32> {
+        let mut last_err = None;
+        for profile in PixelFormatProfile::ORDER {
+            let attribs = Self::pixel_format_attribs(extensions, profile);
+            let mut format_id = 0;
+            let mut num_formats = 0;
 
-        let res = unsafe {
-            wgl.ext.as_ref().unwrap().ChoosePixelFormatARB(
-                hdc as _,
-                attribs.as_ptr(),
-                null(),
-                1,
-                &mut format_id,
-                &mut num_formats,
-            )
-        };
-        if res == 0 {
-            anyhow::bail!("ChoosePixelFormatARB returned 0");
+            let res = unsafe {
+                wgl.ext.as_ref().unwrap().ChoosePixelFormatARB(
+                    hdc as _,
+                    attribs.as_ptr(),
+                    null(),
+                    1,
+                    &mut format_id,
+                    &mut num_formats,
+                )
+            };
+            if res != 0 && num_formats > 0 {
+                log::trace!(
+                    "ChoosePixelFormatARB accepted {profile:?} profile: format {format_id}"
+                );
+                return Ok(format_id);
+            }
+            let err = if res == 0 {
+                format!("ChoosePixelFormatARB returned 0 for {profile:?} profile")
+            } else {
+                format!("ChoosePixelFormatARB returned 0 formats for {profile:?} profile")
+            };
+            log::debug!("{err}; trying next profile");
+            last_err.replace(err);
         }
+        anyhow::bail!("{}", last_err.unwrap_or_default())
+    }
 
-        if num_formats == 0 {
-            anyhow::bail!("ChoosePixelFormatARB returned 0 formats");
-        }
+    fn create_ext(wgl: Rc<WglWrapper>, extensions: String, hdc: HDC) -> anyhow::Result<Self> {
+        use ffiextra::*;
+
+        let format_id = Self::choose_pixel_format_arb(&wgl, &extensions, hdc)?;
 
         let mut pfd: PIXELFORMATDESCRIPTOR = unsafe { std::mem::zeroed() };
 
@@ -345,10 +443,8 @@ impl GlState {
         })
     }
 
-    fn create_basic(wgl: WglWrapper, window: HWND) -> anyhow::Result<Self> {
-        let hdc = unsafe { GetDC(window) };
-
-        let pfd = PIXELFORMATDESCRIPTOR {
+    fn basic_pixel_format_descriptor(profile: PixelFormatProfile) -> PIXELFORMATDESCRIPTOR {
+        PIXELFORMATDESCRIPTOR {
             nSize: std::mem::size_of::<PIXELFORMATDESCRIPTOR>() as u16,
             nVersion: 1,
             dwFlags: PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER,
@@ -367,18 +463,32 @@ impl GlState {
             cAccumGreenBits: 0,
             cAccumBlueBits: 0,
             cAccumAlphaBits: 0,
-            cDepthBits: 24,
-            cStencilBits: 8,
+            cDepthBits: profile.depth_bits() as u8,
+            cStencilBits: profile.stencil_bits() as u8,
             cAuxBuffers: 0,
             iLayerType: PFD_MAIN_PLANE,
             bReserved: 0,
             dwLayerMask: 0,
             dwVisibleMask: 0,
             dwDamageMask: 0,
-        };
-        let format = unsafe { ChoosePixelFormat(hdc, &pfd) };
-        unsafe {
-            SetPixelFormat(hdc, format, &pfd);
+        }
+    }
+
+    fn create_basic(wgl: Rc<WglWrapper>, window: HWND) -> anyhow::Result<Self> {
+        let hdc = unsafe { GetDC(window) };
+
+        // 同样先试 0 深度/模板，ChoosePixelFormat 返回 0 再回退上游组合
+        for profile in PixelFormatProfile::ORDER {
+            let pfd = Self::basic_pixel_format_descriptor(profile);
+            let format = unsafe { ChoosePixelFormat(hdc, &pfd) };
+            if format == 0 {
+                log::debug!("ChoosePixelFormat found nothing for {profile:?} profile");
+                continue;
+            }
+            unsafe {
+                SetPixelFormat(hdc, format, &pfd);
+            }
+            break;
         }
 
         let rc = unsafe { wgl.wgl.CreateContext(hdc as *mut _) };
