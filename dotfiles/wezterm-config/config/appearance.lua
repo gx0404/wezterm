@@ -20,8 +20,12 @@ return {
    default_cursor_style = 'BlinkingBlock',
    cursor_blink_rate = 650,
 
-   -- color scheme
-   colors = colors,
+   -- color scheme：整套调色板注册成 'GX Mocha' 并设为默认方案；设置浮层「外观」里
+   -- 选的方案写在 gui-settings.json 的 color_scheme，会覆盖这里的默认值。界面色
+   -- （标签栏、滚动条、分割线等）单独放 colors，叠加在任何方案之上。
+   color_schemes = { [colors.name] = colors.scheme },
+   color_scheme = colors.name,
+   colors = colors.chrome,
 
    -- background: pass in `true` if you want wezterm to start with focus mode on (no bg images)
    background = backdrops:initial_options(false),

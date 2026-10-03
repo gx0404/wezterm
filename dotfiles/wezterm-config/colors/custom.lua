@@ -29,7 +29,15 @@ local mocha = {
    crust     = '#11111b',
 }
 
-local colorscheme = {
+-- 拆成两份，让设置浮层「外观」里的配色切换真正生效：
+--   scheme：整套终端调色板，注册为名为 'GX Mocha' 的配色方案（config/appearance.lua 的
+--           color_schemes）并设为默认 color_scheme；设置页写进 gui-settings.json 的
+--           color_scheme 会覆盖它，前景/背景/ANSI 16 色随之整套换掉。
+--   chrome：标签栏、滚动条、分割线等界面色，作为 `colors` 叠加在任何方案之上，
+--           切换方案时保持 Mocha 风格的界面外观。
+-- ANSI 16 色用 Catppuccin Mocha 官方色板（此前是 Windows Terminal Campbell，
+-- 蓝/紫在 #1f1f28 背景上对比度只有约 2:1，与整体配色割裂）；背景保持 mocha.base。
+local scheme = {
    foreground = mocha.text,
    background = mocha.base,
    cursor_bg = mocha.rosewater,
@@ -38,25 +46,32 @@ local colorscheme = {
    selection_bg = mocha.surface2,
    selection_fg = mocha.text,
    ansi = {
-      '#0C0C0C', -- black
-      '#C50F1F', -- red
-      '#13A10E', -- green
-      '#C19C00', -- yellow
-      '#0037DA', -- blue
-      '#881798', -- magenta/purple
-      '#3A96DD', -- cyan
-      '#CCCCCC', -- white
+      mocha.surface1, -- black
+      mocha.red,
+      mocha.green,
+      mocha.yellow,
+      mocha.blue,
+      mocha.pink, -- magenta
+      mocha.teal, -- cyan
+      mocha.subtext1, -- white
    },
    brights = {
-      '#767676', -- black
-      '#E74856', -- red
-      '#16C60C', -- green
-      '#F9F1A5', -- yellow
-      '#3B78FF', -- blue
-      '#B4009E', -- magenta/purple
-      '#61D6D6', -- cyan
-      '#F2F2F2', -- white
+      mocha.surface2, -- black
+      mocha.red,
+      mocha.green,
+      mocha.yellow,
+      mocha.blue,
+      mocha.pink, -- magenta
+      mocha.teal, -- cyan
+      mocha.subtext0, -- white
    },
+   indexed = {
+      [16] = mocha.peach,
+      [17] = mocha.rosewater,
+   },
+}
+
+local chrome = {
    tab_bar = {
       background = 'rgba(0, 0, 0, 0.4)',
       active_tab = {
@@ -82,13 +97,16 @@ local colorscheme = {
       },
    },
    visual_bell = mocha.red,
-   indexed = {
-      [16] = mocha.peach,
-      [17] = mocha.rosewater,
-   },
    scrollbar_thumb = mocha.surface2,
    split = mocha.overlay0,
    compose_cursor = mocha.flamingo,
 }
 
-return colorscheme
+return {
+   -- scheme 注册到 color_schemes 时用的名字；config/appearance.lua 与
+   -- utils/backdrops.lua（判断设置浮层是否选了别的方案）共用这一处。
+   name = 'GX Mocha',
+   scheme = scheme,
+   chrome = chrome,
+   mocha = mocha,
+}

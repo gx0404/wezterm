@@ -12,23 +12,70 @@ math.random()
 
 local GLOB_PATTERN = '*.{jpg,jpeg,png,gif,bmp,ico,tiff,pnm,dds,tga}'
 
+---读 gui-settings.json 原文；文件不存在或读不了返回 nil。
+---@return string?
+local function read_sidecar()
+   local f = io.open(gui_settings.path(wezterm.config_dir, wezterm.home_dir, os.getenv), 'r')
+   if not f then
+      return nil
+   end
+   local text = f:read('*a')
+   f:close()
+   return text
+end
+
+---内置配色方案的背景色；取不到返回 nil。get_builtin_schemes 每次要转换上千套方案，
+---整份结果在本次配置加载内缓存。
+local builtin_schemes = nil
+---@param name string
+---@return string?
+local function builtin_background(name)
+   if builtin_schemes == nil then
+      builtin_schemes = wezterm.color.get_builtin_schemes()
+   end
+   local scheme = builtin_schemes[name]
+   return scheme and scheme.background
+end
+
 ---@class BackDrops
 ---@field current_idx number index of current image
 ---@field images string[] background images
 ---@field images_dir string directory of background images. Default is `wezterm.config_dir .. '/backdrops/'`
----@field focus_color string background color when in focus mode. Default is `colors.custom.background`
+---@field mask_color string color of the mask layer above the image. Default is the background of the effective color scheme
+---@field focus_color string background color when in focus mode. Default is the background of the effective color scheme
 ---@field focus_on boolean focus mode on or off
 local BackDrops = {}
 BackDrops.__index = BackDrops
 
+---遮罩层/专注模式要跟随当前生效配色方案的背景：设置浮层「外观」选的方案写在
+---gui-settings.json 的 color_scheme 键（轻量提取，同壁纸键）。没有该键或选的就是
+---GX Mocha 时用 colors.scheme.background，否则查内置方案的背景；查不到（自定义/已
+---删除的方案、接口出错）一律回退 Mocha 背景。纯函数：文件内容与查表函数由调用方注入，
+---便于 tests/pure_fn_test.lua 单测。
+---@param settings_text string? gui-settings.json 原文，读不到传 nil
+---@param lookup fun(name: string): string? 内置方案名 -> 背景色，取不到返回 nil
+---@return string
+function BackDrops.scheme_background(settings_text, lookup)
+   local name = settings_text and settings_text:match('"color_scheme"%s*:%s*"([^"]+)"')
+   if name and name ~= colors.name then
+      local ok, background = pcall(lookup, name)
+      if ok and type(background) == 'string' and background ~= '' then
+         return background
+      end
+   end
+   return colors.scheme.background
+end
+
 --- Initialise backdrop controller
 ---@private
 function BackDrops:init()
+   local mask_color = BackDrops.scheme_background(read_sidecar(), builtin_background)
    local inital = {
       current_idx = 1,
       images = {},
       images_dir = wezterm.config_dir .. '/backdrops/',
-      focus_color = colors.background,
+      mask_color = mask_color,
+      focus_color = mask_color,
       focus_on = false,
    }
    local backdrops = setmetatable(inital, self)
@@ -85,12 +132,10 @@ end
 ---wallpaper 键；启动/重载时优先按它覆盖默认（只认 basename 且必须在
 ---目录内——set_default 的查找天然挡掉目录外与缺失条目）。
 function BackDrops:set_default_from_sidecar()
-   local f = io.open(gui_settings.path(wezterm.config_dir, wezterm.home_dir, os.getenv), 'r')
-   if not f then
+   local text = read_sidecar()
+   if not text then
       return self
    end
-   local text = f:read('*a')
-   f:close()
    -- gui-settings.json 由 fork 的 store_key 原子写入（顶层键形状固定）；
    -- 轻量提取，不为一个键引入 JSON 解析器。
    local name = text:match('"wallpaper"%s*:%s*"([^"]+)"')
@@ -101,7 +146,7 @@ function BackDrops:set_default_from_sidecar()
 end
 
 ---Override the default `focus_color`
----Default `focus_color` is `colors.custom.background`
+---Default `focus_color` is the background of the effective color scheme
 ---@param focus_color string background color when in focus mode
 function BackDrops:set_focus(focus_color)
    self.focus_color = focus_color
@@ -122,7 +167,7 @@ function BackDrops:_create_opts()
          horizontal_align = 'Center',
       },
       {
-         source = { Color = colors.background },
+         source = { Color = self.mask_color },
          height = '120%',
          width = '120%',
          vertical_offset = '-10%',

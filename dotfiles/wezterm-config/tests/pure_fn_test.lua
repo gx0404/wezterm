@@ -305,6 +305,67 @@ do
    check('toggle.no_background', out.background, nil)
 end
 
+-- 配色拆分（colors/custom.lua）：scheme 是整套调色板（注册为默认方案，设置浮层选别的方案
+-- 才能整套换掉），chrome 只放界面色；ANSI 用 Catppuccin Mocha 官方 16 色。
+do
+   local colors = require('colors.custom')
+   check('colors.name', colors.name, 'GX Mocha')
+   check('colors.has_mocha', type(colors.mocha), 'table')
+   check('colors.scheme.background', colors.scheme.background, '#1f1f28')
+   check('colors.scheme.ansi_count', #colors.scheme.ansi, 8)
+   check('colors.scheme.brights_count', #colors.scheme.brights, 8)
+   check('colors.scheme.ansi_black', colors.scheme.ansi[1], '#45475a')
+   check('colors.scheme.ansi_blue', colors.scheme.ansi[5], '#89b4fa')
+   check('colors.scheme.ansi_magenta', colors.scheme.ansi[6], '#f5c2e7')
+   check('colors.scheme.ansi_white', colors.scheme.ansi[8], '#bac2de')
+   check('colors.scheme.brights_black', colors.scheme.brights[1], '#585b70')
+   check('colors.scheme.brights_white', colors.scheme.brights[8], '#a6adc8')
+   check('colors.scheme.indexed', colors.scheme.indexed[16], colors.mocha.peach)
+   -- chrome 不得带调色板键，否则会盖掉设置浮层选中的方案
+   for _, key in ipairs({ 'foreground', 'background', 'ansi', 'brights', 'indexed' }) do
+      check('colors.chrome.no_' .. key, colors.chrome[key], nil)
+   end
+   check('colors.chrome.tab_bar', type(colors.chrome.tab_bar), 'table')
+   check('colors.chrome.split', colors.chrome.split, colors.mocha.overlay0)
+
+   local appearance = require('config.appearance')
+   check('appearance.color_scheme', appearance.color_scheme, colors.name)
+   check('appearance.color_schemes', appearance.color_schemes[colors.name], colors.scheme)
+   check('appearance.colors_is_chrome', appearance.colors, colors.chrome)
+   check('appearance.close_confirmation', appearance.window_close_confirmation, 'AlwaysPrompt')
+
+   -- 遮罩层/专注模式背景跟随 gui-settings.json 里设置浮层选中的方案
+   local backdrops = require('utils.backdrops')
+   local scheme_background = backdrops.scheme_background
+   local builtin = { Dracula = '#282a36', Broken = 42, Empty = '' }
+   local function lookup(name)
+      return builtin[name]
+   end
+   local default_bg = colors.scheme.background
+   local cases = {
+      { 'no_key', '{"wallpaper": "a.png"}', default_bg },
+      { 'gx_scheme', '{"color_scheme": "GX Mocha"}', default_bg },
+      { 'builtin', '{"color_scheme": "Dracula"}', '#282a36' },
+      { 'compact_json', '{\n  "wallpaper": "a.png",\n  "color_scheme":"Dracula"\n}', '#282a36' },
+      { 'unknown_scheme', '{"color_scheme": "Nope"}', default_bg },
+      { 'bad_type', '{"color_scheme": "Broken"}', default_bg },
+      { 'empty_color', '{"color_scheme": "Empty"}', default_bg },
+   }
+   check('backdrop.no_sidecar', scheme_background(nil, lookup), default_bg)
+   for _, case in ipairs(cases) do
+      check('backdrop.' .. case[1], scheme_background(case[2], lookup), case[3])
+   end
+   local dracula = '{"color_scheme": "Dracula"}'
+   check('backdrop.lookup_error', scheme_background(dracula, error), default_bg)
+   -- 测试环境的配置目录（tests/）旁没有 gui-settings.json，实例走默认方案背景
+   check('backdrop.instance_focus', backdrops.focus_color, colors.scheme.background)
+   local saved_images = backdrops.images
+   backdrops.images = { 'wallpaper.png' }
+   local layers = backdrops:_create_opts()
+   backdrops.images = saved_images
+   check('backdrop.mask_layer', layers[2] and layers[2].source.Color, backdrops.mask_color)
+end
+
 -- GX Shell 安装包内置 shell 探测（utils/gx-shell.lua）
 do
    local gx_shell = require('utils.gx-shell')
