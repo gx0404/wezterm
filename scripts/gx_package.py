@@ -500,6 +500,11 @@ def package_deb(stage: Path, dest: Path, version: str, bin_dir: Path, abi: dict)
 
 
 def preflight(kind: str, bin_dir: Path | None, stage_only: bool = False):
+    if kind == "windows" and not str(ROOT).isascii():
+        raise ValueError(
+            f"repository path is not pure ASCII: {ROOT}. Strawberry Perl/nmake write a non-ASCII "
+            "checkout path into garbled directories and the openssl-sys build then fails; "
+            "move the repository to a pure ASCII path")
     if kind == "windows" and (os.name != "nt" or platform.machine().lower() not in {"amd64", "x86_64"}):
         raise ValueError("Windows packaging requires an x64 Windows build host")
     if kind == "deb":
@@ -659,6 +664,11 @@ def main() -> int:
     parser.add_argument("--stage-dir", type=Path,
                         help="write the verified payload to this new directory instead of building an installer")
     args = parser.parse_args()
+    # Only a .tag created by this run is removed afterwards: upstream
+    # wezterm-version/build.rs uses ../.tag verbatim as the version string
+    # whenever it exists, so a leftover file would pollute later dev builds.
+    tag_path = ROOT / ".tag"
+    created_tag = False
     try:
         kind = ("windows" if os.name == "nt" else "deb") if args.platform == "auto" else args.platform
         version = validate_version(args.version)
@@ -682,7 +692,8 @@ def main() -> int:
         if not args.bin_dir:
             # The upstream build script reads .tag. Pin UTC date/hash before
             # Cargo runs so cached builds and both operating systems agree.
-            (ROOT / ".tag").write_text(product_version_from_source(sha) + "\n", encoding="ascii")
+            created_tag = not tag_path.exists()
+            tag_path.write_text(product_version_from_source(sha) + "\n", encoding="ascii")
             cmd = [tool("cargo"), "build", "--locked", "--release",
                    *[v for name in BINARIES for v in ("-p", name)]]
             env = os.environ.copy()
@@ -724,6 +735,9 @@ def main() -> int:
     except (ValueError, OSError, subprocess.CalledProcessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
+    finally:
+        if created_tag:
+            tag_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

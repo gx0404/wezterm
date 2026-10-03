@@ -252,6 +252,58 @@ class PackageTests(unittest.TestCase):
                                  {"max_glibc": "2.31", "needed": ["libc.so.6"]})
 
 
+class PreflightPathTests(unittest.TestCase):
+    def test_windows_preflight_rejects_non_ascii_root(self):
+        with patch.object(package, "ROOT", Path("D:/\u5de5\u7a0b/wezterm")), \
+                patch.object(package.os, "name", "nt"), \
+                patch.object(package.platform, "machine", return_value="AMD64"):
+            with self.assertRaisesRegex(ValueError, "pure ASCII"):
+                package.preflight("windows", None)
+
+    def test_windows_preflight_passes_ascii_check_for_ascii_root(self):
+        with patch.object(package, "ROOT", Path("D:/gx_projects/wezterm")), \
+                patch.object(package.os, "name", "nt"), \
+                patch.object(package.platform, "machine", return_value="AMD64"), \
+                patch.object(package, "tool", side_effect=ValueError("stop after ascii check")):
+            with self.assertRaisesRegex(ValueError, "stop after ascii check"):
+                package.preflight("windows", None)
+
+
+class TagCleanupTests(unittest.TestCase):
+    def _main(self, root, run_effect):
+        argv = ["gx_package.py", "windows", "--version", "1.2.3"]
+        with patch.object(package, "ROOT", root), patch.object(package.sys, "argv", argv), \
+                patch.object(package, "validate_version", return_value="1.2.3"), \
+                patch.object(package, "preflight"), \
+                patch.object(package, "source_info", return_value=("a" * 40, False)), \
+                patch.object(package, "product_version_from_source", return_value="GX-fixture"), \
+                patch.object(package, "tool", return_value=Path("cargo")), \
+                patch.object(package, "run", side_effect=run_effect), \
+                patch.dict("os.environ", {"CARGO_TARGET_DIR": str(root / "target")}), \
+                patch("sys.stderr", new_callable=io.StringIO):
+            return package.main()
+
+    def test_created_tag_is_removed_after_failed_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seen = []
+            def fail(*args, **kwargs):
+                seen.append((root / ".tag").is_file())
+                raise subprocess.CalledProcessError(1, "cargo")
+            self.assertEqual(self._main(root, fail), 1)
+            self.assertEqual(seen, [True])
+            self.assertFalse((root / ".tag").exists())
+
+    def test_preexisting_tag_is_kept_after_failed_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".tag").write_text("keep-me\n", encoding="ascii")
+            def fail(*args, **kwargs):
+                raise subprocess.CalledProcessError(1, "cargo")
+            self.assertEqual(self._main(root, fail), 1)
+            self.assertTrue((root / ".tag").is_file())
+
+
 class StageTests(unittest.TestCase):
     def make_stage(self, root, kind='windows'):
         stage = root / 'stage'
