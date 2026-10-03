@@ -744,30 +744,41 @@ impl<'a> Performer<'a> {
         match osc {
             OperatingSystemCommand::SetIconNameSun(title)
             | OperatingSystemCommand::SetIconName(title) => {
-                if title.is_empty() {
-                    self.icon_title = None;
-                } else {
-                    self.icon_title = Some(title);
-                }
-                let title = self.icon_title.clone();
-                if let Some(handler) = self.alert_handler.as_mut() {
-                    handler.alert(Alert::IconTitleChanged(title));
+                let icon_title = if title.is_empty() { None } else { Some(title) };
+                // fork: only alert when the title actually changed. Shell
+                // prompts and spinners re-send the same title constantly,
+                // and every title alert costs the GUI a tab bar rebuild
+                // plus Lua format callbacks.
+                if icon_title != self.icon_title {
+                    self.icon_title = icon_title;
+                    let title = self.icon_title.clone();
+                    if let Some(handler) = self.alert_handler.as_mut() {
+                        handler.alert(Alert::IconTitleChanged(title));
+                    }
                 }
             }
             OperatingSystemCommand::SetIconNameAndWindowTitle(title) => {
+                // fork: this leaves icon_title=None and title=title; when
+                // both already hold there is nothing observable to report
+                let changed = self.icon_title.is_some() || self.title != title;
                 self.icon_title.take();
-                self.title = title.clone();
-                if let Some(handler) = self.alert_handler.as_mut() {
-                    handler.alert(Alert::WindowTitleChanged(title.clone()));
-                    handler.alert(Alert::IconTitleChanged(Some(title)));
+                if changed {
+                    self.title = title.clone();
+                    if let Some(handler) = self.alert_handler.as_mut() {
+                        handler.alert(Alert::WindowTitleChanged(title.clone()));
+                        handler.alert(Alert::IconTitleChanged(Some(title)));
+                    }
                 }
             }
 
             OperatingSystemCommand::SetWindowTitleSun(title)
             | OperatingSystemCommand::SetWindowTitle(title) => {
-                self.title = title.clone();
-                if let Some(handler) = self.alert_handler.as_mut() {
-                    handler.alert(Alert::WindowTitleChanged(title));
+                // fork: as above, skip the alert for an unchanged title
+                if self.title != title {
+                    self.title = title.clone();
+                    if let Some(handler) = self.alert_handler.as_mut() {
+                        handler.alert(Alert::WindowTitleChanged(title));
+                    }
                 }
             }
             OperatingSystemCommand::SetHyperlink(link) => {
