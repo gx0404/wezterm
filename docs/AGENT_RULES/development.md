@@ -25,7 +25,13 @@
   脚本补 `bin/graphify` shim 对齐 graphify.sh 既定解析路径）；lua 5.4 同为
   钉版（Windows 用 LuaBinaries 预编译包、失败回退官方源码 mingw 编译；
   Linux/mac 官方源码 posix 编译），是 `scripts/tests/*.lua` 纯 Lua 单测的
-  运行器。Makefile 已把其 bin 前置 PATH。
+  运行器。Makefile 已把其 bin 前置 PATH。Windows 另钉版 NASM 3.02 与
+  Strawberry Perl portable（`nasm/bin`、`perl/perl/bin`，MSVC 打包用，
+  `scripts/gx_msvc_env.cmd` 只认这两处）。venv 只用真实解释器路径
+  （`find_real_python` 跳过 WindowsApps 下 Python 安装管理器的别名——它找不到
+  匹配运行时会把 Python 装进当前目录）；脚本要经 `make setup` 或 Git Bash 运行，
+  MSYS2 bash 启动的子进程会丢失 `LOCALAPPDATA` 等变量；仓库改名/移动后 venv 内
+  绝对路径失效，`rm -rf .local/tools/venv` 再重跑。
 - hooks：`.claude/hooks/dangerous_patterns.conf` 是危险模式唯一真源，
   `pre_tool_use_gate.py` 消费（claude/codex 协议适配；ZCode 复用 claude 形）。
 

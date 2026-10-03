@@ -45,6 +45,10 @@
   线程），首窗几何经 `mux.spawn_window` 的 `width/height/position` 传入。
   配置求值期间调用 `wezterm.gui.screens()` 依赖 Rust 侧 `reload_lock`
   （A5e）不持 `CONFIG` 锁，旧于该修复的二进制会死锁。
+  窗口材质的系统支持只能经 `utils/backdrops.lua::BackDrops.system_backdrop_support()`
+  探测（pcall 包住 `wezterm.gui.system_backdrop_support()`，取不到返回 nil）；
+  `effective_material` 遇到支持表里不为 true 的云母/亚克力回退 `solid`，支持表为
+  nil 时保持原样以兼容旧二进制。
 - 本机 `~/.config/wezterm` 保持独立目录（不 symlink 进仓库）；仓库快照是
   移植真源，本机改动经 `make gx-sync` 回收（默认只读对比，
   `GX_SYNC_WRITE=1` 写回）。

@@ -123,6 +123,21 @@
 - 新配置 `win32_frame_follow_colors`（默认 false）：Win11 22000+ 的 DWM 标题栏/文字/边框颜色
   跟随 `window_frame.*`，随焦点切换 active/inactive，`RESIZE`/`INTEGRATED_BUTTONS` 装饰下设
   圆角偏好；Win10 静默跳过。
+- 新增 `wezterm.gui.system_backdrop_support()`，返回 `{ mica, acrylic, tabbed }`：Windows 按系统
+  版本判定（22H2+ 三种都支持，21H2 支持云母与亚克力，Win10 1803+ 只支持亚克力，更早全不支持），
+  其他平台全 false；不依赖 GUI 连接、不取配置锁，配置求值期可调用。dotfiles 据此把系统不支持的
+  窗口材质（如 Win10 选云母）回退为纯色，旧二进制没有该接口时行为不变。
+- dotfiles：`events/status.lua` 的 `setup` 新增可选项 `integrated_hides_tab_bar`（默认 false），
+  为 true 时集成标题栏按钮模式下 herdr 应用模式仍可隐藏标签栏。
+- Windows UI 冒烟脚本 `scripts/ui_smoke_windows.ps1` 新增 `launcher` 与 `copy-mode` 两个浮层页面
+  （default 键位 Ctrl+Shift+L / Ctrl+Shift+X，GX 键位 F3 / F1），`docs/TESTING.md` 同步。
+- 开发：Windows MSVC 打包所需的 NASM 3.02 与 Strawberry Perl 5.42.3.1 改由 `make setup`
+  （`scripts/setup_env.sh`）钉版 sha256 安装到仓内 `.local/tools/`，`scripts/gx_msvc_env.cmd`
+  只认仓内工具并在缺失时提示先 `make setup`；仓库路径必须纯 ASCII 作为文档化硬前提
+  （非 ASCII 路径会让 Strawberry Perl/nmake 把 OpenSSL 产物写进乱码目录，openssl-sys 构建失败）。
+  `docs/AGENT_RULES/development.md` 新增「工具安装仓内封闭」不变量，`AGENTS.md` 硬边界与
+  `.claude/rules/ai-tooling.md` 同步提醒；`dangerous_patterns.conf` 新增 hook 规则拒绝 winget、
+  choco、scoop 的 install 子命令与 `msiexec /i`，`pip install`（非仓内 venv）改为询问。
 
 
 ### Changed
@@ -241,6 +256,12 @@
 - Windows 风格标题栏按钮铺满栏高、失焦时变暗、前景优先取 `window_frame.*_titlebar_fg`；
   `+`/`☰`/`×` 悬停加 3pt 圆角，fancy 标签 `×` 悬停色不再把活动/非活动配色用反；retro 标签栏
   `☰` 悬停改用 `new_tab_hover`。
+- `periodic_stat_logging` 为 0（默认）时不再安装 metrics 记录器、不再启动每秒唤醒的统计线程，
+  渲染等热路径省去直方图锁与写入；热重载把它从 0 改为非 0 需要重启 GUI 才生效，非 0 之间的
+  改动热重载即生效（新增文档页 `docs/config/lua/config/periodic_stat_logging.md`）。
+- dotfiles：补 `char_select_font_size` 与 `pane_select_font_size`（与命令面板同值）；壁纸选择器
+  与标签页改名提示改为中文并带 Nerd Font 图标；tab 未读输出计数按 1 秒缓存（窗格数变化立即
+  重算），format-tab-title 每帧的多次调用不再重复遍历窗格。
 
 
 ### Fixed
@@ -328,6 +349,15 @@
 - 开发：`make generated-check` 的比对忽略行尾 CR，Windows（core.autocrlf）检出不再把补全/键表/
   译表误报为漂移；本机 `scripts/dev_framework.py evidence` 分配的证据批次见 `.ui-evidence/`
   （perf-baseline / perf-after1 / perf-after1-follow / ui-after1 / ui-fluent2 / ui-fluent3）。
+- 打包：`gx_package.py` 的 Windows 预检拒绝非 ASCII 仓库路径（此前 openssl-sys 在构建末尾才失败，
+  产物目录被写成乱码路径）；`.tag` 只在本次创建时于结束或失败后清理——残留的 `.tag` 会让
+  `wezterm-version/build.rs` 把后续所有开发构建的版本串钉在旧提交。
+- 开发：`scripts/setup_env.sh` 建框架 venv 时只用真实解释器路径（`sys.executable`），跳过
+  WindowsApps 下 Python 安装管理器的别名（找不到匹配运行时会把 Python 装进当前目录），venv
+  就绪判定改读已安装包元数据；graphify 钉版升到 0.9.73 与本机技能一致。目录改名或移动后
+  venv 内的绝对路径失效，需 `rm -rf .local/tools/venv` 后重跑 `make setup`。
+- `bell_requests_attention` 的 rustdoc 仍写「Windows 任务栏闪烁尚未实现」，改为与文档一致的
+  已实现说明。
 
 
 ## 0.3.0(TBD)

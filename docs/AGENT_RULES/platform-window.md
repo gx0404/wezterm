@@ -48,6 +48,12 @@
   Windows 用 `ITaskbarList3`；IME 位置重放 `WindowInner.last_ime_rect`；
   剪贴板读写都在后台线程退避重试；滚轮行数来自 `SPI_GETWHEELSCROLLLINES`
   并在 `WM_SETTINGCHANGE` 失效。
+- 系统背景材质支持（fork）：`ConnectionOps::system_backdrop_support()` 是不带 self 的
+  关联函数（配置在 Connection 创建前、以及 watcher 线程上求值），默认全 false；
+  Windows 实现 `os/windows/window.rs::backdrop_support_for` 逐条对应 `apply_theme`
+  的分支（`IS_WIN11_22H2` 走 DWMWA_SYSTEMBACKDROP_TYPE 三种都支持；否则亚克力要求
+  build ≥ 17134 的 ACCENT_POLICY，`!IS_WIN10` 用 DWMWA_MICA_EFFECT 支持云母）。改
+  `apply_theme` 的版本分支必须同步改它与 `backdrop_support_tests`。
 - 纹理契约：`window/src/bitmaps/atlas.rs::Atlas`（`allocate()` 失败给
   `OutOfTextureSpace`）+ `bitmaps/mod.rs::Texture2d` trait——GUI 的 atlas
   降级链依赖该契约。

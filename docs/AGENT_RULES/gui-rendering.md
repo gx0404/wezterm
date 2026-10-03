@@ -80,6 +80,9 @@ Lua gui 命名空间。平台窗口与事件抽象在 platform-window 域（`win
   → `enable_opengl()` → `RenderState::new` → 代数递增），指数退避最多 8 次。
 - 设置浮层写入 `gui-settings.json` 的键必须登记进 `gui_settings::GUI_OWNED_KEYS`
   （现有：wallpaper、color_scheme、default_shell、window_material 等）。
+- 统计记录器（fork）：`stats::Stats::init` 只在 `config::common_init` 之后、
+  `periodic_stat_logging > 0` 时安装；未安装时 `metrics::*!` 宏是 no-op，热路径不加
+  锁。新增统计点不要假设 recorder 一定存在；从 0 改非 0 需重启 GUI。
 - **纹理耗尽降级链**：`AllowImage::Yes→Scale(2/4/8)→No`；新图像路径要接进
   该链而不是自行吞错。
 - **wezterm.gui 只在 GUI 进程注册**（window-funcs crate 由 main.rs 单独
