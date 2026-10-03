@@ -1824,7 +1824,11 @@ unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> 
     let mut inner = inner.borrow_mut();
 
     if inner.paint_throttled {
+        // fork: 节流期间必须把更新区域验证掉，否则 Win32 会在消息队列
+        // 空闲时反复生成 WM_PAINT，主线程在节流窗口内空转跑满一个核。
+        // invalidated 保持为真，由定时器回调在节流结束后补发 InvalidateRect
         inner.invalidated = true;
+        ValidateRect(hwnd, null());
         return Some(0);
     }
 
