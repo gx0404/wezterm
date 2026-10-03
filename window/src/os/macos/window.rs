@@ -2133,7 +2133,10 @@ impl WindowView {
             let status = if s.is_empty() {
                 DeadKeyStatus::None
             } else {
-                DeadKeyStatus::Composing(s.to_string())
+                DeadKeyStatus::Composing {
+                    text: s.to_string(),
+                    cursor: None,
+                }
             };
             inner
                 .events
@@ -2651,7 +2654,10 @@ impl WindowView {
                     Ok(TranslateStatus::Composing(composing)) => {
                         // Next key press in dead key sequence is pending.
                         inner.events.dispatch(WindowEvent::AdviseDeadKeyStatus(
-                            DeadKeyStatus::Composing(composing),
+                            DeadKeyStatus::Composing {
+                                text: composing,
+                                cursor: None,
+                            },
                         ));
 
                         return;
@@ -2760,7 +2766,10 @@ impl WindowView {
                             // If it didn't generate an event, then a composition
                             // is pending.
                             let status = if inner.ime_last_event.is_none() {
-                                DeadKeyStatus::Composing(inner.ime_text.clone())
+                                DeadKeyStatus::Composing {
+                                    text: inner.ime_text.clone(),
+                                    cursor: None,
+                                }
                             } else {
                                 DeadKeyStatus::None
                             };
@@ -2790,7 +2799,10 @@ impl WindowView {
                             let status = if inner.ime_text.is_empty() {
                                 DeadKeyStatus::None
                             } else {
-                                DeadKeyStatus::Composing(inner.ime_text.clone())
+                                DeadKeyStatus::Composing {
+                                    text: inner.ime_text.clone(),
+                                    cursor: None,
+                                }
                             };
                             inner
                                 .events

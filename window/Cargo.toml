@@ -51,6 +51,8 @@ wezterm-input-types.workspace = true
 [target."cfg(windows)".dependencies]
 clipboard-win = { workspace = true, features = ["std"] }
 shared_library.workspace = true
+# fork: column widths for the IME caret (already in the graph via wezterm-font)
+wezterm-cell.workspace = true
 winapi = { workspace=true, features = [
     "combaseapi",
     "dwmapi",

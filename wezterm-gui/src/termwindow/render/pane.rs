@@ -395,8 +395,8 @@ impl crate::TermWindow {
                                 cursor_is_default_color: self.cursor_is_default_color,
                             }),
                             match (self.pos.is_active, &self.term_window.dead_key_status) {
-                                (true, DeadKeyStatus::Composing(composing)) => {
-                                    Some(composing.to_string())
+                                (true, DeadKeyStatus::Composing { text, .. }) => {
+                                    Some(text.to_string())
                                 }
                                 _ => None,
                             },
@@ -472,10 +472,10 @@ impl crate::TermWindow {
                         shape_hash,
                         shape_generation: quad_key.shape_generation,
                         composing: if self.cursor.y == stable_row && self.pos.is_active {
-                            if let DeadKeyStatus::Composing(composing) =
+                            if let DeadKeyStatus::Composing { text, .. } =
                                 &self.term_window.dead_key_status
                             {
-                                Some((self.cursor.x, composing.to_string()))
+                                Some((self.cursor.x, text.to_string()))
                             } else {
                                 None
                             }

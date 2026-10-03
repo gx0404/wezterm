@@ -77,8 +77,8 @@ impl crate::TermWindow {
 
         // Referencing the text being composed, but only if it belongs to this pane
         let composing = if cursor_idx.is_some() {
-            if let DeadKeyStatus::Composing(composing) = &self.dead_key_status {
-                Some(composing)
+            if let DeadKeyStatus::Composing { text, .. } = &self.dead_key_status {
+                Some(text)
             } else {
                 None
             }

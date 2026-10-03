@@ -60,6 +60,8 @@ use winreg::RegKey;
 
 const GCS_RESULTSTR: DWORD = 0x800;
 const GCS_COMPSTR: DWORD = 0x8;
+// fork: the IME caret position within the composition string
+const GCS_CURSORPOS: DWORD = 0x80;
 const ISC_SHOWUICOMPOSITIONWINDOW: DWORD = 0x80000000;
 
 #[allow(non_snake_case)]
@@ -3569,6 +3571,25 @@ impl ImmContext {
             Ok(String::new())
         }
     }
+
+    /// fork: the IME caret within the composition string, in UTF-16
+    /// code units. Unlike the string queries, GCS_CURSORPOS reports the
+    /// position as the return value; a negative value is an IMM error
+    /// (eg: IMM_ERROR_NODATA) and means there is no caret to show.
+    fn get_cursor_pos(&self) -> Option<usize> {
+        let pos =
+            unsafe { ImmGetCompositionStringW(self.imc, GCS_CURSORPOS, std::ptr::null_mut(), 0) };
+        pos.try_into().ok()
+    }
+
+    /// fork: the Composing status for the composition string `text`,
+    /// carrying the IME caret so that the builtin preedit can draw it.
+    fn composing_status(&self, text: String) -> DeadKeyStatus {
+        let cursor = self
+            .get_cursor_pos()
+            .map(|units| utf16_offset_to_columns(&text, units));
+        DeadKeyStatus::Composing { text, cursor }
+    }
 }
 
 impl Drop for ImmContext {
@@ -3576,6 +3597,63 @@ impl Drop for ImmContext {
         unsafe {
             ImmReleaseContext(self.hwnd, self.imc);
         }
+    }
+}
+
+/// fork: convert an IME caret offset in UTF-16 code units (as reported by
+/// GCS_CURSORPOS) into a terminal column offset within `text`, using the
+/// same width rules the GUI uses to lay out the preedit. An offset that
+/// lands inside a surrogate pair rounds down to the start of that
+/// character; an offset past the end of `text` clamps to its full width.
+fn utf16_offset_to_columns(text: &str, utf16_offset: usize) -> usize {
+    let mut units = 0;
+    let mut prefix_len = text.len();
+    for (idx, c) in text.char_indices() {
+        units += c.len_utf16();
+        if units > utf16_offset {
+            prefix_len = idx;
+            break;
+        }
+    }
+    wezterm_cell::unicode_column_width(&text[..prefix_len], None)
+}
+
+#[cfg(test)]
+mod ime_cursor_tests {
+    use super::utf16_offset_to_columns;
+
+    #[test]
+    fn ascii_offsets_are_columns() {
+        assert_eq!(utf16_offset_to_columns("nihao", 0), 0);
+        assert_eq!(utf16_offset_to_columns("nihao", 2), 2);
+        assert_eq!(utf16_offset_to_columns("nihao", 5), 5);
+    }
+
+    #[test]
+    fn wide_chars_take_two_columns() {
+        // two double-width chars followed by ascii
+        let text = "中国ren";
+        assert_eq!(utf16_offset_to_columns(text, 1), 2);
+        assert_eq!(utf16_offset_to_columns(text, 2), 4);
+        assert_eq!(utf16_offset_to_columns(text, 3), 5);
+    }
+
+    #[test]
+    fn surrogate_pairs_count_two_units() {
+        // U+20000 is a double-width CJK char outside the BMP, so it is
+        // a surrogate pair in UTF-16
+        let text = format!("{}a", char::from_u32(0x2_0000).unwrap());
+        assert_eq!(utf16_offset_to_columns(&text, 2), 2);
+        assert_eq!(utf16_offset_to_columns(&text, 3), 3);
+        // An offset splitting the pair rounds down to its start
+        assert_eq!(utf16_offset_to_columns(&text, 1), 0);
+    }
+
+    #[test]
+    fn offsets_past_the_end_clamp() {
+        assert_eq!(utf16_offset_to_columns("ab", 10), 2);
+        assert_eq!(utf16_offset_to_columns("中", 7), 2);
+        assert_eq!(utf16_offset_to_columns("", 3), 0);
     }
 }
 
@@ -3668,11 +3746,9 @@ unsafe fn ime_composition(
         // No finished result; continue with the default
         // processing
         if let Ok(composing) = imc.get_str(GCS_COMPSTR) {
-            inner
-                .events
-                .dispatch(WindowEvent::AdviseDeadKeyStatus(DeadKeyStatus::Composing(
-                    composing,
-                )));
+            inner.events.dispatch(WindowEvent::AdviseDeadKeyStatus(
+                imc.composing_status(composing),
+            ));
         }
         // We will show the composing string ourselves.
         // Suppress the default composition display.
@@ -3702,7 +3778,7 @@ unsafe fn ime_composition(
                 if let Ok(composing) = imc.get_str(GCS_COMPSTR) {
                     if !composing.is_empty() {
                         inner.events.dispatch(WindowEvent::AdviseDeadKeyStatus(
-                            DeadKeyStatus::Composing(composing),
+                            imc.composing_status(composing),
                         ));
                     }
                 }
@@ -4310,7 +4386,10 @@ unsafe fn key(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<L
                 if inner.config.use_dead_keys {
                     inner.dead_pending.replace((modifiers, vk));
                     inner.events.dispatch(WindowEvent::AdviseDeadKeyStatus(
-                        DeadKeyStatus::Composing(c.to_string()),
+                        DeadKeyStatus::Composing {
+                            text: c.to_string(),
+                            cursor: None,
+                        },
                     ));
                     return Some(0);
                 }

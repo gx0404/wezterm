@@ -198,9 +198,16 @@ pub enum WindowKeyEvent {
 pub enum DeadKeyStatus {
     /// Not in a dead key processing hold
     None,
-    /// Holding until composition is done; the string is the uncommitted
+    /// Holding until composition is done; `text` is the uncommitted
     /// composition text to show as a placeholder
-    Composing(String),
+    Composing {
+        text: String,
+        /// fork: where the IME caret sits within `text`, as an offset
+        /// in terminal columns (not bytes or UTF-16 units) from the
+        /// start of `text`. `None` when the platform does not report
+        /// a caret position.
+        cursor: Option<usize>,
+    },
 }
 
 #[derive(Debug)]

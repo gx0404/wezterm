@@ -7652,6 +7652,7 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-plasma",
  "wezterm-bidi",
+ "wezterm-cell",
  "wezterm-color-types",
  "wezterm-font",
  "wezterm-input-types",
