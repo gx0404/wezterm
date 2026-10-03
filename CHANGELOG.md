@@ -80,6 +80,23 @@
   AGENTS/ARCHITECTURE 包数 67、cli 子命令 19（补 spawn）、lua-api-crates 注册数
   14+1、AGENT_RULES 域清单补 code-comments/dotfiles、MAKE_COMMANDS 的 setup/
   sccache/TMP 段、product-docs 去掉易漂移的文件计数、development 的图谱指纹路径。
+- `max_fps_follows_display`（默认 false）：Windows 上帧率上限跟随窗口所在显示器的刷新率
+  （`EnumDisplaySettingsW`），跨显示器拖动与显示模式变化时自动更新；读不到刷新率回退
+  `max_fps`。任意机器自适应，不写死数字。
+- 浮层与元素配色新配置：`colors.overlay_selected_bg/fg`（启动器、InputSelector、确认框、
+  CharSelect 的选中行底色与左侧强调条）、`colors.copy_mode_status_bg/fg`（copy mode 搜索
+  状态行与 quickselect 状态行）、`char_select_border_color`、`scroll_bar_thumb_width`
+  （默认 3pt，`"100%"` 回到铺满）、`split_thickness`（分割线粗细不再跟随下划线）。
+- Windows 验证基建：`scripts/ui_smoke_windows.ps1`（真实桌面窗口、`PrintWindow` 抓图并在
+  黑图/白带时退回屏幕抓取，可按参数打开命令面板/设置/快捷键速查/主菜单/壁纸/右键菜单/
+  确认框，不可达记 skipped）与 `scripts/perf_probe_windows.ps1`（idle/cat/loop/scroll/
+  spinner 五场景，采集 `periodic_stat_logging`、进程树 CPU、GPU Engine 计数器并汇总）；
+  `make ui-smoke` 在 Windows 自动分派到 PowerShell 入口，`dev_framework.py run ui-smoke`
+  新增 `--out`。
+- dotfiles：Windows 界面字体链（Segoe UI 半粗 → 微软雅黑 UI → Segoe UI Emoji，字体文件
+  存在才启用）用于标题栏、命令面板、字符选择与窗格选择；新增 `utils/font-files.lua`、
+  `utils/cache.lua`。
+
 
 ### Changed
 - 不兼容：Windows 键位改为与 Linux 相同的 `Ctrl+Shift` 方案，不再占用裸 `Alt`（`SUPER`
@@ -152,6 +169,41 @@
   `.local/tmp`（原为系统 Temp），构建目标、编译缓存与构建临时文件不再外泄到仓库外；
   规则固化为 docs/AGENT_RULES/development.md 的「构建产物仓内封闭」不变量
   （`.local/` 整目录 gitignore）。
+- 性能（Windows 帧节奏）：帧节流改用高精度可等待定时器（`CreateWaitableTimerExW`
+  HIGH_RESOLUTION，旧系统回退 async-io），deadline 从本帧开始计、paint 耗时不再叠加到帧
+  间隔；连接建立时 `timeBeginPeriod(1)`，定时器与 mux 3ms 输出合并等待不再量化到 15.6ms；
+  节流期间 `ValidateRect` 停止 `WM_PAINT` 空转。
+- 性能（Windows DPI/WGL）：`default_dpi` 取光标所在显示器的有效 DPI（尊重
+  `dpi_by_screen`/`dpi`），高缩放机器首窗不再先按 96dpi 建再重做；`WM_DPICHANGED` 采纳
+  系统建议尺寸；WGL 优先请求无 MSAA、无深度/模板的像素格式（驱动拒绝再回退），扩展探测
+  只做一次并销毁探测窗口。
+- 性能（进程探测）：Windows 前台进程信息过期时立即返回旧值并在后台刷新（通用
+  stale-while-revalidate 缓存 `mux/src/stale_cache.rs`，Windows TTL 1s），标签栏与标题重算
+  不再在 GUI 主线程同步做进程快照；500ms 内多个 pane 共享同一次快照，进程树组装由
+  O(子树×N) 降为 O(n)；新建 tab/分屏的 openpty 与子进程创建移出 GUI 主线程；拖动改变
+  窗口大小时行列不变不再调用 `ResizePseudoConsole`。
+- 性能（标题/标签栏）：终端重复设置相同标题不再通知 GUI；标题与进度 Alert 只让 pane 所在
+  窗口重算；短时间内多次标题刷新（含 TabResized）合并为一次（约 40ms）；
+  `format-tab-title`/`format-window-title` 回调共用一份 tabs/panes/config 参数表（config 表
+  按配置代数缓存，应视为只读）；纯色背景层改画纯色四边形不再占用纹理 atlas，atlas 初始
+  尺寸从 128 提到 1024；拖拽改变窗口大小时只 resize 当前 tab，其余 tab、标题刷新与
+  `window-resized` 在拖拽静止或切到该 tab 时补齐。
+- 滚动条 thumb 改为靠右的圆端细条，悬停与拖动时提亮；CharSelect/PaneSelect 圆角固定
+  6px；InputSelector 默认说明随界面语言显示中文；启动器等文本浮层标题行加粗并加分隔线。
+- dotfiles：关闭窗口默认先确认（`window_close_confirmation = 'AlwaysPrompt'`，只剩空闲
+  Shell 含 `wsl.exe`/`wslhost.exe` 的窗口仍一键关闭）；配色拆成「方案」与「界面色」——默认
+  方案注册为 `GX Mocha`，设置浮层「外观」选的方案现在整套生效，ANSI 16 色改为 Catppuccin
+  Mocha 官方色板（背景 `#1f1f28` 不变），壁纸遮罩与专注模式背景跟随当前方案；终端字体
+  回退链为 JetBrainsMono NF → Noto Sans CJK SC → Segoe UI Emoji（微软雅黑只在找不到
+  Noto CJK 时补入）；首窗按活动屏幕约 80% 居中；删除与默认值相同的 `freetype_load_target`/
+  `freetype_render_target`。
+- 文档纠错：`prefer_egl` 默认值写明 Windows 为 false、其他平台为 true；
+  `bell_requests_attention` 默认值更正为 false 并注明 Windows 任务栏闪烁尚未实现。
+- 随包 ConPTY（`conpty.dll` + `OpenConsole.exe`）从 1.22.2502.04002 升级到微软官方
+  NuGet 包 `Microsoft.Windows.Console.ConPTY` 1.24.261001001（签名有效，SHA256 登记在
+  `assets/windows/conhost/README.md`），规避 pwsh 退出全屏 TUI 时 conhost FailFast 闪退；
+  升级后需删除 `target/<profile>/` 下旧副本再构建。
+
 
 ### Fixed
 - GX 自动 CI 的 push/PR 与手动发布源码 ref 对齐默认分支 `feature/gx_wezterm`，
@@ -201,6 +253,21 @@
   Bold 变体落空后回退微软雅黑（比例字体）。dotfiles `config/fonts.lua` 在 Windows 改用
   typographic 族名 `JetBrainsMono NF`（两路全字重可解析），macOS/Linux 保持原名；验证见
   `.ui-evidence` font-bold-fix 批次（ls-fonts 解析链 Before/After 与等宽像素测量）。
+- Windows 节流期间 `WM_PAINT` 被反复重生成导致 GUI 主线程空转跑满一核。
+- `max_fps=0`/`animation_fps=0` 在配置阶段报错（`max_fps` 限 1..=1000），不再在渲染路径
+  除零 panic。
+- WGL 扩展探测每建一个窗口泄漏一个 HWND+DC。
+- DECSET 2026 同步输出帧不再被 2048 子批拆开画出半帧；子批改为转移所有权不再深拷贝。
+- Windows 命令行超过 520 字符的进程不再丢失 cwd，新 tab 与分屏可以继承目录；可执行文件
+  路径支持长路径。
+- 已退出的窗格（被 exit_behavior 保留或 spawn 失败）关闭时不再弹确认（此前 Windows 上
+  总会弹）。
+- WSL 域：`WEZTERM_PANE`、`WEZTERM_UNIX_SOCKET` 与 `set_environment_variables` 经 `WSLENV`
+  传进发行版。
+- `WinChild` 作为 Future 等待时不再等在已关闭或被复用的句柄上。
+- dotfiles：tab 标题首帧被截成「pw…」；手动重命名改存在 mux 里，配置重载后不再丢失；
+  前台进程名按 tab 限频 2 秒读取，已关闭 tab 与窗口的状态按窗口回收。
+
 
 ## 0.3.0(TBD)
 
