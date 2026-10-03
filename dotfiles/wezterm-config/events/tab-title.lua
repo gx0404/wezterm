@@ -5,6 +5,7 @@
 local wezterm = require('wezterm')
 local Cells = require('utils.cells')
 local OptsValidator = require('utils.opts-validator')
+local cache = require('utils.cache')
 
 ---
 -- =======================================
@@ -80,6 +81,11 @@ local TITLE_INSET = {
    DEFAULT = 6,
    ICON = 8,
 }
+
+-- format-tab-title 每个 tab 每帧至少调用两次（量宽、绘制），而 foreground_process_name
+-- 是惰性字段，每次读取都要向系统查询进程（Windows 上要快照进程树）。同一 tab 同一
+-- 窗格的前台进程名最多每隔这么多秒查一次。
+local PROBE_INTERVAL_S = 2
 
 local RENDER_VARIANTS = {
    { 'scircle_left', 'title', 'padding', 'scircle_right' },
@@ -222,8 +228,10 @@ end
 ---@class Tab
 ---@field title string
 ---@field cells FormatCells
----@field title_locked boolean
----@field locked_title string
+---@field window_id number? 所属窗口，回收已关闭 tab 时只动同一窗口的条目
+---@field probe_at integer? 上次查前台进程名的时刻（os.time()）
+---@field probe_pane_id number? 上次查的是哪个窗格
+---@field probe_name string 上次查到的（已清洗的）前台进程名
 ---@field is_wsl boolean
 ---@field is_admin boolean
 ---@field unseen_output boolean
@@ -236,8 +244,7 @@ function Tab:new()
    local tab = {
       title = '',
       cells = Cells:new(),
-      title_locked = false,
-      locked_title = '',
+      probe_name = '',
       is_wsl = false,
       is_admin = false,
       unseen_output = false,
@@ -246,13 +253,36 @@ function Tab:new()
    return setmetatable(tab, self)
 end
 
----@param event_opts Event.TabTitleOptions
----@param tab any WezTerm https://wezfurlong.org/wezterm/config/lua/MuxTab/index.html
----@param max_width number
-function Tab:set_info(event_opts, tab, max_width)
-   local process_name = clean_process_name(tab.active_pane.foreground_process_name)
-   local base_title = stable_pane_title(tab.active_pane.title)
+---前台进程名（已清洗）；同一窗格在 PROBE_INTERVAL_S 秒内复用上次结果，
+---换了窗格（active_pane 变了）立即重查。
+---@param pane any WezTerm PaneInformation
+---@param now integer os.time()
+---@return string
+function Tab:probe_process_name(pane, now)
+   if
+      self.probe_at
+      and self.probe_pane_id == pane.pane_id
+      and cache.still_fresh(self.probe_at, now, PROBE_INTERVAL_S)
+   then
+      return self.probe_name
+   end
+   self.probe_at = now
+   self.probe_pane_id = pane.pane_id
+   self.probe_name = clean_process_name(pane.foreground_process_name or '')
+   return self.probe_name
+end
 
+---@param event_opts Event.TabTitleOptions
+---@param tab any WezTerm TabInformation https://wezfurlong.org/wezterm/config/lua/TabInformation.html
+---@param max_width number
+---@param now? integer os.time()，缺省取当前时间
+function Tab:set_info(event_opts, tab, max_width, now)
+   -- active_pane 在窗口刚创建等边界情况下可能为 nil
+   local pane = tab.active_pane
+   local process_name = pane and self:probe_process_name(pane, now or os.time()) or ''
+   local base_title = stable_pane_title(pane and pane.title)
+
+   self.window_id = tab.window_id
    self.is_wsl = process_name:match('^wsl') ~= nil
    self.is_admin = (
       base_title:match('^Administrator: ') or base_title:match('(Admin)')
@@ -269,8 +299,11 @@ function Tab:set_info(event_opts, tab, max_width)
       inset = inset + 2
    end
 
-   if self.title_locked then
-      self.title = create_title('', self.locked_title, max_width, inset)
+   -- 手动重命名保存在 mux 的 tab 上（tab:set_title），跨配置重载保留；
+   -- 非空时优先于「进程名 ~ 窗格标题」的自动标题。
+   local manual_title = tab.tab_title
+   if manual_title ~= nil and manual_title ~= '' then
+      self.title = create_title('', manual_title, max_width, inset)
       return
    end
    self.title = create_title(process_name, base_title, max_width, inset)
@@ -286,12 +319,6 @@ function Tab:create_cells()
       :add_segment('unseen_output', ' ' .. GLYPH_CIRCLE)
       :add_segment('padding', ' ')
       :add_segment('scircle_right', GLYPH_SCIRCLE_RIGHT)
-end
-
----@param title string
-function Tab:update_and_lock_title(title)
-   self.locked_title = title
-   self.title_locked = true
 end
 
 ---@param event_opts Event.TabTitleOptions
@@ -343,8 +370,75 @@ function Tab:render()
    return self.cells:render(RENDER_VARIANTS[variant_idx])
 end
 
----@type Tab[]
+---@type table<number, Tab> tab_id -> 状态；窗口里的 tab 关闭后由 prune_closed_tabs 回收
 local tab_list = {}
+
+---回收已关闭 tab 的状态。tabs 是 format-tab-title 传入的、该窗口当前的全部 tab；
+---tab_list 跨窗口共用，所以只回收属于同一窗口、却已不在 tabs 里的条目——动了其他
+---窗口的条目，各窗口会轮流把对方的状态清掉，缓存形同虚设。
+---@param window_id number? 当前 tab 所在窗口
+---@param tabs any[] TabInformation 列表
+---@param current_tab_id number 当前正在渲染的 tab（兜底保证它不会被清掉）
+local function prune_closed_tabs(window_id, tabs, current_tab_id)
+   local alive = { [current_tab_id] = true }
+   for _, other in ipairs(tabs or {}) do
+      alive[other.tab_id] = true
+   end
+   for id, state in pairs(tab_list) do
+      if state.window_id == window_id and not alive[id] then
+         tab_list[id] = nil
+      end
+   end
+end
+
+---format-tab-title 的核心：首次见到的 tab 与已有的 tab 走同一条路径（建好格子后照样
+---更新标题与颜色），首帧就是完整标题，不会先画出一个被截断的空壳。
+---@param event_opts Event.TabTitleOptions
+---@param tab any WezTerm TabInformation
+---@param tabs any[] 该窗口的全部 TabInformation
+---@param hover boolean
+---@param max_width number
+---@param now? integer os.time()，缺省取当前时间
+---@return FormatItem[]
+local function render_tab(event_opts, tab, tabs, hover, max_width, now)
+   prune_closed_tabs(tab.window_id, tabs, tab.tab_id)
+
+   local state = tab_list[tab.tab_id]
+   if not state then
+      state = Tab:new()
+      state:create_cells()
+      tab_list[tab.tab_id] = state
+   end
+   state:set_info(event_opts, tab, max_width, now)
+   state:update_cells(event_opts, tab.is_active, hover)
+   return state:render()
+end
+
+---手动重命名：写进 mux 的 tab 标题（跨配置重载保留）；空串等于恢复自动标题。
+---@param window any WezTerm Window
+---@param line string?
+local function apply_manual_title(window, line)
+   if line == nil then
+      return
+   end
+   local tab = window:active_tab()
+   if tab then
+      tab:set_title(line)
+   end
+end
+
+M.render_tab = render_tab
+M.apply_manual_title = apply_manual_title
+
+-- 导出：供 tests/pure_fn_test.lua 观察回收结果。
+---@return integer
+M.tracked_tab_count = function()
+   local count = 0
+   for _ in pairs(tab_list) do
+      count = count + 1
+   end
+   return count
+end
 
 ---@param opts? Event.TabTitleOptions Default: {unseen_icon = 'circle', hide_active_tab_unseen = true}
 M.setup = function(opts)
@@ -356,7 +450,7 @@ M.setup = function(opts)
 
    -- CUSTOM EVENT
    -- Event listener to manually update the tab name
-   -- Tab name will remain locked until the `reset-tab-title` is triggered
+   -- Tab name stays until `tabs.reset-tab-title` is triggered
    wezterm.on('tabs.manual-update-tab-title', function(window, pane)
       window:perform_action(
          wezterm.action.PromptInputLine({
@@ -365,12 +459,8 @@ M.setup = function(opts)
                { Attribute = { Intensity = 'Bold' } },
                { Text = 'Enter new name for tab' },
             }),
-            action = wezterm.action_callback(function(_window, _pane, line)
-               if line ~= nil then
-                  local tab = window:active_tab()
-                  local id = tab:tab_id()
-                  tab_list[id]:update_and_lock_title(line)
-               end
+            action = wezterm.action_callback(function(inner_window, _pane, line)
+               apply_manual_title(inner_window, line)
             end),
          }),
          pane
@@ -378,11 +468,9 @@ M.setup = function(opts)
    end)
 
    -- CUSTOM EVENT
-   -- Event listener to unlock manually set tab name
+   -- Event listener to restore the automatic tab name
    wezterm.on('tabs.reset-tab-title', function(window, _pane)
-      local tab = window:active_tab()
-      local id = tab:tab_id()
-      tab_list[id].title_locked = false
+      apply_manual_title(window, '')
    end)
 
    -- CUSTOM EVENT
@@ -406,17 +494,8 @@ M.setup = function(opts)
    end)
 
    -- BUILTIN EVENT
-   wezterm.on('format-tab-title', function(tab, _tabs, _panes, _config, hover, max_width)
-      if not tab_list[tab.tab_id] then
-         tab_list[tab.tab_id] = Tab:new()
-         tab_list[tab.tab_id]:set_info(valid_opts, tab, max_width)
-         tab_list[tab.tab_id]:create_cells()
-         return tab_list[tab.tab_id]:render()
-      end
-
-      tab_list[tab.tab_id]:set_info(valid_opts, tab, max_width)
-      tab_list[tab.tab_id]:update_cells(valid_opts, tab.is_active, hover)
-      return tab_list[tab.tab_id]:render()
+   wezterm.on('format-tab-title', function(tab, tabs, _panes, _config, hover, max_width)
+      return render_tab(valid_opts, tab, tabs, hover, max_width)
    end)
 end
 

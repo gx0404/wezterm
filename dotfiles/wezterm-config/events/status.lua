@@ -1,5 +1,6 @@
 local wezterm = require('wezterm')
 local tab_title = require('events.tab-title')
+local still_fresh = require('utils.cache').still_fresh
 
 local M = {}
 local last_status_by_window = {}
@@ -16,14 +17,27 @@ local BATTERY_TTL_S = 60
 local probe_by_window = {}
 local battery_cache = nil
 
----缓存是否仍在有效期内；时钟被往回拨（age 为负）按过期处理。
----@param at integer
----@param now integer
----@param ttl integer
----@return boolean
-local function still_fresh(at, now, ttl)
-   local age = now - at
-   return age >= 0 and age < ttl
+---回收已关闭窗口的状态，表项不随窗口开关无限增长（写法同 events/right-status.lua）。
+---wezterm.gui 只在 GUI 进程里有；取不到窗口列表时本轮不回收，下一轮再试。
+local function prune_closed_windows()
+   local gui = wezterm.gui
+   if not (gui and gui.gui_windows) then
+      return
+   end
+   local ok, windows = pcall(gui.gui_windows)
+   if not ok then
+      return
+   end
+   local alive = {}
+   for _, gui_window in ipairs(windows) do
+      alive[gui_window:window_id()] = true
+   end
+   for id in pairs(last_status_by_window) do
+      if not alive[id] then
+         last_status_by_window[id] = nil
+         probe_by_window[tostring(id)] = nil
+      end
+   end
 end
 
 local colors = {
@@ -232,6 +246,7 @@ M.setup = function(opts)
       local now = os.time()
       local left, right = render_status(window, date_format, now)
       local window_id = window:window_id()
+      prune_closed_windows()
       local previous = last_status_by_window[window_id]
 
       if not previous or previous.left ~= left then
@@ -248,6 +263,13 @@ M.setup = function(opts)
 end
 
 -- 导出：供 tests/pure_fn_test.lua 单独驱动断言，无需起 GUI 窗口。
+M.tracked_window_count = function()
+   local count = 0
+   for _ in pairs(last_status_by_window) do
+      count = count + 1
+   end
+   return count
+end
 M.should_hide_tab_bar = should_hide_tab_bar
 M.next_tab_bar_state = next_tab_bar_state
 M.apply_herdr_app_mode = apply_herdr_app_mode

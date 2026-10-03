@@ -286,6 +286,233 @@ do
    check('battery.rendered', window.right ~= nil and window.right:find('50%%') ~= nil, true)
 end
 
+-- utils/cache.lua::still_fresh：有效期内为真，到期或时钟往回拨为假
+do
+   local still_fresh = require('utils.cache').still_fresh
+   check('cache.fresh', still_fresh(100, 101, 2), true)
+   check('cache.same_second', still_fresh(100, 100, 2), true)
+   check('cache.expired_at_ttl', still_fresh(100, 102, 2), false)
+   check('cache.expired', still_fresh(100, 200, 2), false)
+   check('cache.clock_back', still_fresh(100, 99, 2), false)
+end
+
+-- update-status：已关闭窗口的状态按 gui_windows() 回收，不随窗口开关无限增长
+do
+   local real_gui, real_on, real_battery = wezterm.gui, wezterm.on, wezterm.battery_info
+   local handler = nil
+   wezterm.on = function(name, callback)
+      if name == 'update-status' then
+         handler = callback
+      end
+   end
+   wezterm.battery_info = function()
+      return {}
+   end
+   package.loaded['events.status'] = nil
+   local recycling = require('events.status')
+   recycling.setup({ herdr_app_mode = false })
+   wezterm.on = real_on
+
+   local function status_window(id)
+      local window = { id = id }
+      function window:active_workspace()
+         return 'default'
+      end
+      function window:active_key_table()
+         return nil
+      end
+      function window:leader_is_active()
+         return false
+      end
+      function window:window_id()
+         return self.id
+      end
+      function window:mux_window()
+         return {
+            tabs = function()
+               return { 1 }
+            end,
+         }
+      end
+      function window:set_left_status(_) end
+      function window:set_right_status(_) end
+      return window
+   end
+   local function gui_window(id)
+      return {
+         window_id = function()
+            return id
+         end,
+      }
+   end
+
+   local first, second = status_window(900021), status_window(900022)
+   wezterm.gui = {
+      gui_windows = function()
+         return { gui_window(900021), gui_window(900022) }
+      end,
+   }
+   handler(first, nil)
+   handler(second, nil)
+   check('status_recycle.both_tracked', recycling.tracked_window_count(), 2)
+   wezterm.gui = {
+      gui_windows = function()
+         return { gui_window(900021) }
+      end,
+   }
+   handler(first, nil)
+   check('status_recycle.closed_removed', recycling.tracked_window_count(), 1)
+   -- 取不到窗口列表时本轮不回收（也不抛错）
+   wezterm.gui = {
+      gui_windows = function()
+         error('no gui')
+      end,
+   }
+   handler(second, nil)
+   check('status_recycle.error_keeps_state', recycling.tracked_window_count(), 2)
+   wezterm.gui = nil
+   handler(first, nil)
+   check('status_recycle.no_gui_keeps_state', recycling.tracked_window_count(), 2)
+   wezterm.gui, wezterm.battery_info = real_gui, real_battery
+   package.loaded['events.status'] = nil
+end
+
+-- tab 标题（events/tab-title.lua）：首帧即完整、手动重命名走 mux 的 tab 标题、
+-- 前台进程名限频、已关闭 tab 的状态按窗口回收。
+do
+   package.loaded['events.tab-title'] = nil
+   local titles = require('events.tab-title')
+   local opts = { unseen_icon = 'numbered_box', hide_active_tab_unseen = true }
+
+   local function flatten(items)
+      local parts = {}
+      for _, item in ipairs(items) do
+         if type(item) == 'table' and item.Text then
+            table.insert(parts, item.Text)
+         end
+      end
+      return table.concat(parts)
+   end
+
+   -- 假 tab：foreground_process_name 像真实字段一样惰性取值，并记下读取次数
+   local function fake_tab(id, window_id, process, title)
+      local reads = { count = 0 }
+      local pane = { pane_id = id * 10, title = title, has_unseen_output = false }
+      setmetatable(pane, {
+         __index = function(_, key)
+            if key == 'foreground_process_name' then
+               reads.count = reads.count + 1
+               return process
+            end
+         end,
+      })
+      local tab = {
+         tab_id = id,
+         window_id = window_id,
+         is_active = false,
+         tab_title = '',
+         active_pane = pane,
+         panes = { pane },
+      }
+      return tab, reads
+   end
+
+   -- 首次渲染就是完整标题（此前首帧只有空壳，标题被截成「pw…」）
+   local tab, reads = fake_tab(1, 700, '/usr/bin/pwsh', 'build')
+   local text = flatten(titles.render_tab(opts, tab, { tab }, false, 32, 1000))
+   check('tab_title.first_frame_full', text:find('pwsh ~ build', 1, true) ~= nil, true)
+   check('tab_title.first_frame_not_truncated', text:find('…', 1, true), nil)
+   check('tab_title.tracked_after_first', titles.tracked_tab_count(), 1)
+
+   -- 手动标题（tab.tab_title）优先于自动标题；清空后恢复自动标题
+   tab.tab_title = 'my tab'
+   text = flatten(titles.render_tab(opts, tab, { tab }, false, 32, 1000))
+   check('tab_title.manual_shown', text:find('my tab', 1, true) ~= nil, true)
+   check('tab_title.manual_hides_auto', text:find('pwsh ~', 1, true), nil)
+   tab.tab_title = ''
+   text = flatten(titles.render_tab(opts, tab, { tab }, false, 32, 1000))
+   check('tab_title.reset_restores_auto', text:find('pwsh ~ build', 1, true) ~= nil, true)
+
+   -- 前台进程名：同一窗格 2 秒内只读一次；到期、时钟回拨、换窗格都重读
+   check('tab_title.probe.first_frames', reads.count, 1)
+   titles.render_tab(opts, tab, { tab }, true, 32, 1001)
+   check('tab_title.probe.throttled', reads.count, 1)
+   titles.render_tab(opts, tab, { tab }, false, 32, 1002)
+   check('tab_title.probe.after_interval', reads.count, 2)
+   titles.render_tab(opts, tab, { tab }, false, 32, 990)
+   check('tab_title.probe.clock_back', reads.count, 3)
+   tab.active_pane.pane_id = 99
+   titles.render_tab(opts, tab, { tab }, false, 32, 990)
+   check('tab_title.probe.pane_changed', reads.count, 4)
+
+   -- 未读输出：非活动 tab 显示编号，活动 tab 按 hide_active_tab_unseen 隐藏
+   local busy = fake_tab(2, 700, 'zsh', 'logs')
+   busy.panes = {
+      { has_unseen_output = true },
+      { has_unseen_output = true },
+      { has_unseen_output = false },
+   }
+   local box_two = wezterm.nerdfonts.md_numeric_2_box_multiple
+   text = flatten(titles.render_tab(opts, busy, { tab, busy }, false, 32, 1000))
+   check('tab_title.unseen_count_shown', text:find(box_two, 1, true) ~= nil, true)
+   busy.is_active = true
+   text = flatten(titles.render_tab(opts, busy, { tab, busy }, false, 32, 1000))
+   check('tab_title.unseen_hidden_when_active', text:find(box_two, 1, true), nil)
+
+   -- 回收：只清同一窗口里已不在 tabs 的 tab，别的窗口的状态不受影响
+   local extra = fake_tab(3, 700, 'zsh', 'a')
+   local other, other_reads = fake_tab(9, 800, 'zsh', 'b')
+   titles.render_tab(opts, extra, { tab, busy, extra }, false, 32, 1000)
+   titles.render_tab(opts, other, { other }, false, 32, 1000)
+   check('tab_title.recycle.before', titles.tracked_tab_count(), 4)
+   -- 窗口 700 关掉了 tab 2、3：只剩 tab 1
+   titles.render_tab(opts, tab, { tab }, false, 32, 1000)
+   check('tab_title.recycle.closed_removed', titles.tracked_tab_count(), 2)
+   titles.render_tab(opts, other, { other }, false, 32, 1000)
+   check('tab_title.recycle.other_window_kept', other_reads.count, 1)
+   -- tabs 为 nil（异常调用）也不抛错、不清掉当前 tab
+   check(
+      'tab_title.recycle.nil_tabs',
+      pcall(titles.render_tab, opts, other, nil, false, 32, 1000),
+      true
+   )
+   check('tab_title.recycle.nil_tabs_kept', titles.tracked_tab_count(), 2)
+
+   -- active_pane 为 nil（窗口刚创建）：不抛错，标题为空
+   local bare = { tab_id = 4, window_id = 700, is_active = false, tab_title = '', panes = {} }
+   check(
+      'tab_title.nil_active_pane',
+      pcall(titles.render_tab, opts, bare, { bare }, false, 32, 1000),
+      true
+   )
+
+   -- 手动重命名/重置：写进 mux 的 tab 标题（tab:set_title），空串即恢复自动标题
+   local function fake_window(active)
+      return {
+         active_tab = function()
+            return active
+         end,
+      }
+   end
+   local mux_tab = {
+      set_title = function(self, value)
+         self.title = value
+      end,
+   }
+   titles.apply_manual_title(fake_window(mux_tab), 'release')
+   check('tab_title.rename.set_title', mux_tab.title, 'release')
+   titles.apply_manual_title(fake_window(mux_tab), '')
+   check('tab_title.reset.set_title_empty', mux_tab.title, '')
+   mux_tab.title = 'kept'
+   titles.apply_manual_title(fake_window(mux_tab), nil)
+   check('tab_title.rename.cancelled_keeps_title', mux_tab.title, 'kept')
+   check(
+      'tab_title.rename.no_active_tab',
+      pcall(titles.apply_manual_title, fake_window(nil), 'x'),
+      true
+   )
+end
+
 -- clean_process_name（来自 events/tab-title.lua，herdr 应用模式判断复用同一口径）
 check('clean.unix_path', tab_title.clean_process_name('/usr/bin/herdr'), 'herdr')
 check('clean.windows_path_exe', tab_title.clean_process_name('C:\\Users\\x\\herdr.exe'), 'herdr')
