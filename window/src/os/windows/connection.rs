@@ -18,8 +18,10 @@ use winapi::shared::ntdef::LARGE_INTEGER;
 use winapi::shared::windef::*;
 use winapi::shared::winerror::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS};
 use winapi::um::handleapi::CloseHandle;
+use winapi::um::mmsystem::TIMERR_NOERROR;
 use winapi::um::shellscalingapi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use winapi::um::synchapi::{CancelWaitableTimer, CreateWaitableTimerExW, SetWaitableTimerEx};
+use winapi::um::timeapi::{timeBeginPeriod, timeEndPeriod};
 use winapi::um::winbase::{INFINITE, WAIT_OBJECT_0};
 use winapi::um::wingdi::{
     DEVMODEW, DISPLAY_DEVICEW, DM_DISPLAYFREQUENCY, QDC_ONLY_ACTIVE_PATHS, QDC_VIRTUAL_MODE_AWARE,
@@ -40,6 +42,8 @@ pub struct Connection {
     /// fork: 高精度帧定时器，驱动所有窗口的 max_fps 节流 deadline；
     /// Win10 1803 以前创建失败为 None，此时 wm_paint 回退 async_io 定时器
     frame_timer: Option<FrameTimer>,
+    /// fork: timeBeginPeriod(1) 是否成功，Drop 时配对 timeEndPeriod
+    time_period_raised: bool,
     pub(crate) windows: RefCell<HashMap<HWindow, Rc<RefCell<WindowInner>>>>,
     pub(crate) gl_connection: RefCell<Option<Rc<crate::egl::GlConnection>>>,
 }
@@ -208,9 +212,19 @@ impl ConnectionOps for Connection {
 impl Connection {
     pub(crate) fn create_new() -> anyhow::Result<Self> {
         let event_handle = SPAWN_QUEUE.event_handle.0;
+        // fork: 把本进程的系统计时器精度提到 1ms。Sleep / WaitForXxx 超时与
+        // async_io 的定时器都受此量化，否则 mux 的 3ms 输出合并等待、
+        // 回退路径的帧定时器都会被拉到 15.6ms 的默认节拍
+        let time_period_raised = unsafe { timeBeginPeriod(1) } == TIMERR_NOERROR;
+        if !time_period_raised {
+            log::warn!(
+                "timeBeginPeriod(1) was rejected; timer resolution stays at the system default"
+            );
+        }
         Ok(Self {
             event_handle,
             frame_timer: FrameTimer::new(),
+            time_period_raised,
             windows: RefCell::new(HashMap::new()),
             gl_connection: RefCell::new(None),
         })
@@ -334,6 +348,17 @@ impl Connection {
         .detach();
 
         future
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        // frame_timer 的句柄由 FrameTimer::drop 关闭
+        if self.time_period_raised {
+            unsafe {
+                timeEndPeriod(1);
+            }
+        }
     }
 }
 
