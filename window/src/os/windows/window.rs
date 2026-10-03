@@ -2872,7 +2872,6 @@ unsafe fn wm_paint(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) -> 
 
 fn mods_and_buttons(wparam: WPARAM) -> (Modifiers, MouseButtons) {
     let mut modifiers = Modifiers::default();
-    let mut buttons = MouseButtons::default();
     if wparam & MK_CONTROL != 0 {
         modifiers |= Modifiers::CTRL;
     }
@@ -2882,17 +2881,58 @@ fn mods_and_buttons(wparam: WPARAM) -> (Modifiers, MouseButtons) {
     if unsafe { GetKeyState(VK_MENU) } as u16 & 0x8000 != 0 {
         modifiers |= Modifiers::ALT;
     }
-    if wparam & MK_LBUTTON != 0 {
+    (modifiers, mouse_buttons_from_wparam(wparam))
+}
+
+/// fork: the held buttons from the key state in the low word of
+/// `wparam`. The high word of WM_XBUTTON* carries which X button
+/// changed (and of WM_MOUSEWHEEL the delta), so it must be ignored.
+fn mouse_buttons_from_wparam(wparam: WPARAM) -> MouseButtons {
+    let keys = GET_KEYSTATE_WPARAM(wparam) as WPARAM;
+    let mut buttons = MouseButtons::default();
+    if keys & MK_LBUTTON != 0 {
         buttons |= MouseButtons::LEFT;
     }
-    if wparam & MK_MBUTTON != 0 {
+    if keys & MK_MBUTTON != 0 {
         buttons |= MouseButtons::MIDDLE;
     }
-    if wparam & MK_RBUTTON != 0 {
+    if keys & MK_RBUTTON != 0 {
         buttons |= MouseButtons::RIGHT;
     }
-    // TODO: XBUTTON1 and XBUTTON2?
-    (modifiers, buttons)
+    if keys & MK_XBUTTON1 != 0 {
+        buttons |= MouseButtons::X1;
+    }
+    if keys & MK_XBUTTON2 != 0 {
+        buttons |= MouseButtons::X2;
+    }
+    buttons
+}
+
+/// fork: which extended button a WM_XBUTTON* message is about
+fn xbutton_from_wparam(wparam: WPARAM) -> Option<MousePress> {
+    match GET_XBUTTON_WPARAM(wparam) {
+        XBUTTON1 => Some(MousePress::X1),
+        XBUTTON2 => Some(MousePress::X2),
+        _ => None,
+    }
+}
+
+/// fork: maps a client area button message to its event kind. The
+/// window class has no CS_DBLCLKS so double click messages are not
+/// expected; L/R/M ones stay unhandled as before, while an X button
+/// double click is treated as a press to be safe.
+fn mouse_button_event_kind(msg: UINT, wparam: WPARAM) -> Option<MouseEventKind> {
+    Some(match msg {
+        WM_LBUTTONDOWN => MouseEventKind::Press(MousePress::Left),
+        WM_LBUTTONUP => MouseEventKind::Release(MousePress::Left),
+        WM_RBUTTONDOWN => MouseEventKind::Press(MousePress::Right),
+        WM_RBUTTONUP => MouseEventKind::Release(MousePress::Right),
+        WM_MBUTTONDOWN => MouseEventKind::Press(MousePress::Middle),
+        WM_MBUTTONUP => MouseEventKind::Release(MousePress::Middle),
+        WM_XBUTTONDOWN | WM_XBUTTONDBLCLK => MouseEventKind::Press(xbutton_from_wparam(wparam)?),
+        WM_XBUTTONUP => MouseEventKind::Release(xbutton_from_wparam(wparam)?),
+        _ => return None,
+    })
 }
 
 fn mouse_coords(lparam: LPARAM) -> Point {
@@ -2966,6 +3006,86 @@ fn cursor_icons_use_windows_cursors() {
     assert_eq!(mouse_cursor_id(CursorIcon::Text), IDC_IBEAM);
 }
 
+/// fork: builds a WM_XBUTTON* style wparam (key state low, X button high)
+#[cfg(test)]
+fn xbutton_wparam(keys: WPARAM, xbutton: WORD) -> WPARAM {
+    (keys & 0xffff) | ((xbutton as WPARAM) << 16)
+}
+
+#[test]
+fn xbutton_messages_map_to_side_button_events() {
+    let x1 = xbutton_wparam(MK_XBUTTON1, XBUTTON1);
+    let x2 = xbutton_wparam(MK_XBUTTON2, XBUTTON2);
+    assert_eq!(
+        mouse_button_event_kind(WM_XBUTTONDOWN, x1),
+        Some(MouseEventKind::Press(MousePress::X1))
+    );
+    assert_eq!(
+        mouse_button_event_kind(WM_XBUTTONDOWN, x2),
+        Some(MouseEventKind::Press(MousePress::X2))
+    );
+    // The button is no longer held in the key state of its release
+    assert_eq!(
+        mouse_button_event_kind(WM_XBUTTONUP, xbutton_wparam(0, XBUTTON1)),
+        Some(MouseEventKind::Release(MousePress::X1))
+    );
+    assert_eq!(
+        mouse_button_event_kind(WM_XBUTTONUP, xbutton_wparam(0, XBUTTON2)),
+        Some(MouseEventKind::Release(MousePress::X2))
+    );
+    assert_eq!(
+        mouse_button_event_kind(WM_XBUTTONDBLCLK, x1),
+        Some(MouseEventKind::Press(MousePress::X1))
+    );
+    assert_eq!(
+        mouse_button_event_kind(WM_XBUTTONDBLCLK, x2),
+        Some(MouseEventKind::Press(MousePress::X2))
+    );
+    // Unknown X button numbers are ignored
+    assert_eq!(xbutton_from_wparam(xbutton_wparam(0, 3)), None);
+    assert_eq!(
+        mouse_button_event_kind(WM_XBUTTONDOWN, xbutton_wparam(0, 3)),
+        None
+    );
+}
+
+#[test]
+fn regular_button_messages_are_unchanged() {
+    assert_eq!(
+        mouse_button_event_kind(WM_LBUTTONDOWN, MK_LBUTTON),
+        Some(MouseEventKind::Press(MousePress::Left))
+    );
+    assert_eq!(
+        mouse_button_event_kind(WM_RBUTTONUP, 0),
+        Some(MouseEventKind::Release(MousePress::Right))
+    );
+    assert_eq!(
+        mouse_button_event_kind(WM_MBUTTONDOWN, MK_MBUTTON),
+        Some(MouseEventKind::Press(MousePress::Middle))
+    );
+    for msg in [WM_LBUTTONDBLCLK, WM_RBUTTONDBLCLK, WM_MBUTTONDBLCLK] {
+        assert_eq!(mouse_button_event_kind(msg, 0), None);
+    }
+}
+
+#[test]
+fn held_buttons_include_side_buttons() {
+    assert_eq!(
+        mouse_buttons_from_wparam(MK_LBUTTON | MK_XBUTTON1),
+        MouseButtons::LEFT | MouseButtons::X1
+    );
+    assert_eq!(
+        mouse_buttons_from_wparam(MK_RBUTTON | MK_MBUTTON | MK_XBUTTON2),
+        MouseButtons::RIGHT | MouseButtons::MIDDLE | MouseButtons::X2
+    );
+    // Only the key state counts: XBUTTON2 in the high word is the
+    // button that changed, not one that is held
+    assert_eq!(
+        mouse_buttons_from_wparam(xbutton_wparam(0, XBUTTON2)),
+        MouseButtons::NONE
+    );
+}
+
 unsafe fn mouse_button(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
     let inner = rc_from_hwnd(hwnd)?;
     // To support dragging the window, capture when the left
@@ -2980,15 +3100,7 @@ unsafe fn mouse_button(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) ->
     let (modifiers, mouse_buttons) = mods_and_buttons(wparam);
     let coords = mouse_coords(lparam);
     let event = MouseEvent {
-        kind: match msg {
-            WM_LBUTTONDOWN => MouseEventKind::Press(MousePress::Left),
-            WM_LBUTTONUP => MouseEventKind::Release(MousePress::Left),
-            WM_RBUTTONDOWN => MouseEventKind::Press(MousePress::Right),
-            WM_RBUTTONUP => MouseEventKind::Release(MousePress::Right),
-            WM_MBUTTONDOWN => MouseEventKind::Press(MousePress::Middle),
-            WM_MBUTTONUP => MouseEventKind::Release(MousePress::Middle),
-            _ => return None,
-        },
+        kind: mouse_button_event_kind(msg, wparam)?,
         coords,
         screen_coords: client_to_screen(hwnd, coords),
         mouse_buttons,
@@ -2998,7 +3110,12 @@ unsafe fn mouse_button(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) ->
         .borrow_mut()
         .events
         .dispatch(WindowEvent::MouseEvent(event));
-    Some(0)
+    // fork: the WM_XBUTTON* messages want TRUE when processed
+    if matches!(msg, WM_XBUTTONDOWN | WM_XBUTTONUP | WM_XBUTTONDBLCLK) {
+        Some(winapi::shared::minwindef::TRUE as LRESULT)
+    } else {
+        Some(0)
+    }
 }
 
 unsafe fn nc_mouse_button(
@@ -4386,7 +4503,9 @@ unsafe fn do_wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> 
         WM_MOUSELEAVE => mouse_leave(hwnd, msg, wparam, lparam),
         WM_MOUSEHWHEEL | WM_MOUSEWHEEL => mouse_wheel(hwnd, msg, wparam, lparam),
         WM_LBUTTONDBLCLK | WM_RBUTTONDBLCLK | WM_MBUTTONDBLCLK | WM_LBUTTONDOWN | WM_LBUTTONUP
-        | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN | WM_MBUTTONUP => {
+        | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN | WM_MBUTTONUP
+        // fork: side buttons; WM_NCXBUTTON* stay with DefWindowProc
+        | WM_XBUTTONDOWN | WM_XBUTTONUP | WM_XBUTTONDBLCLK => {
             mouse_button(hwnd, msg, wparam, lparam)
         }
         WM_DROPFILES => drop_files(hwnd, msg, wparam, lparam),
