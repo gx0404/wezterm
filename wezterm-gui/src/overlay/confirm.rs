@@ -1,10 +1,10 @@
+use crate::overlay::style::OverlayStyle;
 use crate::scripting::guiwin::GuiWin;
 use config::i18n::tr;
 use config::keyassignment::{Confirmation, KeyAssignment};
 use mux::termwiztermtab::TermWizTerminal;
 use mux_lua::MuxPane;
 use std::rc::Rc;
-use termwiz::cell::AttributeChange;
 use termwiz::color::ColorAttribute;
 use termwiz::input::{InputEvent, KeyCode, KeyEvent, MouseButtons, MouseEvent};
 use termwiz::surface::{Change, CursorVisibility, Position};
@@ -59,6 +59,9 @@ fn run_confirmation_impl(message: &str, term: &mut TermWizTerminal) -> anyhow::R
         No,
     }
 
+    // fork: the active button shares the list selection style
+    let style = OverlayStyle::from_config(&config::configuration());
+
     let render = |term: &mut TermWizTerminal, active: ActiveButton| -> termwiz::Result<()> {
         let mut changes = vec![
             Change::ClearScreen(ColorAttribute::Default),
@@ -79,23 +82,11 @@ fn run_confirmation_impl(message: &str, term: &mut TermWizTerminal) -> anyhow::R
             y: Position::Absolute(button_row),
         });
 
-        if active == ActiveButton::Yes {
-            changes.push(AttributeChange::Reverse(true).into());
-        }
-        changes.push(yes_label.clone().into());
-        if active == ActiveButton::Yes {
-            changes.push(AttributeChange::Reverse(false).into());
-        }
+        changes.extend(style.button(&yes_label, active == ActiveButton::Yes));
 
         changes.push("        ".into());
 
-        if active == ActiveButton::No {
-            changes.push(AttributeChange::Reverse(true).into());
-        }
-        changes.push(no_label.clone().into());
-        if active == ActiveButton::No {
-            changes.push(AttributeChange::Reverse(false).into());
-        }
+        changes.extend(style.button(&no_label, active == ActiveButton::No));
 
         term.render(&changes)?;
         term.flush()

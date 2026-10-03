@@ -9,6 +9,7 @@ use crate::commands::derive_command_from_key_assignment;
 use crate::inputmap::InputMap;
 use crate::overlay::quickselect;
 use crate::overlay::selector::{matcher_pattern, matcher_score};
+use crate::overlay::style::{self, ListRow, OverlayStyle, RowPrefix};
 use crate::termwindow::TermWindowNotif;
 use config::configuration;
 use config::i18n::{fill, tr, tr_cow};
@@ -20,7 +21,6 @@ use mux::window::WindowId;
 use mux::Mux;
 use rayon::prelude::*;
 use std::collections::BTreeMap;
-use termwiz::cell::{AttributeChange, CellAttributes};
 use termwiz::color::ColorAttribute;
 use termwiz::input::{InputEvent, KeyCode, KeyEvent, Modifiers, MouseButtons, MouseEvent};
 use termwiz::surface::{Change, Position};
@@ -173,7 +173,9 @@ impl LauncherArgs {
     }
 }
 
-const ROW_OVERHEAD: usize = 3;
+// fork: the header is a title plus a separator line; the remaining two
+// rows are the inclusive item count and a spare bottom row
+const ROW_OVERHEAD: usize = style::HEADER_ROWS + 2;
 
 struct LauncherState {
     active_idx: usize,
@@ -383,27 +385,25 @@ impl LauncherState {
             self.max_items = max_items;
         }
 
+        let config = configuration();
+        let style = OverlayStyle::from_config(&config);
+
         let mut changes = vec![
             Change::ClearScreen(ColorAttribute::Default),
             Change::CursorPosition {
                 x: Position::Absolute(0),
                 y: Position::Absolute(0),
             },
-            Change::Text(format!(
-                "{}\r\n",
-                truncate_right(&self.help_text, max_width)
-            )),
-            Change::AllAttributes(CellAttributes::default()),
         ];
+        changes.extend(style.header(&truncate_right(&self.help_text, max_width), size.cols));
 
         let labels = &self.labels;
         let max_label_len = labels.iter().map(|s| s.len()).max().unwrap_or(0);
         let mut labels_iter = labels.into_iter();
 
-        let config = configuration();
         let colors = &config.resolved_palette;
-        let launcher_label_fg = colors.launcher_label_fg;
-        let launcher_label_bg = colors.launcher_label_bg;
+        let launcher_label_fg = colors.launcher_label_fg.map(ColorAttribute::from);
+        let launcher_label_bg = colors.launcher_label_bg.map(ColorAttribute::from);
 
         for (row_num, (entry_idx, entry)) in self
             .filtered_entries
@@ -416,66 +416,39 @@ impl LauncherState {
                 break;
             }
 
-            let mut attr = CellAttributes::blank();
-
-            if entry_idx == self.active_idx {
-                changes.push(AttributeChange::Reverse(true).into());
-                attr.set_reverse(true);
-            }
-
             // from above we know that row_num <= max_items
             // show labels as long as we have more labels left
             // and we are not filtering
-            if !self.filtering {
-                if let Some(label) = labels_iter.next() {
-                    if let Some(launcher_label_bg) = launcher_label_bg {
-                        changes.push(AttributeChange::Background(launcher_label_bg.into()).into());
-                    }
-                    if let Some(launcher_label_fg) = launcher_label_fg {
-                        changes.push(AttributeChange::Foreground(launcher_label_fg.into()).into());
-                    }
-                    changes.push(Change::Text(format!(" {label:>max_label_len$}. ")));
-                    if launcher_label_bg.is_some() {
-                        changes.push(AttributeChange::Background(ColorAttribute::Default).into());
-                    }
-                    if launcher_label_fg.is_some() {
-                        changes.push(AttributeChange::Foreground(ColorAttribute::Default).into());
-                    }
-                } else {
-                    changes.push(Change::Text(" ".repeat(max_label_len + 3)));
+            let prefix = if !self.filtering {
+                match labels_iter.next() {
+                    Some(label) => RowPrefix::Label {
+                        label,
+                        width: max_label_len,
+                        fg: launcher_label_fg,
+                        bg: launcher_label_bg,
+                    },
+                    None => RowPrefix::Blank(max_label_len + 3),
                 }
             } else if !self.always_fuzzy {
-                changes.push(Change::Text(" ".repeat(max_label_len + 3)));
+                RowPrefix::Blank(max_label_len + 3)
             } else {
-                changes.push(Change::Text("    ".to_string()));
-            }
+                RowPrefix::Blank(4)
+            };
 
-            let mut line = crate::tabbar::parse_status_text(&entry.label, attr.clone());
-            if line.len() > max_width {
-                line.resize(max_width, termwiz::surface::SEQ_ZERO);
-            }
-            changes.append(&mut line.changes(&attr));
-            changes.push(Change::Text(" ".to_string()));
-
-            if entry_idx == self.active_idx {
-                changes.push(AttributeChange::Reverse(false).into());
-            }
-            changes.push(Change::AllAttributes(CellAttributes::default()));
+            changes.extend(style.list_row(&ListRow {
+                prefix,
+                text: &entry.label,
+                max_width,
+                active: entry_idx == self.active_idx,
+            }));
             changes.push(Change::Text("\r\n".to_string()));
         }
 
         if self.filtering || !self.filter_term.is_empty() {
-            changes.append(&mut vec![
-                Change::CursorPosition {
-                    x: Position::Absolute(0),
-                    y: Position::Absolute(0),
-                },
-                Change::ClearToEndOfLine(ColorAttribute::Default),
-                Change::Text(truncate_right(
-                    &format!("{}{}", &self.fuzzy_help_text, self.filter_term),
-                    max_width,
-                )),
-            ]);
+            changes.extend(style.prompt_line(&truncate_right(
+                &format!("{}{}", &self.fuzzy_help_text, self.filter_term),
+                max_width,
+            )));
         }
 
         term.render(&changes)
@@ -613,15 +586,19 @@ impl LauncherState {
                                 .saturating_sub(1),
                         );
                     }
-                    if y > 0 && y as usize <= self.filtered_entries.len() {
-                        self.active_idx = self.top_row + y as usize - 1;
+                    if let Some(idx) =
+                        style::entry_at_row(y as usize, self.top_row, self.filtered_entries.len())
+                    {
+                        self.active_idx = idx;
                     }
                 }
                 InputEvent::Mouse(MouseEvent {
                     y, mouse_buttons, ..
                 }) => {
-                    if y > 0 && y as usize <= self.filtered_entries.len() {
-                        self.active_idx = self.top_row + y as usize - 1;
+                    if let Some(idx) =
+                        style::entry_at_row(y as usize, self.top_row, self.filtered_entries.len())
+                    {
+                        self.active_idx = idx;
 
                         if mouse_buttons == MouseButtons::LEFT {
                             if self.launch(self.active_idx) {

@@ -186,6 +186,15 @@ pub struct Palette {
 
     pub launcher_label_fg: Option<ColorSpec>,
     pub launcher_label_bg: Option<ColorSpec>,
+
+    /// fork: background of the selected row in the launcher,
+    /// InputSelector and confirmation overlays. When neither this nor
+    /// `overlay_selected_fg` is set, the selected row keeps the
+    /// historical reverse video style.
+    pub overlay_selected_bg: Option<RgbaColor>,
+    /// fork: color of the accent bar drawn at the left edge of the
+    /// selected overlay row.
+    pub overlay_selected_fg: Option<RgbaColor>,
 }
 impl_lua_conversion_dynamic!(Palette);
 
@@ -243,6 +252,8 @@ impl Palette {
             input_selector_label_bg: overlay!(input_selector_label_bg),
             launcher_label_fg: overlay!(launcher_label_fg),
             launcher_label_bg: overlay!(launcher_label_bg),
+            overlay_selected_bg: overlay!(overlay_selected_bg),
+            overlay_selected_fg: overlay!(overlay_selected_fg),
         }
     }
 }
