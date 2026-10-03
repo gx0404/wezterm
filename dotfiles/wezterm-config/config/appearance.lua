@@ -145,7 +145,8 @@ end
 
 -- 窗口材质（gui-settings.json 的 window_material，见 utils/backdrops.lua）：云母/亚克力要
 -- 系统背景材质与半透明窗口一起设置，只在 Windows 上写入；其他平台云母/亚克力已降级成壁纸，
--- 不产生半透明窗口。
+-- 不产生半透明窗口。材质支持由 wezterm.gui.system_backdrop_support() 探测，不支持（如
+-- Windows 10 上的云母）时已回退纯色，window_options() 为空。
 if platform.is_win then
    for key, value in pairs(backdrops:window_options()) do
       options[key] = value

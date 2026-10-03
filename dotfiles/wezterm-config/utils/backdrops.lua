@@ -109,19 +109,39 @@ function BackDrops.material_from_settings(settings_text)
 end
 
 ---云母/亚克力只在 Windows 上有系统材质：其他平台把它们降级成壁纸，免得得到一个没有
----模糊底的半透明窗口。Windows 10/11 对材质的支持差异由 wezterm 本体按系统版本处理，
----Lua 不判断系统版本。纯函数。
+---模糊底的半透明窗口。Windows 上再看系统支不支持（Windows 10 没有云母，1803 之前也没有
+---亚克力）：support 是 wezterm.gui.system_backdrop_support() 的结果，选的材质在其中不为
+---true 就回退纯色（同样是为了不留一个没有模糊底的半透明窗口）；support 为 nil（旧二进制
+---没有该接口、或不在 GUI 里）时不判断，保持原样。纯函数。
 ---@param material string
 ---@param is_win boolean
+---@param support table? { mica = boolean, acrylic = boolean, tabbed = boolean }
 ---@return 'wallpaper'|'solid'|'mica'|'acrylic'
-function BackDrops.effective_material(material, is_win)
+function BackDrops.effective_material(material, is_win, support)
    if not is_win and MATERIAL_OPACITY[material] then
       return DEFAULT_MATERIAL
+   end
+   if type(support) == 'table' and MATERIAL_OPACITY[material] and support[material] ~= true then
+      return 'solid'
    end
    if MATERIALS[material] then
       return material
    end
    return DEFAULT_MATERIAL
+end
+
+---系统支持哪些背景材质：wezterm.gui.system_backdrop_support()。wezterm.gui 只在 GUI 进程里有，
+---旧二进制没有这个函数；取不到（含调用出错、返回值不是表）一律返回 nil，effective_material
+---据此保持原样。该接口只查系统版本、不取配置锁，配置求值期调用是安全的。
+---@return table?
+function BackDrops.system_backdrop_support()
+   local ok, support = pcall(function()
+      return wezterm.gui.system_backdrop_support()
+   end)
+   if ok and type(support) == 'table' then
+      return support
+   end
+   return nil
 end
 
 ---按窗口材质生成 `background` 层栈，以及材质要求一起设置的窗口配置键。纯函数。
@@ -171,7 +191,8 @@ function BackDrops:init()
       focus_on = false,
       material = BackDrops.effective_material(
          BackDrops.material_from_settings(settings_text),
-         platform.is_win
+         platform.is_win,
+         BackDrops.system_backdrop_support()
       ),
    }
    local backdrops = setmetatable(inital, self)
@@ -264,7 +285,8 @@ end
 
 ---当前窗口材质要求一起设置的窗口配置键（云母/亚克力：win32_system_backdrop 与
 ---window_background_opacity；壁纸/纯色为空表）。config/appearance.lua 在 Windows 上
----把它们合并进配置；非 Windows 上云母/亚克力在 init 时已降级成壁纸，这里为空。
+---把它们合并进配置；非 Windows 上云母/亚克力在 init 时已降级成壁纸、系统不支持的材质
+---已回退纯色，这里为空。
 ---@return table
 function BackDrops:window_options()
    local _, extra = BackDrops.material_layers(self.material, self.mask_color, nil)

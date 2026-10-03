@@ -1313,6 +1313,52 @@ do
    check('material.effective.wallpaper', effective('wallpaper', true), 'wallpaper')
    check('material.effective.unknown', effective('glass', true), 'wallpaper')
 
+   -- 系统支持表（wezterm.gui.system_backdrop_support()）：nil 时不判断、保持原样；选的系统材质
+   -- 不为 true 就回退纯色，支持则保留；壁纸/纯色不看支持表，非 Windows 仍先降级成壁纸。
+   local win10 = { mica = false, acrylic = true, tabbed = false }
+   local none = { mica = false, acrylic = false, tabbed = false }
+   local win11 = { mica = true, acrylic = true, tabbed = true }
+   check('material.support.nil_keeps_mica', effective('mica', true, nil), 'mica')
+   check('material.support.nil_keeps_acrylic', effective('acrylic', true, nil), 'acrylic')
+   check('material.support.win10_mica_solid', effective('mica', true, win10), 'solid')
+   check('material.support.win10_acrylic_kept', effective('acrylic', true, win10), 'acrylic')
+   check('material.support.none_acrylic_solid', effective('acrylic', true, none), 'solid')
+   check('material.support.win11_mica_kept', effective('mica', true, win11), 'mica')
+   check('material.support.win11_acrylic_kept', effective('acrylic', true, win11), 'acrylic')
+   check('material.support.missing_key_solid', effective('mica', true, {}), 'solid')
+   check('material.support.not_table_ignored', effective('mica', true, true), 'mica')
+   check('material.support.wallpaper_ignores', effective('wallpaper', true, none), 'wallpaper')
+   check('material.support.solid_ignores', effective('solid', true, none), 'solid')
+   check('material.support.unknown_ignores', effective('glass', true, none), 'wallpaper')
+   check('material.support.other_platform_wallpaper', effective('mica', false, none), 'wallpaper')
+
+   -- 探测接口取不到时返回 nil（不在 GUI 里、旧二进制没有该函数、调用出错、返回值不是表）
+   local real_gui = wezterm.gui
+   local detect = backdrops.system_backdrop_support
+   wezterm.gui = nil
+   check('material.detect.no_gui', detect(), nil)
+   wezterm.gui = {}
+   check('material.detect.old_binary', detect(), nil)
+   wezterm.gui = {
+      system_backdrop_support = function()
+         error('boom')
+      end,
+   }
+   check('material.detect.error', detect(), nil)
+   wezterm.gui = {
+      system_backdrop_support = function()
+         return true
+      end,
+   }
+   check('material.detect.not_table', detect(), nil)
+   wezterm.gui = {
+      system_backdrop_support = function()
+         return win10
+      end,
+   }
+   check('material.detect.table', detect(), win10)
+   wezterm.gui = real_gui
+
    -- 四种材质的层栈与附加键
    local layers, extra = backdrops.material_layers('wallpaper', bg, 'wall.png')
    check('material.wallpaper.count', #layers, 2)
