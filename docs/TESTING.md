@@ -75,8 +75,8 @@ cargo nextest run --locked -p wezterm-escape-parser
    Windows 分支（`os.name == 'nt'` 时 `make ui-smoke` / `python3
    scripts/dev_framework.py run ui-smoke [--out <批次目录>]` 自动转到
    `scripts/ui_smoke_windows.ps1`，用 pwsh、找不到再用 powershell）：真实桌面
-   窗口，没有 Xvfb 隔离；`PrintWindow(PW_RENDERFULLCONTENT)` 抓图，黑图再临时
-   `TOPMOST|NOACTIVATE` + `CopyFromScreen`，全程不 `SetForegroundWindow`。
+   窗口，没有 Xvfb 隔离；`PrintWindow(PW_RENDERFULLCONTENT)` 抓图，黑图或底部白带再
+   临时 `TOPMOST|NOACTIVATE` + `CopyFromScreen`，全程不 `SetForegroundWindow`。
    `--out` 必须是证据根下的仓库相对路径，缺省为 `.ui-evidence/smoke/<时间戳>-<pid>`。
    要选浮层/配置/可执行文件时直接调脚本：`pwsh -File scripts/ui_smoke_windows.ps1
    -Out <批次目录> [-Exe ..] [-ConfigFile ..|-NoConfig] [-Overlay
