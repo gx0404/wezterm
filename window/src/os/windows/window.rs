@@ -516,13 +516,39 @@ fn decorations_to_style(decorations: WindowDecorations) -> u32 {
     }
 }
 
-fn get_primary_monitor_dpi() -> u32 {
-    let primary = unsafe { MonitorFromWindow(null_mut(), MONITOR_DEFAULTTOPRIMARY) };
-    assert!(!primary.is_null(), "MonitorFromWindow() returned NULL");
-    let mut dpi_x = USER_DEFAULT_SCREEN_DPI as u32;
-    let mut dpi_y = USER_DEFAULT_SCREEN_DPI as u32;
-    unsafe { GetDpiForMonitor(primary, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) };
-    dpi_x
+/// fork: 光标所在的显示器；取不到光标位置时回退主显示器。新窗口按
+/// CW_USEDEFAULT 放置时通常落在启动它的那块屏，用光标位置近似
+pub(crate) fn cursor_monitor() -> HMONITOR {
+    let mut pt = POINT { x: 0, y: 0 };
+    let mon = unsafe {
+        if GetCursorPos(&mut pt) != 0 {
+            MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
+        } else {
+            null_mut()
+        }
+    };
+    if mon.is_null() {
+        let primary = unsafe { MonitorFromWindow(null_mut(), MONITOR_DEFAULTTOPRIMARY) };
+        assert!(!primary.is_null(), "MonitorFromWindow() returned NULL");
+        primary
+    } else {
+        mon
+    }
+}
+
+/// fork: 显示器的有效 DPI（MDT_EFFECTIVE_DPI）；mon 为空或查询失败为 None
+pub(crate) fn monitor_dpi(mon: HMONITOR) -> Option<u32> {
+    if mon.is_null() {
+        return None;
+    }
+    let mut dpi_x = 0;
+    let mut dpi_y = 0;
+    let hr = unsafe { GetDpiForMonitor(mon, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) };
+    if hr == S_OK && dpi_x != 0 {
+        Some(dpi_x)
+    } else {
+        None
+    }
 }
 
 impl Window {
@@ -562,7 +588,9 @@ impl Window {
 
         let decorations = config.window_decorations;
         let style = decorations_to_style(decorations);
-        let frame_dpi = get_primary_monitor_dpi();
+        // fork: 与 ConnectionOps::default_dpi 同口径取光标所在显示器，客户区
+        // 尺寸与非客户区边框按同一 DPI 换算
+        let frame_dpi = monitor_dpi(cursor_monitor()).unwrap_or(USER_DEFAULT_SCREEN_DPI as u32);
         let (width, height) =
             adjust_client_to_window_dimensions(style, geometry.width, geometry.height, frame_dpi);
 
@@ -1933,6 +1961,42 @@ fn fill_unpresented_background(config: &ConfigHandle, hdc: HDC, rc: &RECT) {
         DeleteDC(mem_dc);
         DeleteObject(dib as _);
     }
+}
+
+/// fork: PerMonitorV2 下 DefWindowProc 不会替窗口调整尺寸；采用系统建议的
+/// RECT，让窗口跨不同缩放的显示器时保持物理尺寸与行列数。SetWindowPos
+/// 触发的 WM_WINDOWPOSCHANGED 照常经 wm_size 派发带新 DPI 的 Resized。
+/// 自管全屏（saved_placement）时尺寸由我们钉死，不干预
+unsafe fn wm_dpichanged(hwnd: HWND, _msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
+    if lparam == 0 {
+        return None;
+    }
+    if let Some(inner) = rc_from_hwnd(hwnd) {
+        if let Ok(inner) = inner.try_borrow() {
+            if inner.saved_placement.is_some() {
+                return None;
+            }
+        }
+    }
+    let suggested = &*(lparam as *const RECT);
+    log::trace!(
+        "WM_DPICHANGED dpi={} suggested rect left={} top={} width={} height={}",
+        LOWORD(wparam as u32),
+        suggested.left,
+        suggested.top,
+        rect_width(suggested),
+        rect_height(suggested)
+    );
+    SetWindowPos(
+        hwnd,
+        null_mut(),
+        suggested.left,
+        suggested.top,
+        rect_width(suggested),
+        rect_height(suggested),
+        SWP_NOZORDER | SWP_NOACTIVATE,
+    );
+    Some(0)
 }
 
 /// fork: 显示模式（分辨率/刷新率/显示器增减）变化后重新读取刷新率。
@@ -3392,6 +3456,7 @@ unsafe fn do_wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> 
         }
         WM_SETTINGCHANGE | WM_DWMCOMPOSITIONCHANGED => apply_theme(hwnd),
         WM_DISPLAYCHANGE => wm_displaychange(hwnd, msg, wparam, lparam),
+        WM_DPICHANGED => wm_dpichanged(hwnd, msg, wparam, lparam),
         WM_IME_SETCONTEXT => ime_set_context(hwnd, msg, wparam, lparam),
         WM_IME_COMPOSITION => ime_composition(hwnd, msg, wparam, lparam),
         WM_IME_ENDCOMPOSITION => ime_end_composition(hwnd, msg, wparam, lparam),

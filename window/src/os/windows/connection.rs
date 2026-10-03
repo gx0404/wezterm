@@ -158,6 +158,38 @@ impl ConnectionOps for Connection {
         "Windows".to_string()
     }
 
+    /// fork: 首窗口按光标所在显示器的有效 DPI 建字体与几何，避免 150% 缩放
+    /// 机器先按 96dpi 建再按 144dpi 全部重做。dpi_by_screen → dpi → 探测的
+    /// 优先级与 ScreenInfoHelper::enumerate 一致
+    fn default_dpi(&self) -> f64 {
+        let config = config::configuration();
+        let mon = super::window::cursor_monitor();
+
+        if !config.dpi_by_screen.is_empty() {
+            if let Ok(helper) = ScreenInfoHelper::new() {
+                unsafe {
+                    let mut mi: MONITORINFOEXW = std::mem::zeroed();
+                    mi.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+                    if GetMonitorInfoW(mon, &mut mi as *mut MONITORINFOEXW as *mut MONITORINFO) != 0
+                    {
+                        let name = helper.monitor_name(&mi);
+                        if let Some(dpi) = config.dpi_by_screen.get(&name) {
+                            return *dpi;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(dpi) = config.dpi {
+            return dpi;
+        }
+
+        super::window::monitor_dpi(mon)
+            .map(f64::from)
+            .unwrap_or(crate::DEFAULT_DPI)
+    }
+
     fn run_message_loop(&self) -> anyhow::Result<()> {
         let mut msg: MSG = unsafe { std::mem::zeroed() };
         loop {
