@@ -1,9 +1,14 @@
 use crate::resize_increment_calculator::ResizeIncrementCalculator;
+use crate::termwindow::live_resize::LiveResizeTimer;
+use crate::termwindow::TermWindowNotif;
 use crate::utilsprites::RenderMetrics;
 use ::window::{Dimensions, ResizeIncrement, Window, WindowOps, WindowState};
 use config::{ConfigHandle, DimensionContext};
+use mux::tab::TabId;
 use mux::Mux;
+use smol::Timer;
 use std::rc::Rc;
+use std::time::Instant;
 use wezterm_font::FontConfiguration;
 use wezterm_term::TerminalSize;
 
@@ -44,6 +49,11 @@ impl super::TermWindow {
         if self.dimensions == dimensions && self.window_state == window_state {
             // It didn't really change
             log::trace!("dimensions didn't change NOP!");
+            // fork: a non-live event with the final size still ends a
+            // live resize
+            if !live_resizing {
+                self.finish_live_resize();
+            }
             return;
         }
         let last_state = self.window_state;
@@ -59,15 +69,96 @@ impl super::TermWindow {
 
         // For simple, user-interactive resizes where the dpi doesn't change,
         // skip our scaling recalculation
-        if live_resizing && self.dimensions.dpi == dimensions.dpi {
-            self.apply_dimensions(&dimensions, None, window);
+        // fork: deferring needs a window to deliver the settle timer to
+        let live = live_resizing && self.dimensions.dpi == dimensions.dpi && self.window.is_some();
+        if live {
+            // fork: only the active tab follows each step of the drag;
+            // the rest of the work waits for the resize to settle
+            // (see live_resize.rs)
+            if let Some(deadline) = self.live_resize.note_live_event(Instant::now()) {
+                self.schedule_live_resize_settle(deadline);
+            }
+            self.apply_dimensions_impl(&dimensions, None, window, true);
         } else {
+            // fork: this resizes every tab and refreshes the title itself,
+            // which covers anything a live resize deferred
+            self.live_resize.finish();
             self.scaling_changed(dimensions, self.fonts.get_font_scale(), window);
         }
         if let Some(modal) = self.get_modal() {
             modal.reconfigure(self);
         }
-        self.emit_window_event("window-resized", None);
+        if !live {
+            self.emit_window_event("window-resized", None);
+        }
+    }
+
+    /// fork: arm the timer that ends a live resize once it goes quiet
+    fn schedule_live_resize_settle(&mut self, deadline: Instant) {
+        let window = match self.window.as_ref() {
+            Some(window) => window.clone(),
+            None => {
+                // Nobody to deliver the timer to: catch up right away
+                self.live_resize.timer_dropped();
+                self.finish_live_resize();
+                return;
+            }
+        };
+        promise::spawn::spawn(async move {
+            Timer::at(deadline).await;
+            window.notify(TermWindowNotif::Apply(Box::new(|tw| {
+                tw.live_resize_timer_fired();
+            })));
+        })
+        .detach();
+    }
+
+    fn live_resize_timer_fired(&mut self) {
+        match self.live_resize.on_timer(Instant::now()) {
+            LiveResizeTimer::Idle => {}
+            LiveResizeTimer::Flush => self.finish_live_resize(),
+            LiveResizeTimer::Rearm(deadline) => self.schedule_live_resize_settle(deadline),
+        }
+    }
+
+    /// fork: end a live resize: resize the tabs that missed it and send the
+    /// title update and window-resized event that were held back
+    pub(crate) fn finish_live_resize(&mut self) {
+        let flush = self.live_resize.finish();
+        if !flush.stale_tabs.is_empty() {
+            let mux = Mux::get();
+            for tab_id in flush.stale_tabs {
+                // Skip tabs that left this window in the meantime
+                if mux.window_containing_tab(tab_id) != Some(self.mux_window_id) {
+                    continue;
+                }
+                if let Some(tab) = mux.get_tab(tab_id) {
+                    tab.resize(self.terminal_size);
+                }
+            }
+            self.resize_overlays();
+        }
+        if flush.update_title {
+            self.update_title_now();
+        }
+        if flush.window_resized {
+            self.emit_window_event("window-resized", None);
+        }
+    }
+
+    /// fork: a tab that becomes active while it still has the size from
+    /// before a live resize catches up right away
+    pub(crate) fn resize_stale_active_tab(&mut self) {
+        if !self.live_resize.has_stale_tabs() {
+            return;
+        }
+        let mux = Mux::get();
+        if let Some(tab) = mux.get_active_tab_for_window(self.mux_window_id) {
+            if self.live_resize.take_stale(tab.tab_id()) {
+                tab.resize(self.terminal_size);
+                self.resize_overlays();
+            }
+        }
     }
 
     pub fn apply_pending_scale_changes(&mut self) {
@@ -131,8 +222,21 @@ impl super::TermWindow {
     pub fn apply_dimensions(
         &mut self,
         dimensions: &Dimensions,
+        scale_changed_cells: Option<RowsAndCols>,
+        window: &Window,
+    ) {
+        self.apply_dimensions_impl(dimensions, scale_changed_cells, window, false);
+    }
+
+    /// fork: `live` is true for the steps of an interactive resize; only
+    /// the active tab is resized then and the title refresh is deferred
+    /// until the resize settles (see live_resize.rs).
+    fn apply_dimensions_impl(
+        &mut self,
+        dimensions: &Dimensions,
         mut scale_changed_cells: Option<RowsAndCols>,
         window: &Window,
+        live: bool,
     ) {
         log::trace!(
             "apply_dimensions {:?} scale_changed_cells {:?}. window_state {:?}",
@@ -294,15 +398,28 @@ impl super::TermWindow {
 
         let mux = Mux::get();
         if let Some(window) = mux.get_window(self.mux_window_id) {
+            // fork: during a live resize only the active tab is resized;
+            // LiveResizeDeferral remembers the others
+            let tab_ids: Vec<TabId> = window.iter_tabs().map(|tab| tab.tab_id()).collect();
+            let active = window.get_active_tab().map(|tab| tab.tab_id());
+            let resize_now = self.live_resize.tabs_to_resize(&tab_ids, active, live);
             for tab in window.iter_tabs() {
-                tab.resize(size);
+                if resize_now.contains(&tab.tab_id()) {
+                    tab.resize(size);
+                }
             }
         };
         self.resize_overlays();
         self.invalidate_fancy_tab_bar();
-        // fork: the tab bar is laid out for the window width, so the next
-        // frame needs it rebuilt; don't wait for the coalescing window
-        self.update_title_now();
+        if live {
+            // fork: rebuilt once the live resize settles
+            self.live_resize.defer_title();
+        } else {
+            // fork: the tab bar is laid out for the window width, so the
+            // next frame needs it rebuilt; don't wait for the coalescing
+            // window
+            self.update_title_now();
+        }
 
         window.set_resize_increments(if self.config.use_resize_increments {
             ri_calc.into()

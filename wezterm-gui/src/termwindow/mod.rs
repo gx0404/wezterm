@@ -85,6 +85,7 @@ pub mod clipboard;
 pub mod context_menu;
 pub mod keybinds;
 pub mod keyevent;
+mod live_resize;
 pub mod modal;
 mod mouseevent;
 pub mod palette;
@@ -487,6 +488,9 @@ pub struct TermWindow {
     /// fork: config table shared by the format-* Lua callbacks; dropped
     /// by `config_was_reloaded` (see `cached_config_table`).
     title_config_cache: Option<TitleConfigTableCache>,
+    /// fork: tabs, title update and window-resized event held back while
+    /// the window is live resized (see `live_resize.rs`).
+    live_resize: live_resize::LiveResizeDeferral,
     cursor_blink_state: RefCell<ColorEase>,
     blink_state: RefCell<ColorEase>,
     rapid_blink_state: RefCell<ColorEase>,
@@ -840,6 +844,7 @@ impl TermWindow {
             last_status_call: Instant::now(),
             title_update: Default::default(),
             title_config_cache: None,
+            live_resize: Default::default(),
             cursor_blink_state: RefCell::new(ColorEase::new(
                 config.cursor_blink_rate,
                 config.cursor_blink_ease_in,
@@ -1396,6 +1401,9 @@ impl TermWindow {
                     self.mux_pane_output_event(pane_id);
                 }
                 MuxNotification::WindowInvalidated(_) => {
+                    // fork: the active tab may have changed to one that
+                    // missed a live resize
+                    self.resize_stale_active_tab();
                     window.invalidate();
                     self.update_title_post_status();
                 }
@@ -1414,7 +1422,13 @@ impl TermWindow {
                 }
                 MuxNotification::TabResized(_) => {
                     // Also handled by wezterm-client
-                    self.update_title_post_status();
+                    if self.live_resize.is_active() {
+                        // fork: every step of a live resize resizes the
+                        // active tab; rebuild the title once it settles
+                        self.live_resize.defer_title();
+                    } else {
+                        self.update_title_post_status();
+                    }
                 }
                 MuxNotification::TabTitleChanged { .. } => {
                     self.update_title_post_status();
@@ -2622,6 +2636,9 @@ impl TermWindow {
             window.remember_and_set_active_tab_idx(tab_idx);
 
             drop(window);
+
+            // fork: before the first frame of the newly active tab
+            self.resize_stale_active_tab();
 
             if let Some(pane) = self.get_active_pane_or_overlay() {
                 pane.focus_changed(true);
