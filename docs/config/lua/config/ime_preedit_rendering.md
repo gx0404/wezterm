@@ -17,6 +17,11 @@ WezTerm supports the following IME preedit rendering.
   rendering the text using the same font as the terminal and
   works in concert with features like [window:composition_status()](../window/composition_status.md).
 
+  On Windows, "Builtin" rendering also draws a thin caret inside the
+  preedit at the position reported by the IME, so that moving the
+  caret within the text being composed is visible. On other systems
+  no caret is drawn inside the preedit.
+
 * `"System"` - IME preedit is rendered by system
 
   "Builtin" rendering may truncate displaying of IME preedit

@@ -85,6 +85,12 @@ impl crate::TermWindow {
         } else {
             None
         };
+        // fork: the IME caret column within `composing`, when the platform
+        // reports one
+        let composing_cursor = match &self.dead_key_status {
+            DeadKeyStatus::Composing { cursor, .. } if composing.is_some() => *cursor,
+            _ => None,
+        };
 
         let mut composition_width = 0;
 
@@ -341,6 +347,7 @@ impl crate::TermWindow {
             };
 
             let ComputeCellFgBgResult {
+                fg_color: cursor_text_color,
                 cursor_shape,
                 cursor_border_color,
                 cursor_border_color_alt,
@@ -434,6 +441,37 @@ impl crate::TermWindow {
 
                 quad.set_fg_color(cursor_border_color);
                 quad.set_alt_color_and_mix_value(cursor_border_color_alt, cursor_border_mix);
+            }
+
+            // fork: while composing, the cursor drawn above is a block that
+            // spans the whole preedit. When the platform reports where the
+            // IME caret is (Windows GCS_CURSORPOS), also draw a thin caret at
+            // that column, in the color of the text on the block so that it
+            // reads against it. It is clamped to the preedit and to the line,
+            // and kept inside the block when the caret is at its end.
+            if let (Some(caret_col), Some(_), false) =
+                (composing_cursor, cursor_shape, params.password_input)
+            {
+                let span = composition_width.min(num_cols.saturating_sub(params.cursor.x));
+                if span > 0 {
+                    // Twice the underline thickness, like the heavy outline
+                    // used for bar cursors
+                    let caret_width = ((params.render_metrics.underline_height.max(1) * 2) as f32)
+                        .min(cell_width);
+                    let block_left = params.left_pixel_x
+                        + phys(params.cursor.x, num_cols, direction) as f32 * cell_width;
+                    let caret_left = (block_left + caret_col.min(span) as f32 * cell_width)
+                        .min(block_left + span as f32 * cell_width - caret_width);
+                    let mut quad = self
+                        .filled_rectangle(
+                            layers,
+                            2,
+                            euclid::rect(caret_left, params.top_pixel_y, caret_width, cell_height),
+                            cursor_text_color,
+                        )
+                        .context("filled_rectangle")?;
+                    quad.set_hsv(hsv);
+                }
             }
         }
 

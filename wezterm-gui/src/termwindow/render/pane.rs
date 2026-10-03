@@ -428,6 +428,13 @@ impl crate::TermWindow {
                         config_generation: self.term_window.config.generation(),
                         shape_generation: self.term_window.shape_generation,
                         quad_generation: self.term_window.quad_generation,
+                        // fork: key the IME caret too; see `composing_cursor`
+                        composing_cursor: match &self.term_window.dead_key_status {
+                            DeadKeyStatus::Composing { cursor, .. } if composing.is_some() => {
+                                *cursor
+                            }
+                            _ => None,
+                        },
                         composing: composing.clone(),
                         selection: selrange.clone(),
                         cursor,

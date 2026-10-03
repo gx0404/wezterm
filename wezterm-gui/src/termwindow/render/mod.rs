@@ -62,6 +62,10 @@ pub struct LineQuadCacheKey {
     pub quad_generation: usize,
     /// Only set if cursor.y == stable_row
     pub composing: Option<String>,
+    /// fork: the IME caret column within `composing`. It is part of this
+    /// key, but not of `LineToEleShapeCacheKey`, so that moving the caret
+    /// redraws the line without reshaping it.
+    pub composing_cursor: Option<usize>,
     pub selection: Range<usize>,
     pub shape_hash: [u8; 16],
     pub top_pixel_y: NotNan<f32>,
