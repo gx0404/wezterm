@@ -92,6 +92,7 @@ pub mod resize;
 mod selection;
 pub mod settings;
 pub mod spawn;
+mod title_update;
 pub mod wallpaper;
 pub mod webgpu;
 use crate::spawn::SpawnWhere;
@@ -1280,18 +1281,19 @@ impl TermWindow {
                 } => {
                     self.emit_user_var_event(pane_id, name, value);
                 }
-                MuxNotification::WindowTitleChanged { .. }
-                | MuxNotification::Alert {
-                    alert:
-                        Alert::OutputSinceFocusLost
-                        | Alert::CurrentWorkingDirectoryChanged
-                        | Alert::WindowTitleChanged(_)
-                        | Alert::TabTitleChanged(_)
-                        | Alert::IconTitleChanged(_)
-                        | Alert::Progress(_),
-                    ..
-                } => {
+                MuxNotification::WindowTitleChanged { .. } => {
                     self.update_title();
+                }
+                MuxNotification::Alert { alert, pane_id }
+                    if title_update::alert_refreshes_title(&alert) =>
+                {
+                    // fork: title/progress alerts only matter to the window
+                    // holding the pane; without this check a single OSC 0
+                    // made every GUI window rebuild its tab bar and emit
+                    // update-status
+                    if self.window_contains_pane(pane_id) {
+                        self.update_title();
+                    }
                 }
                 MuxNotification::Alert {
                     alert: Alert::PaletteChanged,
@@ -1340,6 +1342,11 @@ impl TermWindow {
                     alert: Alert::ToastNotification { .. },
                     ..
                 } => {}
+                MuxNotification::Alert { .. } => {
+                    // fork: unreachable in practice; the variants left are
+                    // the title/progress alerts taken by the guarded arm
+                    // above, which the exhaustiveness check cannot see
+                }
                 MuxNotification::TabAddedToWindow {
                     window_id: _,
                     tab_id,
