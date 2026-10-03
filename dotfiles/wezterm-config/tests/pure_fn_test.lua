@@ -836,6 +836,8 @@ do
    check('appearance.palette_bg', appearance.command_palette_bg_color, 'rgba(24, 24, 37, 0.94)')
    check('appearance.palette_fg', appearance.command_palette_fg_color, colors.mocha.text)
    check('appearance.char_select_bg', appearance.char_select_bg_color, 'rgba(24, 24, 37, 0.94)')
+   check('appearance.char_select_font_size', appearance.char_select_font_size, 12)
+   check('appearance.pane_select_font_size', appearance.pane_select_font_size, 12)
    check('appearance.char_select_fg', appearance.char_select_fg_color, colors.mocha.text)
    check('appearance.pane_select_bg', appearance.pane_select_bg_color, 'rgba(17, 17, 27, 0.75)')
    check('appearance.pane_select_fg', appearance.pane_select_fg_color, colors.mocha.yellow)

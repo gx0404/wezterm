@@ -83,8 +83,10 @@ local options = {
    command_palette_rows = 25,
    char_select_fg_color = mocha.text,
    char_select_bg_color = 'rgba(24, 24, 37, 0.94)',
+   char_select_font_size = 12,
    pane_select_fg_color = mocha.yellow,
    pane_select_bg_color = 'rgba(17, 17, 27, 0.75)',
+   pane_select_font_size = 12,
 
    -- window
    window_padding = {

@@ -150,7 +150,7 @@ local keys = {
          title = 'InputSelector: Select Background',
          choices = backdrops:choices(),
          fuzzy = true,
-         fuzzy_description = 'Select Background: ',
+         fuzzy_description = wezterm.nerdfonts.md_image .. ' 选择壁纸：',
          action = wezterm.action_callback(function(window, _pane, idx)
             if not idx then
                return

@@ -474,7 +474,7 @@ M.setup = function(opts)
             description = wezterm.format({
                { Foreground = { Color = palette.mocha.text } },
                { Attribute = { Intensity = 'Bold' } },
-               { Text = 'Enter new name for tab' },
+               { Text = nf.md_tab .. ' 输入新的标签页名称' },
             }),
             action = wezterm.action_callback(function(inner_window, _pane, line)
                apply_manual_title(inner_window, line)
