@@ -22,7 +22,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::ffi::OsString;
-use std::io::{self, Error as IoError};
+use std::io::Error as IoError;
 use std::num::NonZeroIsize;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
@@ -138,8 +138,8 @@ pub(crate) struct WindowInner {
     events: WindowEventSender,
     gl_state: Option<Rc<glium::backend::Context>>,
     /// Fraction of mouse scroll
-    hscroll_remainder: i16,
-    vscroll_remainder: i16,
+    hscroll_remainder: i32,
+    vscroll_remainder: i32,
 
     last_size: Option<Dimensions>,
     in_size_move: bool,
@@ -2601,17 +2601,194 @@ unsafe fn mouse_leave(hwnd: HWND, _msg: UINT, _wparam: WPARAM, _lparam: LPARAM) 
     Some(0)
 }
 
-lazy_static! {
-    static ref WHEEL_SCROLL_LINES: i16 = read_scroll_speed("WheelScrollLines").unwrap_or(3);
-    static ref WHEEL_SCROLL_CHARS: i16 = read_scroll_speed("WheelScrollChars").unwrap_or(3);
+/// fork: how far one wheel notch scrolls, as configured in the Mouse control
+/// panel and reported by SystemParametersInfoW
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WheelScroll {
+    /// this many lines (vertical wheel) or characters (horizontal wheel)
+    Units(i32),
+    /// WHEEL_PAGESCROLL: one notch scrolls a whole screen. The registry
+    /// spells it "-1", which upstream multiplied in and so scrolled one
+    /// line in the wrong direction.
+    Page,
 }
 
-fn read_scroll_speed(name: &str) -> io::Result<i16> {
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let desktop = hkcu.open_subkey("Control Panel\\Desktop")?;
-    desktop
-        .get_value::<String, _>(name)
-        .and_then(|v| v.parse().map_err(|_| io::ErrorKind::InvalidData.into()))
+impl WheelScroll {
+    fn from_spi(value: UINT) -> Self {
+        if value == WHEEL_PAGESCROLL {
+            Self::Page
+        } else {
+            Self::Units(value.min(i16::MAX as UINT) as i32)
+        }
+    }
+}
+
+/// Windows' default for both the vertical and the horizontal wheel
+const DEFAULT_WHEEL_SCROLL: WheelScroll = WheelScroll::Units(3);
+
+fn query_wheel_scroll(action: UINT) -> WheelScroll {
+    let mut value: UINT = 0;
+    let ok = unsafe { SystemParametersInfoW(action, 0, &mut value as *mut UINT as PVOID, 0) };
+    if ok == 0 {
+        DEFAULT_WHEEL_SCROLL
+    } else {
+        WheelScroll::from_spi(value)
+    }
+}
+
+thread_local! {
+    /// fork: (vertical, horizontal) wheel settings; None until first use and
+    /// again after WM_SETTINGCHANGE, so a changed setting is picked up
+    /// without restarting
+    static WHEEL_SCROLL: std::cell::Cell<Option<(WheelScroll, WheelScroll)>> =
+        std::cell::Cell::new(None);
+}
+
+fn wheel_scroll_settings() -> (WheelScroll, WheelScroll) {
+    WHEEL_SCROLL.with(|cell| match cell.get() {
+        Some(settings) => settings,
+        None => {
+            let settings = (
+                query_wheel_scroll(SPI_GETWHEELSCROLLLINES),
+                query_wheel_scroll(SPI_GETWHEELSCROLLCHARS),
+            );
+            cell.set(Some(settings));
+            settings
+        }
+    })
+}
+
+fn invalidate_wheel_scroll_settings() {
+    WHEEL_SCROLL.with(|cell| cell.set(None));
+}
+
+/// fork: rough count of text rows (or columns) that fit in `client_px`
+/// pixels, used to turn WHEEL_PAGESCROLL into "one screen". The window
+/// layer does not know the real cell metrics, so the cell size is estimated
+/// from the configured font size and line height (a cell is about 1.2em
+/// tall and 0.6em wide); the GUI clamps the viewport, so the estimate only
+/// affects how far a page scroll moves.
+fn estimate_page_units(
+    client_px: i32,
+    dpi: f64,
+    font_size: f64,
+    line_height: f64,
+    horizontal: bool,
+) -> i32 {
+    let em_px = font_size * dpi / 72.0;
+    let cell_px = if horizontal {
+        em_px * 0.6
+    } else {
+        em_px * 1.2 * line_height
+    };
+    if !(cell_px.is_finite() && cell_px > 0.0) {
+        return 1;
+    }
+    ((client_px.max(0) as f64 / cell_px).floor() as i32).max(1)
+}
+
+/// fork: turn a raw wheel delta into whole scroll units, carrying the
+/// fraction to the next event (high resolution wheels and touchpads send
+/// less than WHEEL_DELTA per message). Same rules as upstream, including
+/// dropping the carried fraction when the direction changes, but done in
+/// i32 so large settings or a page scroll cannot overflow.
+/// Returns (units to scroll, new remainder).
+fn accumulate_wheel(delta: i32, units_per_notch: i32, remainder: i32) -> (i32, i32) {
+    let wheel_delta = WHEEL_DELTA as i32;
+    let scaled = delta.saturating_mul(units_per_notch);
+    let mut position = scaled / wheel_delta;
+    let fraction = scaled % wheel_delta;
+    let mut remainder = if remainder.signum() != fraction.signum() {
+        0
+    } else {
+        remainder
+    };
+    remainder += fraction;
+    position += remainder / wheel_delta;
+    remainder %= wheel_delta;
+    (position, remainder)
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::*;
+
+    #[test]
+    fn spi_values_map_to_wheel_scroll() {
+        assert_eq!(WheelScroll::from_spi(3), WheelScroll::Units(3));
+        assert_eq!(WheelScroll::from_spi(0), WheelScroll::Units(0));
+        assert_eq!(WheelScroll::from_spi(WHEEL_PAGESCROLL), WheelScroll::Page);
+        assert_eq!(
+            WheelScroll::from_spi(1_000_000),
+            WheelScroll::Units(i16::MAX as i32)
+        );
+    }
+
+    #[test]
+    fn whole_notches_scroll_whole_units() {
+        assert_eq!(accumulate_wheel(120, 3, 0), (3, 0));
+        assert_eq!(accumulate_wheel(-240, 3, 0), (-6, 0));
+    }
+
+    #[test]
+    fn fractions_carry_over() {
+        let (pos, rem) = accumulate_wheel(20, 3, 0);
+        assert_eq!((pos, rem), (0, 60));
+        let (pos, rem) = accumulate_wheel(20, 3, rem);
+        assert_eq!((pos, rem), (1, 0));
+    }
+
+    #[test]
+    fn direction_change_drops_the_carried_fraction() {
+        assert_eq!(accumulate_wheel(-20, 3, 60), (0, -60));
+    }
+
+    #[test]
+    fn large_settings_do_not_overflow() {
+        assert_eq!(accumulate_wheel(120, i16::MAX as i32, 0).0, i16::MAX as i32);
+        assert_eq!(
+            accumulate_wheel(i16::MIN as i32, i32::MAX, 0).0,
+            i32::MIN / 120
+        );
+    }
+
+    #[test]
+    fn page_estimate_scales_with_font_and_dpi() {
+        // 12pt at 96dpi is a 16px em; rows are ~19.2px, columns ~9.6px
+        assert_eq!(estimate_page_units(960, 96.0, 12.0, 1.0, false), 50);
+        assert_eq!(estimate_page_units(960, 96.0, 12.0, 1.0, true), 100);
+        assert_eq!(estimate_page_units(960, 144.0, 12.0, 1.0, false), 33);
+        assert_eq!(estimate_page_units(960, 96.0, 12.0, 2.0, false), 25);
+    }
+
+    #[test]
+    fn page_estimate_is_at_least_one() {
+        assert_eq!(estimate_page_units(0, 96.0, 12.0, 1.0, false), 1);
+        assert_eq!(estimate_page_units(-5, 96.0, 12.0, 1.0, false), 1);
+        assert_eq!(estimate_page_units(500, 96.0, 0.0, 1.0, false), 1);
+    }
+}
+
+impl WindowInner {
+    /// fork: rows (or columns) in one screen, for WHEEL_PAGESCROLL
+    fn wheel_page_units(&self, horizontal: bool) -> i32 {
+        let mut rect = RECT::default();
+        unsafe {
+            GetClientRect(self.hwnd.0, &mut rect);
+        }
+        let client_px = if horizontal {
+            rect_width(&rect)
+        } else {
+            rect_height(&rect)
+        };
+        estimate_page_units(
+            client_px,
+            self.get_effective_dpi() as f64,
+            self.config.font_size,
+            self.config.line_height,
+            horizontal,
+        )
+    }
 }
 
 unsafe fn mouse_wheel(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> Option<LRESULT> {
@@ -2621,54 +2798,44 @@ unsafe fn mouse_wheel(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> 
     let coords = mouse_coords(lparam);
     let screen_coords = ScreenPoint::new(coords.x, coords.y);
     let coords = screen_to_client(hwnd, screen_coords);
-    let delta = GET_WHEEL_DELTA_WPARAM(wparam);
-    let scaled_delta = if msg == WM_MOUSEWHEEL {
-        delta * (*WHEEL_SCROLL_LINES)
+    let delta = GET_WHEEL_DELTA_WPARAM(wparam) as i32;
+    let horizontal = msg == WM_MOUSEHWHEEL;
+    let (vertical_setting, horizontal_setting) = wheel_scroll_settings();
+    let setting = if horizontal {
+        horizontal_setting
     } else {
-        delta * (*WHEEL_SCROLL_CHARS)
+        vertical_setting
     };
-    let mut position = scaled_delta / WHEEL_DELTA;
-    let remainder = scaled_delta % WHEEL_DELTA;
+
+    let mut inner = inner.borrow_mut();
+    let units_per_notch = match setting {
+        WheelScroll::Units(units) => units,
+        WheelScroll::Page => inner.wheel_page_units(horizontal),
+    };
+    let remainder = if horizontal {
+        &mut inner.hscroll_remainder
+    } else {
+        &mut inner.vscroll_remainder
+    };
+    let (position, new_remainder) = accumulate_wheel(delta, units_per_notch, *remainder);
+    *remainder = new_remainder;
+    log::trace!(
+        "mouse_wheel horizontal={} delta={} units_per_notch={} remainder={} pos={}",
+        horizontal,
+        delta,
+        units_per_notch,
+        new_remainder,
+        position
+    );
+    if position == 0 {
+        return Some(0);
+    }
+    let position = position.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+
     let event = MouseEvent {
-        kind: if msg == WM_MOUSEHWHEEL {
-            let mut inner = inner.borrow_mut();
-            if inner.hscroll_remainder.signum() != remainder.signum() {
-                // Reset remainder when changing scroll direction
-                inner.hscroll_remainder = 0;
-            }
-            inner.hscroll_remainder += remainder;
-            position += inner.hscroll_remainder / WHEEL_DELTA;
-            inner.hscroll_remainder %= WHEEL_DELTA;
-            log::trace!(
-                "mouse_hwheel delta={} scaled={} remainder={} pos={}",
-                delta,
-                scaled_delta,
-                inner.hscroll_remainder,
-                position
-            );
-            if position == 0 {
-                return Some(0);
-            }
+        kind: if horizontal {
             MouseEventKind::HorzWheel(position)
         } else {
-            let mut inner = inner.borrow_mut();
-            if inner.vscroll_remainder.signum() != remainder.signum() {
-                // Reset remainder when changing scroll direction
-                inner.vscroll_remainder = 0;
-            }
-            inner.vscroll_remainder += remainder;
-            position += inner.vscroll_remainder / WHEEL_DELTA;
-            inner.vscroll_remainder %= WHEEL_DELTA;
-            log::trace!(
-                "mouse_wheel delta={} scaled={} remainder={} pos={}",
-                delta,
-                scaled_delta,
-                inner.vscroll_remainder,
-                position
-            );
-            if position == 0 {
-                return Some(0);
-            }
             MouseEventKind::VertWheel(position)
         },
         coords,
@@ -2676,10 +2843,7 @@ unsafe fn mouse_wheel(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> 
         mouse_buttons,
         modifiers,
     };
-    inner
-        .borrow_mut()
-        .events
-        .dispatch(WindowEvent::MouseEvent(event));
+    inner.events.dispatch(WindowEvent::MouseEvent(event));
     Some(0)
 }
 
@@ -3676,7 +3840,12 @@ unsafe fn do_wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> 
             crate::spawn::SPAWN_QUEUE.run();
             None
         }
-        WM_SETTINGCHANGE | WM_DWMCOMPOSITIONCHANGED => apply_theme(hwnd),
+        WM_SETTINGCHANGE => {
+            // fork: the wheel scroll settings may be what changed
+            invalidate_wheel_scroll_settings();
+            apply_theme(hwnd)
+        }
+        WM_DWMCOMPOSITIONCHANGED => apply_theme(hwnd),
         WM_DISPLAYCHANGE => wm_displaychange(hwnd, msg, wparam, lparam),
         WM_POWERBROADCAST => wm_powerbroadcast(hwnd, msg, wparam, lparam),
         WM_DPICHANGED => wm_dpichanged(hwnd, msg, wparam, lparam),
