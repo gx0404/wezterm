@@ -44,6 +44,29 @@ check('hide.app_mode_disabled', status.should_hide_tab_bar(false, 1, 'herdr'), f
 check('hide.empty_process_name', status.should_hide_tab_bar(true, 1, ''), false)
 check('hide.uncleaned_process_name', status.should_hide_tab_bar(true, 1, 'herdr.exe'), false)
 check('hide.zero_tabs', status.should_hide_tab_bar(true, 0, 'herdr'), false)
+-- decorations 含 INTEGRATED_BUTTONS：集成标题栏按钮画在 tab bar 里，不能隐藏
+check(
+   'hide.integrated_buttons',
+   status.should_hide_tab_bar(true, 1, 'herdr', 'RESIZE|INTEGRATED_BUTTONS'),
+   false
+)
+check(
+   'hide.integrated_buttons_only',
+   status.should_hide_tab_bar(true, 1, 'herdr', 'INTEGRATED_BUTTONS'),
+   false
+)
+check('hide.native_decorations', status.should_hide_tab_bar(true, 1, 'herdr', 'TITLE|RESIZE'), true)
+check('hide.decorations_not_string', status.should_hide_tab_bar(true, 1, 'herdr', 42), true)
+check(
+   'hide.integrated_still_needs_herdr',
+   status.should_hide_tab_bar(true, 1, 'bash', 'INTEGRATED_BUTTONS'),
+   false
+)
+check('integrated.detect_nil', tab_title.has_integrated_buttons(nil), false)
+check('integrated.detect_empty', tab_title.has_integrated_buttons(''), false)
+check('integrated.detect_native', tab_title.has_integrated_buttons('TITLE|RESIZE'), false)
+check('integrated.detect_yes', tab_title.has_integrated_buttons('RESIZE|INTEGRATED_BUTTONS'), true)
+check('integrated.detect_not_string', tab_title.has_integrated_buttons({}), false)
 
 -- next_tab_bar_state：herdr 应用模式的 tab bar 状态转移（纯函数）
 do
@@ -235,6 +258,50 @@ do
    -- 时钟往回拨（上次探测记在 1002）：按过期处理，重新探测
    reloaded.apply_herdr_app_mode(throttled, counting, true, 990)
    check('probe.clock_stepped_back', probes, 3)
+
+   -- 集成标题栏按钮（window_decorations 含 INTEGRATED_BUTTONS）：tab bar 就是标题栏，单 tab
+   -- 前台是 herdr 也不隐藏；原生装饰照常隐藏。窗口装饰按窗口缓存 30 秒，且前台不是 herdr
+   -- （不可能隐藏）时根本不取（effective_config 要转换整份配置，很重）。
+   local function with_decorations(target, decorations)
+      local reads = { count = 0 }
+      function target:effective_config()
+         reads.count = reads.count + 1
+         return { window_decorations = decorations }
+      end
+      return reads
+   end
+   local integrated = fake_window(900006)
+   local integrated_reads = with_decorations(integrated, 'RESIZE|INTEGRATED_BUTTONS')
+   reloaded.apply_herdr_app_mode(integrated, shell, true, 2000)
+   check('integrated.not_read_for_shell', integrated_reads.count, 0)
+   reloaded.apply_herdr_app_mode(integrated, herdr, true, 2010)
+   reloaded.apply_herdr_app_mode(integrated, herdr, true, 2020)
+   check('integrated.never_hidden', integrated.writes, 0)
+   check('integrated.keeps_tab_bar', tab_bar_override(integrated), nil)
+   check('integrated.read_cached', integrated_reads.count, 1)
+   reloaded.apply_herdr_app_mode(integrated, herdr, true, 2050)
+   check('integrated.read_again_after_ttl', integrated_reads.count, 2)
+
+   local native = fake_window(900007)
+   with_decorations(native, 'TITLE|RESIZE')
+   reloaded.apply_herdr_app_mode(native, herdr, true, 3000)
+   check('native.hidden', tab_bar_override(native), false)
+
+   -- 取不到窗口装饰（effective_config 抛错）：按没有集成按钮处理，不缓存失败
+   local broken = fake_window(900008)
+   function broken:effective_config()
+      error('boom')
+   end
+   reloaded.apply_herdr_app_mode(broken, herdr, true, 4000)
+   check('decorations_unreadable.hides', tab_bar_override(broken), false)
+
+   -- 之前（无集成按钮的旧配置）隐藏过的窗口，重载成集成按钮配置后要把 tab bar 放回来
+   local migrated = fake_window(900009)
+   reloaded.apply_herdr_app_mode(migrated, herdr, true, 5000)
+   check('integrated.migrated_hidden_before', tab_bar_override(migrated), false)
+   with_decorations(migrated, 'RESIZE|INTEGRATED_BUTTONS')
+   reloaded.apply_herdr_app_mode(migrated, herdr, true, 5100)
+   check('integrated.migrated_restored', tab_bar_override(migrated), nil)
 end
 
 -- update-status：battery_info 在缓存期内只查一次
@@ -532,6 +599,56 @@ do
    check('toggle.no_background', out.background, nil)
 end
 
+-- 手动切换 tab bar 的事件处理（tabs.toggle-tab-bar）：集成标题栏按钮模式下标签栏就是
+-- 标题栏，不允许隐藏；原生装饰照常切换；已经隐藏的窗口仍可切回显示。
+do
+   local real_on = wezterm.on
+   local handlers = {}
+   wezterm.on = function(name, callback)
+      handlers[name] = callback
+   end
+   package.loaded['events.tab-title'] = nil
+   require('events.tab-title').setup({})
+   wezterm.on = real_on
+   package.loaded['events.tab-title'] = tab_title
+
+   local function toggle_window(enable_tab_bar, decorations)
+      local window = { overrides = nil, writes = 0 }
+      function window:effective_config()
+         return { enable_tab_bar = enable_tab_bar, window_decorations = decorations }
+      end
+      function window:get_config_overrides()
+         return self.overrides
+      end
+      function window:set_config_overrides(value)
+         self.overrides = value
+         self.writes = self.writes + 1
+      end
+      return window
+   end
+   local toggle = handlers['tabs.toggle-tab-bar']
+   check('toggle_event.registered', type(toggle), 'function')
+   if toggle then
+      local native = toggle_window(true, 'TITLE|RESIZE')
+      toggle(native, nil)
+      check(
+         'toggle_event.native_hides',
+         native.overrides and native.overrides.enable_tab_bar,
+         false
+      )
+      local integrated = toggle_window(true, 'RESIZE|INTEGRATED_BUTTONS')
+      toggle(integrated, nil)
+      check('toggle_event.integrated_keeps', integrated.writes, 0)
+      local hidden = toggle_window(false, 'RESIZE|INTEGRATED_BUTTONS')
+      toggle(hidden, nil)
+      check(
+         'toggle_event.integrated_can_show',
+         hidden.overrides and hidden.overrides.enable_tab_bar,
+         true
+      )
+   end
+end
+
 -- 配色拆分（colors/custom.lua）：scheme 是整套调色板（注册为默认方案，设置浮层选别的方案
 -- 才能整套换掉），chrome 只放界面色；ANSI 用 Catppuccin Mocha 官方 16 色。
 do
@@ -818,6 +935,30 @@ do
    chain = chain_of({ 'segoeui.ttf' })
    check('ui_chain.regular_only', #chain == 1 and chain[1].weight, 'Regular')
    check('ui_chain.empty', #chain_of({}), 0)
+   -- 标题栏/标签栏要非粗体：即使有半粗文件也取 Regular，后备项不变；只有半粗文件时不加 Segoe UI
+   present = {
+      [dir_a .. 'segoeuisb.ttf'] = true,
+      [dir_a .. 'segoeui.ttf'] = true,
+      [dir_a .. 'msyh.ttc'] = true,
+   }
+   chain = font_files.ui_font_chain({ dir_a }, exists, 'Regular')
+   check(
+      'ui_chain.regular_requested',
+      chain[1].family .. ':' .. chain[1].weight,
+      'Segoe UI:Regular'
+   )
+   check('ui_chain.regular_keeps_fallbacks', chain[2], 'Microsoft YaHei UI')
+   check(
+      'ui_chain.demibold_default',
+      font_files.ui_font_chain({ dir_a }, exists)[1].weight,
+      'DemiBold'
+   )
+   present = { [dir_a .. 'segoeuisb.ttf'] = true }
+   check(
+      'ui_chain.regular_needs_regular_file',
+      #font_files.ui_font_chain({ dir_a }, exists, 'Regular'),
+      0
+   )
 
    -- 把平台伪装成 Windows、字体文件系统换成 files 清单，加载一个配置模块
    local function load_windows(module_name, files)
@@ -866,9 +1007,16 @@ do
    check('fonts.no_freetype_render_target', fonts.freetype_render_target, nil)
 
    -- 界面字体：Windows 上有 Segoe UI 等字体文件才设置，一项都没有就保持上游默认
-   local ui = load_windows('config.appearance', in_sys('segoeuisb.ttf', yahei, emoji))
+   local ui = load_windows('config.appearance', in_sys('segoeuisb.ttf', 'segoeui.ttf', yahei, emoji))
    check('appearance_fonts.frame_font_first', ui.window_frame.font.font[1].family, 'Segoe UI')
    check('appearance_fonts.frame_font_size', ui.window_frame.font_size, 10)
+   -- 标题栏/标签栏非粗体，浮层半粗
+   check('appearance_fonts.frame_font_regular', ui.window_frame.font.font[1].weight, 'Regular')
+   check(
+      'appearance_fonts.palette_font_demibold',
+      ui.command_palette_font.font[1].weight,
+      'DemiBold'
+   )
    check('appearance_fonts.palette_font', ui.command_palette_font ~= nil, true)
    check('appearance_fonts.char_select_font', ui.char_select_font ~= nil, true)
    check('appearance_fonts.pane_select_font', ui.pane_select_font ~= nil, true)
@@ -876,6 +1024,69 @@ do
    check('appearance_fonts.none_frame_font', ui.window_frame.font, nil)
    check('appearance_fonts.none_frame_font_size', ui.window_frame.font_size, nil)
    check('appearance_fonts.none_palette_font', ui.command_palette_font, nil)
+end
+
+-- 窗口外观（config/appearance.lua）：Windows 用集成标题栏按钮 + fancy tab bar，标题栏/标签栏
+-- 底色与细边框取 Mocha；其他平台保持系统装饰。
+do
+   local colors = require('colors.custom')
+   local mocha = colors.mocha
+   local font_files = require('utils.font-files')
+   local function load_appearance(os_name)
+      local saved_platform, saved_readable = package.loaded['utils.platform'], font_files.readable
+      package.loaded['utils.platform'] = {
+         os = os_name,
+         is_win = os_name == 'windows',
+         is_linux = os_name == 'linux',
+         is_mac = os_name == 'mac',
+      }
+      font_files.readable = function()
+         return false
+      end
+      package.loaded['config.appearance'] = nil
+      local loaded, options = pcall(require, 'config.appearance')
+      package.loaded['config.appearance'] = nil
+      package.loaded['utils.platform'] = saved_platform
+      font_files.readable = saved_readable
+      check('window_chrome.load.' .. os_name, loaded, true)
+      return loaded and options or { window_frame = {} }
+   end
+
+   local win = load_appearance('windows')
+   check('window_chrome.win.decorations', win.window_decorations, 'INTEGRATED_BUTTONS|RESIZE')
+   check('window_chrome.win.button_style', win.integrated_title_button_style, 'Windows')
+   check('window_chrome.win.button_alignment', win.integrated_title_button_alignment, 'Right')
+   check('window_chrome.win.button_color', win.integrated_title_button_color, 'auto')
+   local linux = load_appearance('linux')
+   check('window_chrome.linux.decorations', linux.window_decorations, nil)
+   check('window_chrome.linux.button_style', linux.integrated_title_button_style, nil)
+   check('window_chrome.linux.button_alignment', linux.integrated_title_button_alignment, nil)
+   check('window_chrome.linux.button_color', linux.integrated_title_button_color, nil)
+
+   for _, options in ipairs({ win, linux }) do
+      local frame = options.window_frame
+      check('window_chrome.fancy_tab_bar', options.use_fancy_tab_bar, true)
+      check('window_chrome.titlebar_bg', frame.active_titlebar_bg, mocha.crust)
+      check('window_chrome.inactive_titlebar_bg', frame.inactive_titlebar_bg, mocha.crust)
+      check('window_chrome.titlebar_fg', frame.active_titlebar_fg, mocha.text)
+      check('window_chrome.inactive_titlebar_fg', frame.inactive_titlebar_fg, mocha.overlay0)
+      for _, key in ipairs({
+         'border_left_width',
+         'border_right_width',
+         'border_top_height',
+         'border_bottom_height',
+      }) do
+         check('window_chrome.' .. key, frame[key], '1px')
+      end
+      for _, key in ipairs({
+         'border_left_color',
+         'border_right_color',
+         'border_top_color',
+         'border_bottom_color',
+      }) do
+         check('window_chrome.' .. key, frame[key], mocha.surface1)
+      end
+   end
 end
 
 -- 首窗按屏幕自适应（events/gui-startup.lua）：约 80% 并居中；屏幕信息不可用时保持默认大小。

@@ -128,6 +128,18 @@ end
 -- 避免两处实现漂移；也供纯函数用例直接 require 测试。
 M.clean_process_name = clean_process_name
 
+---窗口装饰里是否带集成标题栏按钮。window_decorations 序列化成 'RESIZE|INTEGRATED_BUTTONS'
+---这样的字符串（window_decorations 的 Rust 定义见 wezterm-input-types::WindowDecorations）。
+---集成按钮画在标签栏里：标签栏一旦隐藏，窗口既没有最小化/最大化/关闭按钮也拖不动，
+---所以 herdr 应用模式（events/status.lua）和手动切换都不能隐藏它。
+---@param decorations any window:effective_config().window_decorations
+---@return boolean
+local function has_integrated_buttons(decorations)
+   return type(decorations) == 'string' and decorations:find('INTEGRATED_BUTTONS', 1, true) ~= nil
+end
+
+M.has_integrated_buttons = has_integrated_buttons
+
 ---手动切换 tab bar 要写回的完整 overrides。纯函数：浅拷贝入参，只翻转
 ---enable_tab_bar 一个键，其余覆盖键原样保留；不再顺带写 background，避免把
 ---当时的壁纸固定成窗口覆盖（否则壁纸管理浮层选图重载后会被旧图顶回）。
@@ -474,10 +486,15 @@ M.setup = function(opts)
    end)
 
    -- CUSTOM EVENT
-   -- 手动切换 tab bar（与 events/status.lua 的 herdr 应用模式共用 enable_tab_bar 覆盖）
+   -- 手动切换 tab bar（与 events/status.lua 的 herdr 应用模式共用 enable_tab_bar 覆盖）。
+   -- 集成标题栏按钮模式下标签栏就是标题栏，不允许隐藏。
    wezterm.on('tabs.toggle-tab-bar', function(window, _pane)
+      local config = window:effective_config()
+      if config.enable_tab_bar and has_integrated_buttons(config.window_decorations) then
+         return
+      end
       window:set_config_overrides(
-         toggled_tab_bar_overrides(window:get_config_overrides(), window:effective_config().enable_tab_bar)
+         toggled_tab_bar_overrides(window:get_config_overrides(), config.enable_tab_bar)
       )
    end)
 

@@ -65,14 +65,17 @@ end
 -- Noto Sans CJK：GX Shell 安装包随带 NotoSansCJK-Regular.ttc；单文件 OTF 版本也算。
 M.NOTO_CJK_FILES = { 'NotoSansCJK-Regular.ttc', 'NotoSansCJKsc-Regular.otf' }
 
----界面字体回退链（标题栏、命令面板、字符选择、窗格选择）：Segoe UI 半粗 → 微软雅黑 UI
+---界面字体回退链（命令面板、字符选择、窗格选择、标题栏/标签栏）：Segoe UI → 微软雅黑 UI
 ---→ Segoe UI Emoji，每项只在字体文件存在时加入；全都没有时返回空表（调用方不设置）。
+---weight 缺省 'DemiBold'（浮层用半粗，没有半粗文件时退回 Regular）；标题栏/标签栏传
+---'Regular'，非粗体更接近 Windows 11 的标题栏观感。
 ---@param dirs string[]
 ---@param exists? fun(path: string): boolean
+---@param weight? 'Regular'|'DemiBold' Segoe UI 的字重
 ---@return (string|table)[]
-function M.ui_font_chain(dirs, exists)
+function M.ui_font_chain(dirs, exists, weight)
    local chain = {}
-   if M.any_exists(dirs, { 'segoeuisb.ttf' }, exists) then
+   if weight ~= 'Regular' and M.any_exists(dirs, { 'segoeuisb.ttf' }, exists) then
       table.insert(chain, { family = 'Segoe UI', weight = 'DemiBold' })
    elseif M.any_exists(dirs, { 'segoeui.ttf' }, exists) then
       table.insert(chain, { family = 'Segoe UI', weight = 'Regular' })

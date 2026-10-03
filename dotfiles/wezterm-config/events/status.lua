@@ -17,6 +17,11 @@ local BATTERY_TTL_S = 60
 local probe_by_window = {}
 local battery_cache = nil
 
+-- window:effective_config() 要把整份配置转成 Lua 表，很重；window_decorations 只会随配置
+-- 重载（重载会新建 Lua 状态、这个缓存随之清空）变化，缓存一段时间足够。
+local DECORATIONS_TTL_S = 30
+local decorations_by_window = {}
+
 ---回收已关闭窗口的状态，表项不随窗口开关无限增长（写法同 events/right-status.lua）。
 ---wezterm.gui 只在 GUI 进程里有；取不到窗口列表时本轮不回收，下一轮再试。
 local function prune_closed_windows()
@@ -36,6 +41,7 @@ local function prune_closed_windows()
       if not alive[id] then
          last_status_by_window[id] = nil
          probe_by_window[tostring(id)] = nil
+         decorations_by_window[tostring(id)] = nil
       end
    end
 end
@@ -108,11 +114,18 @@ end
 ---herdr 应用模式：是否应该隐藏宿主 tab bar。纯函数，不读取/修改任何
 ---window 或全局状态，只依据显式入参判断，可脱离 wezterm 运行时单独测试
 ---（见 tests/pure_fn_test.lua）。
+---
+---decorations 含 INTEGRATED_BUTTONS 时一律不隐藏：集成标题栏按钮画在 tab bar 里，隐藏后
+---窗口没有关闭/最大化按钮也拖不动。
 ---@param herdr_app_mode boolean
 ---@param tab_count number
 ---@param process_name string 已经过 clean_process_name 清洗的前台进程名
+---@param decorations? string window_decorations 的字符串形式，如 'RESIZE|INTEGRATED_BUTTONS'；缺省按没有集成按钮处理
 ---@return boolean
-local function should_hide_tab_bar(herdr_app_mode, tab_count, process_name)
+local function should_hide_tab_bar(herdr_app_mode, tab_count, process_name, decorations)
+   if tab_title.has_integrated_buttons(decorations) then
+      return false
+   end
    return herdr_app_mode == true and tab_count == 1 and process_name == 'herdr'
 end
 
@@ -203,21 +216,47 @@ local function foreground_process_name(key, pane, now)
    return name
 end
 
+---窗口生效的 window_decorations（字符串），同一窗口 DECORATIONS_TTL_S 秒内复用上次结果。
+---读不到（取配置失败）时返回空串且不缓存，按没有集成按钮处理。
+---@param key string tostring(window_id)
+---@param window any WezTerm GuiWindow
+---@param now integer os.time()
+---@return string
+local function window_decorations(key, window, now)
+   local cached = decorations_by_window[key]
+   if cached and still_fresh(cached.at, now, DECORATIONS_TTL_S) then
+      return cached.value
+   end
+   local ok, value = pcall(function()
+      return window:effective_config().window_decorations
+   end)
+   if not ok or type(value) ~= 'string' then
+      return ''
+   end
+   decorations_by_window[key] = { at = now, value = value }
+   return value
+end
+
 ---按 herdr 应用模式决定是否隐藏 tab bar；状态转移见 next_tab_bar_state。
----只在单 tab（隐藏的前提）时探测前台进程。
+---只在单 tab（隐藏的前提）时探测前台进程，且只在前台是 herdr（可能隐藏）时才取窗口装饰。
 ---@param window any WezTerm GuiWindow
 ---@param pane any? WezTerm Pane，可能为 nil（窗口刚创建等边界情况）
 ---@param herdr_app_mode boolean
 ---@param now? integer os.time()，缺省取当前时间
 local function apply_herdr_app_mode(window, pane, herdr_app_mode, now)
+   now = now or os.time()
    local key = tostring(window:window_id())
    local tab_count = #window:mux_window():tabs()
    local process_name = ''
    if pane and herdr_app_mode and tab_count == 1 then
-      process_name = foreground_process_name(key, pane, now or os.time())
+      process_name = foreground_process_name(key, pane, now)
+   end
+   local decorations = ''
+   if process_name == 'herdr' then
+      decorations = window_decorations(key, window, now)
    end
 
-   local hide = should_hide_tab_bar(herdr_app_mode, tab_count, process_name)
+   local hide = should_hide_tab_bar(herdr_app_mode, tab_count, process_name, decorations)
    local state = load_tab_bar_state(key)
    -- 判定不变时不必取 overrides（每次 update-status 都会走到这里）。
    local overrides = nil

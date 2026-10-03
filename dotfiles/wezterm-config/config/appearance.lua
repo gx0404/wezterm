@@ -10,15 +10,23 @@ local display = require('utils.display')
 ---@type table<PlatformType, 'WebGpu' | 'OpenGL' | 'Software'>
 local front_end = { linux = 'OpenGL', windows = 'OpenGL', mac = 'OpenGL' }
 
--- 界面字体（标题栏、命令面板、字符选择、窗格选择）只在 Windows 设置：Segoe UI 半粗 →
--- 微软雅黑 UI → Segoe UI Emoji，各项仅在字体文件存在时加入；一项都没有就保持上游默认。
--- 终端正文字体在 config/fonts.lua，与这里无关。
+local mocha = colors.mocha
+
+-- 界面字体只在 Windows 设置，回退链 Segoe UI → 微软雅黑 UI → Segoe UI Emoji，各项仅在
+-- 字体文件存在时加入；一项都没有就保持上游默认。浮层（命令面板、字符选择、窗格选择）
+-- 用半粗 ui_font，标题栏/标签栏（window_frame）用非粗体 frame_font。终端正文字体在
+-- config/fonts.lua，与这里无关。
 local ui_font = nil
+local frame_font = nil
 if platform.is_win then
    local dirs = font_files.windows_font_dirs(os.getenv, wezterm.executable_dir)
    local chain = font_files.ui_font_chain(dirs)
    if #chain > 0 then
       ui_font = wezterm.font_with_fallback(chain)
+   end
+   local frame_chain = font_files.ui_font_chain(dirs, nil, 'Regular')
+   if #frame_chain > 0 then
+      frame_font = wezterm.font_with_fallback(frame_chain)
    end
 end
 
@@ -58,10 +66,11 @@ local options = {
    -- scrollbar
    enable_scroll_bar = true,
 
-   -- tab bar
+   -- tab bar：fancy（自绘圆角标签）。栏底色来自下面的 window_frame，colors.tab_bar.background
+   -- 在 fancy 下不生效。
    enable_tab_bar = true,
    hide_tab_bar_if_only_one_tab = false,
-   use_fancy_tab_bar = false,
+   use_fancy_tab_bar = true,
    tab_max_width = 32,
    show_tab_index_in_tab_bar = false,
    switch_to_last_active_tab_when_closing_tab = true,
@@ -84,10 +93,22 @@ local options = {
    -- 只剩空闲 Shell 的窗口仍一键关闭，名单见 config/general.lua 的
    -- skip_close_confirmation_for_processes_named。
    window_close_confirmation = 'AlwaysPrompt',
+   -- 标题栏/标签栏的底色、文字色与 1px 细边框（Windows 11 窗口边缘观感）。
    window_frame = {
-      active_titlebar_bg = '#090909',
-      font = ui_font,
-      font_size = ui_font and 10 or nil,
+      active_titlebar_bg = mocha.crust,
+      inactive_titlebar_bg = mocha.crust,
+      active_titlebar_fg = mocha.text,
+      inactive_titlebar_fg = mocha.overlay0,
+      border_left_width = '1px',
+      border_right_width = '1px',
+      border_top_height = '1px',
+      border_bottom_height = '1px',
+      border_left_color = mocha.surface1,
+      border_right_color = mocha.surface1,
+      border_top_color = mocha.surface1,
+      border_bottom_color = mocha.surface1,
+      font = frame_font,
+      font_size = frame_font and 10 or nil,
    },
    -- inactive_pane_hsb = {
    --    saturation = 0.9,
@@ -111,6 +132,17 @@ if ui_font then
    options.command_palette_font = ui_font
    options.char_select_font = ui_font
    options.pane_select_font = ui_font
+end
+
+-- Windows：集成标题栏按钮（最小化/最大化/关闭画在标签栏右上角，Windows 11 Fluent 风）。
+-- 没有系统标题栏，标签栏就是标题栏，所以 herdr 应用模式与手动切换都不能隐藏它
+-- （events/status.lua、events/tab-title.lua）。按钮外观以及 Windows 10/11 的差异由 wezterm
+-- 按系统版本自适应，这里不判断系统版本。
+if platform.is_win then
+   options.window_decorations = 'INTEGRATED_BUTTONS|RESIZE'
+   options.integrated_title_button_style = 'Windows'
+   options.integrated_title_button_alignment = 'Right'
+   options.integrated_title_button_color = 'auto'
 end
 
 return options
