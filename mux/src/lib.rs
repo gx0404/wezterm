@@ -48,6 +48,7 @@ pub mod pane;
 pub mod renderable;
 pub mod ssh;
 pub mod ssh_agent;
+mod stale_cache;
 pub mod tab;
 pub mod termwiztermtab;
 pub mod tmux;
