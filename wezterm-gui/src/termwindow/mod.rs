@@ -89,6 +89,7 @@ pub mod keyevent;
 mod live_resize;
 pub mod modal;
 mod mouseevent;
+pub mod overlay_style;
 pub mod palette;
 pub mod paneselect;
 mod prevcursor;
