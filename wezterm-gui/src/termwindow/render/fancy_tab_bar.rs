@@ -3,7 +3,8 @@ use crate::tabbar::{TabBarItem, TabEntry};
 use crate::termwindow::box_model::*;
 use crate::termwindow::render::corners::*;
 
-use crate::termwindow::render::window_buttons::window_button_element;
+use crate::termwindow::overlay_style::blend;
+use crate::termwindow::render::window_buttons::{window_button_element, WindowButtonState};
 use crate::termwindow::{UIItem, UIItemType};
 use crate::utilsprites::RenderMetrics;
 use config::{Dimension, DimensionContext, TabBarColors};
@@ -50,6 +51,63 @@ const PLUS_BUTTON: &[Poly] = &[
     },
 ];
 
+/// fork: corner radius of the `+`, `☰` and `×` buttons; 4 pixels at
+/// 96 dpi, scaled with the display dpi.
+const BUTTON_CORNER_RADIUS: Dimension = Dimension::Points(3.);
+
+/// fork: how strongly the `×` hover chip tints the tab background with
+/// the tab's own text color.
+const CLOSE_HOVER_TINT: f32 = 0.15;
+
+/// fork: corners of a fancy tab. The rounded pair faces away from the
+/// terminal (the top corners for a top bar, the bottom ones for a bottom
+/// bar) and uses `window_frame.tab_corner_radius`. Inactive tabs keep
+/// upstream's zero-width, 0.33-cell placeholders on the other pair so
+/// that their right edge separator stops short of the terminal side.
+fn tab_corners(radius: Dimension, is_bottom: bool, active: bool) -> Corners {
+    let mut corners = if is_bottom {
+        bottom_rounded_corners(radius)
+    } else {
+        top_rounded_corners(radius)
+    };
+    if !active {
+        let placeholder = SizedPoly {
+            width: Dimension::Cells(0.),
+            height: Dimension::Cells(0.33),
+            poly: &[],
+        };
+        if is_bottom {
+            corners.top_left = placeholder;
+            corners.top_right = placeholder;
+        } else {
+            corners.bottom_left = placeholder;
+            corners.bottom_right = placeholder;
+        }
+    }
+    corners
+}
+
+/// fork: hover colors of a tab's `×` button, derived from the tab it sits
+/// on: its own text color as a faint chip over its own background.
+/// Upstream swapped the palettes (an active tab borrowed the inactive hover
+/// colors and vice versa), so the chip looked like a piece of another tab.
+/// An inactive tab is itself hovered while its `×` is, hence
+/// `inactive_tab_hover`.
+fn close_button_hover_colors(colors: &TabBarColors, active: bool) -> ElementColors {
+    let tab = if active {
+        colors.active_tab()
+    } else {
+        colors.inactive_tab_hover()
+    };
+    let bg = tab.bg_color.to_linear();
+    let fg = tab.fg_color.to_linear();
+    ElementColors {
+        border: BorderColor::default(),
+        bg: blend(bg, fg, CLOSE_HOVER_TINT).into(),
+        text: fg.into(),
+    }
+}
+
 impl crate::TermWindow {
     pub fn invalidate_fancy_tab_bar(&mut self) {
         self.fancy_tab_bar.take();
@@ -92,6 +150,13 @@ impl crate::TermWindow {
             VerticalAlign::Top
         } else {
             VerticalAlign::Bottom
+        };
+        let tab_radius = self.config.window_frame.tab_corner_radius;
+        let window_button_state = WindowButtonState {
+            is_maximized: self.window_state.contains(window::WindowState::MAXIMIZED),
+            focused: self.focused.is_some(),
+            bar_height: tab_bar_height,
+            dpi: self.dimensions.dpi as f32,
         };
 
         let item_to_elem = |item: &TabEntry| -> Element {
@@ -181,6 +246,7 @@ impl crate::TermWindow {
                     bottom: Dimension::Cells(0.25),
                 })
                 .border(BoxDimension::new(Dimension::Pixels(1.)))
+                .border_corners(Some(rounded_corners(BUTTON_CORNER_RADIUS)))
                 .colors(ElementColors {
                     border: BorderColor::default(),
                     bg: new_tab.bg_color.to_linear().into(),
@@ -209,6 +275,7 @@ impl crate::TermWindow {
                             bottom: Dimension::Cells(0.25),
                         })
                         .border(BoxDimension::new(Dimension::Pixels(1.)))
+                        .border_corners(Some(rounded_corners(BUTTON_CORNER_RADIUS)))
                         .colors(ElementColors {
                             border: BorderColor::default(),
                             bg: new_tab.bg_color.to_linear().into(),
@@ -245,37 +312,8 @@ impl crate::TermWindow {
                         bottom: Dimension::Cells(0.25),
                     })
                     .border(BoxDimension::new(Dimension::Pixels(1.)))
-                    .border_corners(Some(if is_bottom {
-                        Corners {
-                            top_left: SizedPoly::none(),
-                            top_right: SizedPoly::none(),
-                            bottom_left: SizedPoly {
-                                width: Dimension::Cells(0.5),
-                                height: Dimension::Cells(0.5),
-                                poly: BOTTOM_LEFT_ROUNDED_CORNER,
-                            },
-                            bottom_right: SizedPoly {
-                                width: Dimension::Cells(0.5),
-                                height: Dimension::Cells(0.5),
-                                poly: BOTTOM_RIGHT_ROUNDED_CORNER,
-                            },
-                        }
-                    } else {
-                        Corners {
-                            top_left: SizedPoly {
-                                width: Dimension::Cells(0.5),
-                                height: Dimension::Cells(0.5),
-                                poly: TOP_LEFT_ROUNDED_CORNER,
-                            },
-                            top_right: SizedPoly {
-                                width: Dimension::Cells(0.5),
-                                height: Dimension::Cells(0.5),
-                                poly: TOP_RIGHT_ROUNDED_CORNER,
-                            },
-                            bottom_left: SizedPoly::none(),
-                            bottom_right: SizedPoly::none(),
-                        }
-                    }))
+                    // fork: radius from window_frame.tab_corner_radius
+                    .border_corners(Some(tab_corners(tab_radius, is_bottom, true)))
                     .colors(ElementColors {
                         border: BorderColor::new(
                             bg_color
@@ -316,53 +354,8 @@ impl crate::TermWindow {
                         bottom: Dimension::Cells(0.25),
                     })
                     .border(BoxDimension::new(Dimension::Pixels(1.)))
-                    .border_corners(Some(if is_bottom {
-                        Corners {
-                            top_left: SizedPoly {
-                                width: Dimension::Cells(0.),
-                                height: Dimension::Cells(0.33),
-                                poly: &[],
-                            },
-                            top_right: SizedPoly {
-                                width: Dimension::Cells(0.),
-                                height: Dimension::Cells(0.33),
-                                poly: &[],
-                            },
-                            bottom_left: SizedPoly {
-                                width: Dimension::Cells(0.5),
-                                height: Dimension::Cells(0.5),
-                                poly: BOTTOM_LEFT_ROUNDED_CORNER,
-                            },
-                            bottom_right: SizedPoly {
-                                width: Dimension::Cells(0.5),
-                                height: Dimension::Cells(0.5),
-                                poly: BOTTOM_RIGHT_ROUNDED_CORNER,
-                            },
-                        }
-                    } else {
-                        Corners {
-                            top_left: SizedPoly {
-                                width: Dimension::Cells(0.5),
-                                height: Dimension::Cells(0.5),
-                                poly: TOP_LEFT_ROUNDED_CORNER,
-                            },
-                            top_right: SizedPoly {
-                                width: Dimension::Cells(0.5),
-                                height: Dimension::Cells(0.5),
-                                poly: TOP_RIGHT_ROUNDED_CORNER,
-                            },
-                            bottom_left: SizedPoly {
-                                width: Dimension::Cells(0.),
-                                height: Dimension::Cells(0.33),
-                                poly: &[],
-                            },
-                            bottom_right: SizedPoly {
-                                width: Dimension::Cells(0.),
-                                height: Dimension::Cells(0.33),
-                                poly: &[],
-                            },
-                        }
-                    }))
+                    // fork: radius from window_frame.tab_corner_radius
+                    .border_corners(Some(tab_corners(tab_radius, is_bottom, false)))
                     .colors({
                         let inactive_tab = colors.inactive_tab();
                         let bg = bg_color
@@ -403,7 +396,7 @@ impl crate::TermWindow {
                     }),
                 TabBarItem::WindowButton(button) => window_button_element(
                     button,
-                    self.window_state.contains(window::WindowState::MAXIMIZED),
+                    &window_button_state,
                     &font,
                     &metrics,
                     &self.config,
@@ -610,28 +603,9 @@ fn make_x_button(
     .vertical_align(VerticalAlign::Middle)
     .float(Float::Right)
     .item_type(UIItemType::CloseTab(tab_idx))
-    .hover_colors({
-        let inactive_tab_hover = colors.inactive_tab_hover();
-        let active_tab = colors.active_tab();
-
-        Some(ElementColors {
-            border: BorderColor::default(),
-            bg: (if active {
-                inactive_tab_hover.bg_color
-            } else {
-                active_tab.bg_color
-            })
-            .to_linear()
-            .into(),
-            text: (if active {
-                inactive_tab_hover.fg_color
-            } else {
-                active_tab.fg_color
-            })
-            .to_linear()
-            .into(),
-        })
-    })
+    // fork: the hover chip follows the tab it sits on, with rounded corners
+    .hover_colors(Some(close_button_hover_colors(colors, active)))
+    .border_corners(Some(rounded_corners(BUTTON_CORNER_RADIUS)))
     .padding(BoxDimension {
         left: Dimension::Cells(0.25),
         right: Dimension::Cells(0.25),
@@ -644,4 +618,87 @@ fn make_x_button(
         top: Dimension::Cells(0.),
         bottom: Dimension::Cells(0.),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn placeholder() -> SizedPoly {
+        SizedPoly {
+            width: Dimension::Cells(0.),
+            height: Dimension::Cells(0.33),
+            poly: &[],
+        }
+    }
+
+    #[test]
+    fn default_radius_reproduces_the_historical_tab_corners() {
+        let r = Dimension::Cells(0.5);
+        let round = |poly| SizedPoly {
+            width: r,
+            height: r,
+            poly,
+        };
+        // 顶栏：上两角圆；非活动标签下两角保留 0 宽占位
+        let active = tab_corners(r, false, true);
+        assert_eq!(active.top_left, round(TOP_LEFT_ROUNDED_CORNER));
+        assert_eq!(active.top_right, round(TOP_RIGHT_ROUNDED_CORNER));
+        assert_eq!(active.bottom_left, SizedPoly::none());
+        assert_eq!(active.bottom_right, SizedPoly::none());
+        let inactive = tab_corners(r, false, false);
+        assert_eq!(inactive.top_left, round(TOP_LEFT_ROUNDED_CORNER));
+        assert_eq!(inactive.bottom_left, placeholder());
+        assert_eq!(inactive.bottom_right, placeholder());
+
+        // 底栏：镜像
+        let active = tab_corners(r, true, true);
+        assert_eq!(active.bottom_left, round(BOTTOM_LEFT_ROUNDED_CORNER));
+        assert_eq!(active.bottom_right, round(BOTTOM_RIGHT_ROUNDED_CORNER));
+        assert_eq!(active.top_left, SizedPoly::none());
+        let inactive = tab_corners(r, true, false);
+        assert_eq!(inactive.bottom_right, round(BOTTOM_RIGHT_ROUNDED_CORNER));
+        assert_eq!(inactive.top_left, placeholder());
+        assert_eq!(inactive.top_right, placeholder());
+    }
+
+    #[test]
+    fn tab_corners_follow_the_configured_radius() {
+        let r = Dimension::Pixels(8.);
+        let corners = tab_corners(r, false, false);
+        assert_eq!((corners.top_left.width, corners.top_left.height), (r, r));
+        assert_eq!((corners.top_right.width, corners.top_right.height), (r, r));
+    }
+
+    #[test]
+    fn close_button_hover_follows_its_own_tab() {
+        let colors = TabBarColors::default();
+        let active = close_button_hover_colors(&colors, true);
+        assert_eq!(
+            active.text,
+            InheritableColor::Color(colors.active_tab().fg_color.to_linear())
+        );
+        assert_eq!(
+            active.bg,
+            InheritableColor::Color(blend(
+                colors.active_tab().bg_color.to_linear(),
+                colors.active_tab().fg_color.to_linear(),
+                CLOSE_HOVER_TINT,
+            ))
+        );
+        let inactive = close_button_hover_colors(&colors, false);
+        let hover = colors.inactive_tab_hover();
+        assert_eq!(
+            inactive.text,
+            InheritableColor::Color(hover.fg_color.to_linear())
+        );
+        assert_eq!(
+            inactive.bg,
+            InheritableColor::Color(blend(
+                hover.bg_color.to_linear(),
+                hover.fg_color.to_linear(),
+                CLOSE_HOVER_TINT,
+            ))
+        );
+    }
 }

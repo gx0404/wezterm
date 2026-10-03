@@ -763,14 +763,15 @@ impl TabBarState {
             // fork (WZ-13): the hover zone must use the rendered cell width;
             // " ☰ " is 5 bytes but only MENU_BUTTON_DISPLAY_CELLS wide.
             let hover = is_tab_hover(mouse_x, x, menu_button_display_cells());
-            let mut attrs = if config.use_fancy_tab_bar {
+            // fork: hover like the `+` button (new_tab_hover) instead of
+            // reverse video; the fancy bar styles the button itself
+            let attrs = if config.use_fancy_tab_bar {
                 CellAttributes::default()
+            } else if hover {
+                new_tab_hover_attrs.clone()
             } else {
                 new_tab_attrs.clone()
             };
-            if hover {
-                attrs.set_reverse(true);
-            }
             let menu_button = parse_status_text(MENU_BUTTON_TEXT, attrs);
             let button_start = x;
             let width = menu_button.len();

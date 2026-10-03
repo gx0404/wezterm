@@ -178,9 +178,6 @@ pub fn rounded_corner_arc(
 /// `Dimension::Pixels`/`Points` evaluate to the same pixel count on both
 /// axes and give a true circle; `Cells`/`Percent` follow the cell width
 /// on one axis and the cell height on the other and give an ellipse.
-// fork: consumed by the overlay chrome once it adopts contrasting
-// borders; unused until then.
-#[allow(dead_code)]
 pub fn rounded_corners(radius: Dimension) -> Corners {
     Corners {
         top_left: SizedPoly {
@@ -210,7 +207,6 @@ pub fn rounded_corners(radius: Dimension) -> Corners {
 /// `SizedPoly::none()`, so the side borders run all the way down to the
 /// bottom edge; the fancy tab bar keeps its own zero-width, 0.33-cell
 /// placeholders there on purpose to stop its sides short.
-#[allow(dead_code)]
 pub fn top_rounded_corners(radius: Dimension) -> Corners {
     Corners {
         top_left: SizedPoly {
@@ -225,6 +221,25 @@ pub fn top_rounded_corners(radius: Dimension) -> Corners {
         },
         bottom_left: SizedPoly::none(),
         bottom_right: SizedPoly::none(),
+    }
+}
+
+/// fork: the mirror image of `top_rounded_corners`, for a tab bar placed
+/// at the bottom of the window: only the bottom two corners are rounded.
+pub fn bottom_rounded_corners(radius: Dimension) -> Corners {
+    Corners {
+        top_left: SizedPoly::none(),
+        top_right: SizedPoly::none(),
+        bottom_left: SizedPoly {
+            width: radius,
+            height: radius,
+            poly: BOTTOM_LEFT_ROUNDED_CORNER,
+        },
+        bottom_right: SizedPoly {
+            width: radius,
+            height: radius,
+            poly: BOTTOM_RIGHT_ROUNDED_CORNER,
+        },
     }
 }
 
@@ -353,5 +368,19 @@ mod tests {
         // 下两角无占位：侧边直边一直画到底边
         assert_eq!(corners.bottom_left, SizedPoly::none());
         assert_eq!(corners.bottom_right, SizedPoly::none());
+    }
+
+    #[test]
+    fn bottom_rounded_corners_mirror_the_top_ones() {
+        let radius = Dimension::Pixels(8.);
+        let corners = bottom_rounded_corners(radius);
+        assert_eq!(corners.bottom_left.poly, BOTTOM_LEFT_ROUNDED_CORNER);
+        assert_eq!(corners.bottom_right.poly, BOTTOM_RIGHT_ROUNDED_CORNER);
+        assert_eq!(
+            (corners.bottom_right.width, corners.bottom_right.height),
+            (radius, radius)
+        );
+        assert_eq!(corners.top_left, SizedPoly::none());
+        assert_eq!(corners.top_right, SizedPoly::none());
     }
 }
