@@ -104,6 +104,14 @@
 - 盒模型圆角改为「底色扇形 + 边框色弧线」（`box_model.rs`），边框色与底色不同时四角不再变成实心
   色块，可实现 Fluent 风格的异色细边框圆角；新增 `rounded_corners`/`top_rounded_corners` 工具，
   `Pixels`/`Points` 半径在任意 dpi 与字体格子比例下均为正圆。
+- 浮层 Fluent 样式：命令面板、设置、快捷键速查、壁纸、右键/主菜单统一经
+  `termwindow/overlay_style.rs` 渲染——圆角描边外框、选中行改为柔和底色 + 左侧强调条、键位标签
+  小圆角块、设置页分区改底部强调线、右键菜单分隔线满宽；新配置 `overlay_corner_radius`
+  （默认 0.25cell）、`overlay_border_color`、`command_palette_selection_bg_color/_fg_color`、
+  `command_palette_secondary_fg_color`、`command_palette_accent_color`、
+  `window_frame.tab_corner_radius`（默认 0.5cell）、`window_frame.close_button_hover_bg`
+  （默认 #c42b1c）；设置页「外观」新增「窗口材质：壁纸 / Mica / Acrylic / 纯色」行写入
+  `gui-settings.json` 的 `window_material`。
 
 
 ### Changed
@@ -219,6 +227,9 @@
   quick select、分割线（1px）、滚动条（3pt 细线）、视觉铃声（150ms EaseOut）配色与尺寸对齐
   Catppuccin Mocha；集成按钮模式下 herdr 应用模式与手动切换不再隐藏标签栏（否则窗口失去标题栏按钮
   且不可拖动）；删除无人引用的 `events/right-status.lua` 与 `utils/math.lua`。
+- Windows 风格标题栏按钮铺满栏高、失焦时变暗、前景优先取 `window_frame.*_titlebar_fg`；
+  `+`/`☰`/`×` 悬停加 3pt 圆角，fancy 标签 `×` 悬停色不再把活动/非活动配色用反；retro 标签栏
+  `☰` 悬停改用 `new_tab_hover`。
 
 
 ### Fixed
@@ -288,6 +299,15 @@
   下文时复用窗口已设置的像素格式。
 - `QuitApplication` 在 `AlwaysPrompt` 下复用空闲 Shell 名单判定，全部窗格空闲时不再弹确认。
 - 盒模型右边框宽度误用左边框宽度（上游问题）。
+- Windows 字体加载：粗体/暗淡/斜体样式改为按族枚举 DirectWrite 全部字体面，由 wezterm 自身的
+  CSS 匹配规则选最近字重并合成缺失样式，字体文件保持磁盘 mmap——此前这些样式几乎都落到 GDI
+  `GetFontData` 把整份字体复制进内存（`ls-fonts` 显示 `<imported to RAM>, Gdi`），且 Noto Sans
+  CJK 等 TTC 的粗体会从回退链中丢失；GDI 仅作最后兜底且映射器替换成别的字体时不再当作命中；
+  系统字体回退对增补平面字符改用正确的 UTF-16 代理对。HarfBuzz 光栅化器（COLRv1 彩色字形）
+  应用 per-font `scale`；DPI 变化时同步清空窗格选择/字符选择/命令面板三个字体缓存。
+- dotfiles `gui-startup` 不再调用 `window:gui_window()`（GUI 窗口此时尚未创建，会阻塞主线程、
+  窗口永远不出现），首窗几何改经 `mux.spawn_window` 的 `width/height/position` 传入。
+- 命令面板在窗口很矮时计算可见行数会下溢。
 
 
 ## 0.3.0(TBD)
