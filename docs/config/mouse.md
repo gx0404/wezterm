@@ -149,7 +149,9 @@ The `event` portion has three components:
 
 * Whether it is a `Down`, `Up` or `Drag` event
 * The number of consecutive clicks within the click threshold (the *click streak*)
-* The mouse button; `Left`, `Right`, or `Middle`.
+* The mouse button; `Left`, `Right`, or `Middle`, or the side buttons `X1`
+  ("back") and `X2` ("forward"). {{since('nightly', inline=True)}} At the
+  time of writing, side button events are only produced on Windows.
 
 A double click is a `down-up-down` sequence where either the second button down
 is held for long enough or is released and no subsequent down event occurs
@@ -166,6 +168,7 @@ you wanted quadruple-click bindings you can specify `streak=4`.
 | Triple Left Down  | `event={Down={streak=3, button="Left"}}` |
 | Double Left Up  | `event={Up={streak=2, button="Left"}}` |
 | Single Left Drag  | `event={Drag={streak=1, button="Left"}}` |
+| Single X1 Down  | `event={Down={streak=1, button="X1"}}` |
 
 {{since('20220807-113146-c2fee766')}}
 
@@ -198,6 +201,40 @@ config.mouse_bindings = {
 
 return config
 ```
+
+{{since('nightly')}}
+
+The `X1` and `X2` side buttons found on many mice can be bound like any other
+button. This example uses them to switch between tabs:
+
+```lua
+local wezterm = require 'wezterm'
+local act = wezterm.action
+local config = {}
+
+config.mouse_bindings = {
+  -- The "back" side button activates the tab to the left
+  {
+    event = { Down = { streak = 1, button = 'X1' } },
+    mods = 'NONE',
+    action = act.ActivateTabRelative(-1),
+  },
+  -- The "forward" side button activates the tab to the right
+  {
+    event = { Down = { streak = 1, button = 'X2' } },
+    mods = 'NONE',
+    action = act.ActivateTabRelative(1),
+  },
+}
+
+return config
+```
+
+When the application running in the pane has enabled mouse reporting, the
+side buttons are reported to it as xterm buttons 8 and 9 instead, and bindings
+with the default `mouse_reporting=false`, such as the ones above, don't apply.
+Hold the [mouse reporting bypass modifier
+key](lua/config/bypass_mouse_reporting_modifiers.md) to use the bindings anyway.
 
 
 # Gotcha on binding an 'Up' event only
