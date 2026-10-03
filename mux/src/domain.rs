@@ -200,7 +200,9 @@ pub trait Domain: Downcast + Send + Sync {
 impl_downcast!(Domain);
 
 pub struct LocalDomain {
-    pty_system: Mutex<Box<dyn PtySystem + Send>>,
+    // fork: shared so that `spawn_pane` can open the pty on the blocking
+    // pool rather than on the GUI thread.
+    pty_system: Arc<Mutex<Box<dyn PtySystem + Send>>>,
     id: DomainId,
     name: String,
 }
@@ -229,7 +231,7 @@ impl LocalDomain {
     pub fn with_pty_system(name: &str, pty_system: Box<dyn PtySystem + Send>) -> Self {
         let id = alloc_domain_id();
         Self {
-            pty_system: Mutex::new(pty_system),
+            pty_system: Arc::new(Mutex::new(pty_system)),
             id,
             name: name.to_string(),
         }
@@ -598,10 +600,7 @@ impl Domain for LocalDomain {
             .build_command(command, command_dir, pane_id)
             .await
             .context("build_command")?;
-        let pair = self
-            .pty_system
-            .lock()
-            .openpty(crate::terminal_size_to_pty_size(size)?)?;
+        let pty_size = crate::terminal_size_to_pty_size(size)?;
 
         let command_line = cmd
             .as_unix_command_line()
@@ -615,8 +614,21 @@ impl Domain for LocalDomain {
             },
             self.name
         );
-        let child_result = pair.slave.spawn_command(cmd);
-        let mut writer = WriterWrapper::new(pair.master.take_writer()?);
+
+        // fork: opening the pty and spawning the child (on Windows:
+        // CreatePseudoConsole, CreateProcessW and the registry walk that
+        // builds the environment block) can take tens of milliseconds;
+        // run them on the blocking pool so that creating a tab or split
+        // does not stall the GUI thread, which only awaits the result.
+        let pty_system = Arc::clone(&self.pty_system);
+        let (master, child_result, writer) = smol::unblock(move || -> anyhow::Result<_> {
+            let pair = pty_system.lock().openpty(pty_size)?;
+            let child_result = pair.slave.spawn_command(cmd);
+            let writer = pair.master.take_writer()?;
+            Ok((pair.master, child_result, writer))
+        })
+        .await?;
+        let mut writer = WriterWrapper::new(writer);
 
         let mut terminal = wezterm_term::Terminal::new(
             size,
@@ -634,7 +646,7 @@ impl Domain for LocalDomain {
                 pane_id,
                 terminal,
                 child,
-                pair.master,
+                master,
                 Box::new(writer),
                 self.id,
                 command_description,
@@ -649,7 +661,7 @@ impl Domain for LocalDomain {
                     terminal,
                     Box::new(FailedProcessSpawn {}),
                     Box::new(FailedSpawnPty {
-                        inner: Mutex::new(pair.master),
+                        inner: Mutex::new(master),
                     }),
                     Box::new(writer),
                     self.id,
