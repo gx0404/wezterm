@@ -342,7 +342,9 @@ do
          end,
       }
    end
-   function window:set_left_status(_) end
+   function window:set_left_status(value)
+      self.left = value
+   end
    function window:set_right_status(value)
       self.right = value
    end
@@ -351,6 +353,17 @@ do
    wezterm.battery_info = real_battery_info
    check('battery.cached', battery_calls, 1)
    check('battery.rendered', window.right ~= nil and window.right:find('50%%') ~= nil, true)
+   -- 左右状态块不带背景色（48 / 49m）也不加粗（1m）：fancy 标签栏里状态块的底色取
+   -- window_frame 的标题栏底色，与标签栏、+ 按钮一致
+   for _, side in ipairs({ 'left', 'right' }) do
+      local text = window[side] or ''
+      check(
+         'status.no_background.' .. side,
+         text:find('\27%[48') == nil and text:find('\27%[49m') == nil,
+         true
+      )
+      check('status.not_bold.' .. side, text:find('\27%[1m') == nil, true)
+   end
 end
 
 -- utils/cache.lua::still_fresh：有效期内为真，到期或时钟往回拨为假
@@ -578,6 +591,69 @@ do
       pcall(titles.apply_manual_title, fake_window(nil), 'x'),
       true
    )
+
+   -- fancy 标签栏：两端没有半圆字形；标题只给前景色（读自 colors.chrome.tab_bar 的三态），
+   -- 不带背景（标签底色由标签栏按 bg_color 自己画，含悬停态）、不加粗；未读标记用强调色。
+   local palette = require('colors.custom')
+   local tab_bar = palette.chrome.tab_bar
+   local function inspect(items)
+      local info = { fg = {}, bg = 0, bold = 0 }
+      for _, item in ipairs(items) do
+         if type(item) == 'table' then
+            if item.Foreground then
+               table.insert(info.fg, item.Foreground.Color)
+            end
+            if item.Background then
+               info.bg = info.bg + 1
+            end
+            if item.Attribute and item.Attribute.Intensity == 'Bold' then
+               info.bold = info.bold + 1
+            end
+         end
+      end
+      return info
+   end
+   local plain = fake_tab(20, 710, 'zsh', 'plain')
+   local current = fake_tab(21, 710, 'zsh', 'current')
+   current.is_active = true
+   local window_tabs = { plain, current }
+   local items = titles.render_tab(opts, plain, window_tabs, false, 32, 1000)
+   check('tab_title.fancy.default_fg', inspect(items).fg[1], tab_bar.inactive_tab.fg_color)
+   check('tab_title.fancy.no_background', inspect(items).bg, 0)
+   check('tab_title.fancy.not_bold', inspect(items).bold, 0)
+   items = titles.render_tab(opts, plain, window_tabs, true, 32, 1000)
+   check('tab_title.fancy.hover_fg', inspect(items).fg[1], tab_bar.inactive_tab_hover.fg_color)
+   items = titles.render_tab(opts, current, window_tabs, false, 32, 1000)
+   check('tab_title.fancy.active_fg', inspect(items).fg[1], tab_bar.active_tab.fg_color)
+   check(
+      'tab_title.fancy.no_left_circle',
+      flatten(items):find(wezterm.nerdfonts.ple_left_half_circle_thick, 1, true),
+      nil
+   )
+   check(
+      'tab_title.fancy.no_right_circle',
+      flatten(items):find(wezterm.nerdfonts.ple_right_half_circle_thick, 1, true),
+      nil
+   )
+   local unread = fake_tab(22, 710, 'zsh', 'logs')
+   unread.panes = { { has_unseen_output = true } }
+   local accent_seen = false
+   for _, color in ipairs(inspect(titles.render_tab(opts, unread, window_tabs, false, 32, 1000)).fg) do
+      accent_seen = accent_seen or color == palette.mocha.peach
+   end
+   check('tab_title.fancy.unseen_accent', accent_seen, true)
+
+   -- state_colors（纯函数）：三态文字色来自传入的 tab_bar，只有前景色
+   local states = titles.state_colors({
+      inactive_tab = { fg_color = '#111111', bg_color = '#aaaaaa' },
+      inactive_tab_hover = { fg_color = '#222222', bg_color = '#bbbbbb' },
+      active_tab = { fg_color = '#333333', bg_color = '#cccccc' },
+   }, '#abcdef')
+   check('state_colors.default', states.default.text.fg, '#111111')
+   check('state_colors.hover', states.hover.text.fg, '#222222')
+   check('state_colors.active', states.active.text.fg, '#333333')
+   check('state_colors.unseen_accent', states.active.unseen.fg, '#abcdef')
+   check('state_colors.no_background', states.hover.text.bg, nil)
 end
 
 -- clean_process_name（来自 events/tab-title.lua，herdr 应用模式判断复用同一口径）
@@ -597,6 +673,16 @@ do
    out = toggled(nil, true)
    check('toggle.hide_from_nil', out.enable_tab_bar, false)
    check('toggle.no_background', out.background, nil)
+end
+
+-- 状态只在 events/status.lua 里注册；废弃的 events/right-status.lua 已删除（也没有任何
+-- 模块 require 它），防止被加回来后重复注册 update-right-status。
+do
+   local file = io.open(config_root .. '/events/right-status.lua', 'r')
+   if file then
+      file:close()
+   end
+   check('right_status.removed', file, nil)
 end
 
 -- 手动切换 tab bar 的事件处理（tabs.toggle-tab-bar）：集成标题栏按钮模式下标签栏就是
@@ -677,6 +763,20 @@ do
    check('appearance.color_schemes', appearance.color_schemes[colors.name], colors.scheme)
    check('appearance.colors_is_chrome', appearance.colors, colors.chrome)
    check('appearance.close_confirmation', appearance.window_close_confirmation, 'AlwaysPrompt')
+
+   -- fancy 标签栏：栏底色来自 window_frame（crust），tab_bar 的底色、+ 按钮底色与之一致；
+   -- 活动标签与终端背景同色，悬停浮起 surface0；悬停的 + 按钮不再斜体
+   local tab_bar = colors.chrome.tab_bar
+   local frame_bg = appearance.window_frame.active_titlebar_bg
+   check('colors.tab_bar.background', tab_bar.background, frame_bg)
+   check('colors.tab_bar.new_tab_bg', tab_bar.new_tab.bg_color, frame_bg)
+   check('colors.tab_bar.inactive_bg', tab_bar.inactive_tab.bg_color, frame_bg)
+   check('colors.tab_bar.active_bg', tab_bar.active_tab.bg_color, colors.scheme.background)
+   check('colors.tab_bar.hover_bg', tab_bar.inactive_tab_hover.bg_color, colors.mocha.surface0)
+   check('colors.tab_bar.new_tab_hover_bg', tab_bar.new_tab_hover.bg_color, colors.mocha.surface0)
+   check('colors.tab_bar.new_tab_hover_italic', tab_bar.new_tab_hover.italic, nil)
+   check('appearance.tab_max_width', appearance.tab_max_width, 36)
+   check('appearance.close_button_in_tabs', appearance.show_close_tab_button_in_tabs, true)
 
    -- 遮罩层/专注模式背景跟随 gui-settings.json 里设置浮层选中的方案
    local backdrops = require('utils.backdrops')

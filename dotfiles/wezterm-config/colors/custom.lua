@@ -72,28 +72,33 @@ local scheme = {
 }
 
 local chrome = {
+   -- fancy 标签栏（config/appearance.lua 的 use_fancy_tab_bar）：栏底色来自 window_frame 的
+   -- 标题栏底色（crust），这里的 background 只在经典标签栏下生效，取同色保持一致。
+   -- 活动标签与终端背景同色（base），和内容区连成一片；非活动标签融进栏底（crust），悬停
+   -- 时浮起一层 surface0；+ 按钮与栏底同色，悬停同样浮起。标签标题与图标的文字色
+   -- （events/tab-title.lua）也读这里的三态 fg_color。
    tab_bar = {
-      background = 'rgba(0, 0, 0, 0.4)',
+      background = mocha.crust,
       active_tab = {
-         bg_color = mocha.surface2,
+         bg_color = mocha.base,
          fg_color = mocha.text,
       },
       inactive_tab = {
-         bg_color = mocha.surface0,
-         fg_color = mocha.subtext1,
+         bg_color = mocha.crust,
+         fg_color = mocha.subtext0,
       },
       inactive_tab_hover = {
          bg_color = mocha.surface0,
          fg_color = mocha.text,
       },
+      inactive_tab_edge = mocha.surface0,
       new_tab = {
-         bg_color = mocha.base,
-         fg_color = mocha.text,
+         bg_color = mocha.crust,
+         fg_color = mocha.subtext0,
       },
       new_tab_hover = {
-         bg_color = mocha.mantle,
+         bg_color = mocha.surface0,
          fg_color = mocha.text,
-         italic = true,
       },
    },
    visual_bell = mocha.red,

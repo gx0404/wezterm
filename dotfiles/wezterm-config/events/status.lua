@@ -1,6 +1,7 @@
 local wezterm = require('wezterm')
 local tab_title = require('events.tab-title')
 local still_fresh = require('utils.cache').still_fresh
+local mocha = require('colors.custom').mocha
 
 local M = {}
 local last_status_by_window = {}
@@ -22,7 +23,7 @@ local battery_cache = nil
 local DECORATIONS_TTL_S = 30
 local decorations_by_window = {}
 
----回收已关闭窗口的状态，表项不随窗口开关无限增长（写法同 events/right-status.lua）。
+---回收已关闭窗口的状态，表项不随窗口开关无限增长。
 ---wezterm.gui 只在 GUI 进程里有；取不到窗口列表时本轮不回收，下一轮再试。
 local function prune_closed_windows()
    local gui = wezterm.gui
@@ -47,19 +48,18 @@ local function prune_closed_windows()
 end
 
 local colors = {
-   surface = '#181825',
-   text = '#cdd6f4',
-   blue = '#89b4fa',
-   peach = '#fab387',
-   yellow = '#f9e2af',
-   mauve = '#cba6f7',
+   blue = mocha.blue,
+   peach = mocha.peach,
+   yellow = mocha.yellow,
+   mauve = mocha.mauve,
 }
 
+---左右状态块的一段。不设背景色、也不加粗：fancy 标签栏里整块状态的底色取自第一个格子的
+---背景，不设就用 window_frame 的标题栏底色，和 + 按钮、标签栏底色自然一致；字体是
+---Regular 的 Segoe UI（config/appearance.lua），加粗会换成 Bold 字重。
 local function segment(icon, text, color)
    return {
-      { Background = { Color = colors.surface } },
       { Foreground = { Color = color } },
-      { Attribute = { Intensity = 'Bold' } },
       { Text = string.format(' %s %s ', icon, text) },
    }
 end

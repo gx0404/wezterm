@@ -71,7 +71,8 @@ local options = {
    enable_tab_bar = true,
    hide_tab_bar_if_only_one_tab = false,
    use_fancy_tab_bar = true,
-   tab_max_width = 32,
+   tab_max_width = 36,
+   show_close_tab_button_in_tabs = true,
    show_tab_index_in_tab_bar = false,
    switch_to_last_active_tab_when_closing_tab = true,
 

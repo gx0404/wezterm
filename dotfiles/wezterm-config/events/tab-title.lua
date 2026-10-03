@@ -6,6 +6,7 @@ local wezterm = require('wezterm')
 local Cells = require('utils.cells')
 local OptsValidator = require('utils.opts-validator')
 local cache = require('utils.cache')
+local palette = require('colors.custom')
 
 ---
 -- =======================================
@@ -42,8 +43,6 @@ local nf = wezterm.nerdfonts
 
 local M = {}
 
-local GLYPH_SCIRCLE_LEFT = nf.ple_left_half_circle_thick --[[  ]]
-local GLYPH_SCIRCLE_RIGHT = nf.ple_right_half_circle_thick --[[  ]]
 local GLYPH_CIRCLE = nf.fa_circle --[[  ]]
 local GLYPH_ADMIN = nf.md_shield_half_full --[[ 󰞀 ]]
 local GLYPH_LINUX = nf.cod_terminal_linux --[[  ]]
@@ -87,31 +86,39 @@ local TITLE_INSET = {
 -- 窗格的前台进程名最多每隔这么多秒查一次。
 local PROBE_INTERVAL_S = 2
 
+-- fancy 标签栏自己画圆角标签和底色，标题只管文字，所以没有两端的半圆字形。
 local RENDER_VARIANTS = {
-   { 'scircle_left', 'title', 'padding', 'scircle_right' },
-   { 'scircle_left', 'title', 'unseen_output', 'padding', 'scircle_right' },
-   { 'scircle_left', 'admin', 'title', 'padding', 'scircle_right' },
-   { 'scircle_left', 'admin', 'title', 'unseen_output', 'padding', 'scircle_right' },
-   { 'scircle_left', 'wsl', 'title', 'padding', 'scircle_right' },
-   { 'scircle_left', 'wsl', 'title', 'unseen_output', 'padding', 'scircle_right' },
+   { 'title', 'padding' },
+   { 'title', 'unseen_output', 'padding' },
+   { 'admin', 'title', 'padding' },
+   { 'admin', 'title', 'unseen_output', 'padding' },
+   { 'wsl', 'title', 'padding' },
+   { 'wsl', 'title', 'unseen_output', 'padding' },
 }
 
+---@alias TabTitle.State 'default' | 'hover' | 'active'
 
----@type table<string, Cells.SegmentColors>
--- stylua: ignore
-local colors = {
-   text_default          = { bg = '#313244', fg = '#CDD6F4' },
-   text_hover            = { bg = '#45475A', fg = '#FFFFFF' },
-   text_active           = { bg = '#89B4FA', fg = '#11111B' },
+---标签三态下的文字色，全部读自界面色 colors.chrome.tab_bar（colors/custom.lua）：标题、
+---管理员/WSL 图标用该态的 fg_color，未读标记用强调色。只给前景色、不给背景色：fancy 标签栏
+---按 tab_bar 的 bg_color 自己画标签底色（含悬停态），标题里带背景会把整块标签涂成别的颜色。
+---纯函数：调色板由调用方注入。
+---@param tab_bar table colors.chrome.tab_bar
+---@param accent string 未读标记的强调色
+---@return table<TabTitle.State, { text: Cells.SegmentColors, unseen: Cells.SegmentColors }>
+local function state_colors(tab_bar, accent)
+   local function of(tab_colors)
+      return { text = { fg = tab_colors.fg_color }, unseen = { fg = accent } }
+   end
+   return {
+      default = of(tab_bar.inactive_tab),
+      hover = of(tab_bar.inactive_tab_hover),
+      active = of(tab_bar.active_tab),
+   }
+end
 
-   unseen_output_default = { bg = '#313244', fg = '#FAB387' },
-   unseen_output_hover   = { bg = '#45475A', fg = '#FAB387' },
-   unseen_output_active  = { bg = '#89B4FA', fg = '#F38BA8' },
+M.state_colors = state_colors
 
-   scircle_default       = { bg = 'rgba(17, 17, 27, 0.88)', fg = '#313244' },
-   scircle_hover         = { bg = 'rgba(17, 17, 27, 0.88)', fg = '#45475A' },
-   scircle_active        = { bg = 'rgba(17, 17, 27, 0.88)', fg = '#89B4FA' },
-}
+local STATE_COLORS = state_colors(palette.chrome.tab_bar, palette.mocha.peach)
 
 ---
 -- ================
@@ -322,15 +329,14 @@ function Tab:set_info(event_opts, tab, max_width, now)
 end
 
 function Tab:create_cells()
-   local attr = self.cells.attr
+   -- 标题不加粗：标题栏/标签栏字体是 Regular 的 Segoe UI（config/appearance.lua），
+   -- 粗体会换成 Bold 字重，比 Windows 11 标签的观感重。
    self.cells
-      :add_segment('scircle_left', GLYPH_SCIRCLE_LEFT)
       :add_segment('admin', ' ' .. GLYPH_ADMIN)
       :add_segment('wsl', ' ' .. GLYPH_LINUX)
-      :add_segment('title', ' ', nil, attr(attr.intensity('Bold')))
+      :add_segment('title', ' ')
       :add_segment('unseen_output', ' ' .. GLYPH_CIRCLE)
       :add_segment('padding', ' ')
-      :add_segment('scircle_right', GLYPH_SCIRCLE_RIGHT)
 end
 
 ---@param event_opts Event.TabTitleOptions
@@ -359,14 +365,13 @@ function Tab:update_cells(event_opts, is_active, hover)
       )
    end
 
+   local state = STATE_COLORS[tab_state]
    self.cells
-      :update_segment_colors('scircle_left', colors['scircle_' .. tab_state])
-      :update_segment_colors('admin', colors['text_' .. tab_state])
-      :update_segment_colors('wsl', colors['text_' .. tab_state])
-      :update_segment_colors('title', colors['text_' .. tab_state])
-      :update_segment_colors('unseen_output', colors['unseen_output_' .. tab_state])
-      :update_segment_colors('padding', colors['text_' .. tab_state])
-      :update_segment_colors('scircle_right', colors['scircle_' .. tab_state])
+      :update_segment_colors('admin', state.text)
+      :update_segment_colors('wsl', state.text)
+      :update_segment_colors('title', state.text)
+      :update_segment_colors('unseen_output', state.unseen)
+      :update_segment_colors('padding', state.text)
 end
 
 ---@return FormatItem[] (ref: https://wezfurlong.org/wezterm/config/lua/wezterm/format.html)
@@ -467,7 +472,7 @@ M.setup = function(opts)
       window:perform_action(
          wezterm.action.PromptInputLine({
             description = wezterm.format({
-               { Foreground = { Color = '#FFFFFF' } },
+               { Foreground = { Color = palette.mocha.text } },
                { Attribute = { Intensity = 'Bold' } },
                { Text = 'Enter new name for tab' },
             }),
