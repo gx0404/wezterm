@@ -1,43 +1,93 @@
 @echo off
-rem 进入 Visual Studio 2022 Build Tools 的 x64 环境后在仓库根执行给定命令。
-rem 用法（任意 cmd / PowerShell）：scripts\gx_msvc_env.cmd python scripts\gx_package.py windows --check
-rem
-rem 解决的坑：
-rem   1) MSYS2 的 git 若排在 PATH 前面，`git rev-parse --show-toplevel` 返回 POSIX 路径，
-rem      gx_package.py 会误报「must be an independent Git checkout」——这里把 Git for Windows 提前。
-rem   2) vendored OpenSSL 的 MSVC 构建需要 Windows 版 Perl（Strawberry）与 NASM；
-rem      两者只认仓内 .local/tools/（make setup 即 scripts/setup_env.sh 钉版安装），
-rem      不再读系统路径，MSYS perl 与 Strawberry 自带的旧 nasm 也不会被选中。
-rem   3) 仓库路径必须纯 ASCII 是硬前提（非 ASCII 路径会让 Perl/nmake 把 OpenSSL 产物
-rem      写进乱码目录，2026-10-03 实测）；追加 /utf-8 与 NASM 3.02 只是双保险。
-rem   4) 产物目录固定为 target-gx-msvc（已 gitignore），不与 gnu 工具链的 target/ 混用。
+rem Initialize the installed Visual Studio x64 environment without changing global settings.
+rem Usage: scripts\gx_msvc_env.cmd --check
+rem        scripts\gx_msvc_env.cmd make check
 setlocal
 set "REPO=%~dp0.."
 for %%I in ("%REPO%") do set "REPO=%%~fI"
-set "PATH=C:\Windows\System32;C:\Windows;C:\Program Files\Git\cmd;C:\Program Files (x86)\Microsoft Visual Studio\Installer;%PATH%"
-set "VSDEVCMD=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat"
-if not exist "%VSDEVCMD%" (
-  for /f "usebackq delims=" %%P in (`vswhere.exe -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDEVCMD=%%P\Common7\Tools\VsDevCmd.bat"
+if not defined WEZTERM_TOOLCHAIN_ROOT set "WEZTERM_TOOLCHAIN_ROOT=%REPO%\.local\tools"
+for %%I in ("%WEZTERM_TOOLCHAIN_ROOT%") do set "WEZTERM_TOOLCHAIN_ROOT=%%~fI"
+set "TOOLS=%WEZTERM_TOOLCHAIN_ROOT%"
+set "MAKEFLAGS="
+set "MFLAGS="
+set "GNUMAKEFLAGS="
+set "CARGO_TARGET_DIR=%REPO%\target"
+set "SCCACHE_DIR=%REPO%\.local\sccache"
+set "TMP=%REPO%\.local\tmp"
+set "TEMP=%TMP%"
+set "TMPDIR=%TMP%"
+set "RUSTUP_TOOLCHAIN=1.96.1-x86_64-pc-windows-msvc"
+set "PATH=%SystemRoot%\System32;%SystemRoot%;%ProgramFiles%\Git\cmd;%ProgramFiles%\Git\bin;%PATH%"
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%VSWHERE%" (
+  echo [gx_msvc_env] Missing vswhere.exe: install Visual Studio C++ tools and Windows SDK.
+  exit /b 1
 )
+set "VSDEVCMD="
+for /f "usebackq delims=" %%P in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSDEVCMD=%%P\Common7\Tools\VsDevCmd.bat"
 if not exist "%VSDEVCMD%" (
-  echo [gx_msvc_env] 找不到 VsDevCmd.bat：请安装 Visual Studio 2022 Build Tools（C++ 工作负载 + Windows SDK）
+  echo [gx_msvc_env] Missing VsDevCmd.bat: install Visual Studio C++ tools and Windows SDK.
   exit /b 1
 )
 call "%VSDEVCMD%" -arch=x64 -host_arch=x64 >nul
 if errorlevel 1 (
-  echo [gx_msvc_env] VsDevCmd 初始化失败
+  echo [gx_msvc_env] VsDevCmd initialization failed.
   exit /b 1
 )
-if not exist "%REPO%\.local\tools\nasm\bin\nasm.exe" goto :no_tools
-if not exist "%REPO%\.local\tools\perl\perl\bin\perl.exe" goto :no_tools
-set "PATH=%REPO%\.local\tools\nasm\bin;%REPO%\.local\tools\perl\perl\bin;%REPO%\.local\tools\perl\c\bin;C:\msys64\mingw64\bin;%PATH%"
-if not defined RUSTUP_TOOLCHAIN set "RUSTUP_TOOLCHAIN=1.96.1-x86_64-pc-windows-msvc"
-if not defined CARGO_TARGET_DIR set "CARGO_TARGET_DIR=%REPO%\target-gx-msvc"
+for %%T in (make\bin\make.exe venv\Scripts\python.exe nextest\bin\cargo-nextest.exe stylua\bin\stylua.exe lua\bin\lua.exe nasm\bin\nasm.exe perl\perl\bin\perl.exe perl\c\bin\cmake.exe) do (
+  if not exist "%TOOLS%\%%T" (
+    echo [gx_msvc_env] Missing project tool: %TOOLS%\%%T
+    goto :no_tools
+  )
+)
+rem Git's bin/sh launcher prepends its bundled Perl; use the shell directly.
+set "SHELL=%ProgramFiles%\Git\usr\bin\sh.exe"
+set "SHELL=%SHELL:\=/%"
+set "MAKESHELL=%SHELL%"
+set "PATH=%TOOLS%\make\bin;%TOOLS%\venv\Scripts;%TOOLS%\venv\bin;%TOOLS%\nextest\bin;%TOOLS%\stylua\bin;%TOOLS%\lua\bin;%TOOLS%\nasm\bin;%TOOLS%\perl\perl\bin;%TOOLS%\perl\c\bin;%PATH%"
 set "CFLAGS=%CFLAGS% /utf-8"
 set "CXXFLAGS=%CXXFLAGS% /utf-8"
 cd /d "%REPO%"
+if "%~1"=="--check" goto :check
+if "%~1"=="" goto :check
+if not exist "%SCCACHE_DIR%" mkdir "%SCCACHE_DIR%"
+if not exist "%TMP%" mkdir "%TMP%"
+if not exist "%SCCACHE_DIR%" exit /b 1
+if not exist "%TMP%" exit /b 1
 %*
 exit /b %errorlevel%
+
+:check
+for %%T in (cl.exe nmake.exe rc.exe cmake.exe rustup.exe cargo.exe sh.exe) do (
+  where %%T >nul 2>&1
+  if errorlevel 1 (
+    echo [gx_msvc_env] Missing %%T in the initialized environment.
+    exit /b 1
+  )
+)
+cl /? >nul 2>&1
+if errorlevel 1 exit /b 1
+nmake /? >nul 2>&1
+if errorlevel 1 exit /b 1
+rc /? >nul 2>&1
+if errorlevel 1 exit /b 1
+cmake --version
+if errorlevel 1 exit /b 1
+rustup run %RUSTUP_TOOLCHAIN% rustc --version
+if errorlevel 1 exit /b 1
+rustup run %RUSTUP_TOOLCHAIN% cargo --version
+if errorlevel 1 exit /b 1
+rustup run nightly rustfmt --version
+if errorlevel 1 exit /b 1
+"%TOOLS%\make\bin\make.exe" --version
+if errorlevel 1 exit /b 1
+"%TOOLS%\nasm\bin\nasm.exe" -v
+if errorlevel 1 exit /b 1
+"%TOOLS%\perl\perl\bin\perl.exe" -e "print qq(Perl $^V\n)"
+if errorlevel 1 exit /b 1
+echo [gx_msvc_env] OK: MSVC, Windows SDK, project tools, Rust 1.96.1 and nightly rustfmt.
+exit /b 0
+
 :no_tools
-echo [gx_msvc_env] 先运行 make setup（scripts/setup_env.sh）安装仓内 NASM/Perl（.local/tools/nasm、.local/tools/perl）
+echo [gx_msvc_env] Run scripts/setup_env.sh in Git Bash to install checkout-local tools.
 exit /b 1

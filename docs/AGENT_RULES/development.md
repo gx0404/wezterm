@@ -20,27 +20,36 @@
   `--check` 校验镜像、`--write` 原子写入（本仓 version_targets 为空，见
   docs/RELEASE.md 的两套版本体系说明）。
 - 工具钉版：`scripts/setup_env.sh` → `.local/tools/`（nextest/stylua 预编译包
-  sha256 钉版 + venv{graphifyy, tomli}；Windows 下载 nextest/stylua 的 Windows
-  版并同样 sha256 钉版，venv 同样安装——Windows venv 是 Scripts/ 布局，
-  脚本补 `bin/graphify` shim 对齐 graphify.sh 既定解析路径）；lua 5.4 同为
-  钉版（Windows 用 LuaBinaries 预编译包、失败回退官方源码 mingw 编译；
-  Linux/mac 官方源码 posix 编译），是 `scripts/tests/*.lua` 纯 Lua 单测的
-  运行器。Makefile 已把其 bin 前置 PATH。Windows 另钉版 NASM 3.02 与
-  Strawberry Perl portable（`nasm/bin`、`perl/perl/bin`，MSVC 打包用，
-  `scripts/gx_msvc_env.cmd` 只认这两处）。venv 只用真实解释器路径
-  （`find_real_python` 跳过 WindowsApps 下 Python 安装管理器的别名——它找不到
-  匹配运行时会把 Python 装进当前目录）；脚本要经 `make setup` 或 Git Bash 运行，
-  MSYS2 bash 启动的子进程会丢失 `LOCALAPPDATA` 等变量；仓库改名/移动后 venv 内
-  绝对路径失效，`rm -rf .local/tools/venv` 再重跑。
+  sha256 钉版 + venv{graphifyy, tomli}；Windows 下载对应预编译包，venv 使用
+  Scripts/ 布局，补 `Scripts/python3.exe` 与 `bin/graphify` shim）。lua 5.4
+  同为钉版（Windows 用 LuaBinaries 预编译包、下载失败回退官方源码 mingw 编译；
+  Linux/mac 官方源码 posix 编译），供 `scripts/tests/*.lua` 纯 Lua 单测使用。
+  Windows 另装 NASM 3.02、Strawberry Perl 5.42.3.1 portable，并从该 sha256
+  校验包提取 GNU Make 4.4.1 与 libintl/libiconv DLL 到 `make/bin/`；许可保留在
+  `perl/licenses/`。Makefile 前置项目工具 PATH，按 make 宿主选择路径分隔符，
+  框架 Python 优先使用仓内 venv。venv 只用 Python>=3.10 的真实解释器，跳过
+  WindowsApps 别名；仓库改名/移动后 venv 绝对路径失效，删除该 venv 后重跑。
+  Windows 首次在 Git Bash 执行 `bash scripts/setup_env.sh`，无需预装 make；
+  已安装后可用 `make setup`。安装结束与 `--check` 都执行全环境健康门，严格
+  校验钉版工具的可运行性和版本；Windows 还调用 MSVC wrapper 预检，缺项非零退出。
+  `WEZTERM_TOOLCHAIN_ROOT` 可覆盖工具根，跨 Git Bash/cmd 使用 Windows 绝对路径
+  （如 `E:/checkout/.local/tools`），不改变构建产物目录。
+- Windows MSVC 入口：`scripts/gx_msvc_env.cmd --check` / `make check|build|test`，
+  在 cmd/PowerShell 中经 wrapper 执行；通过 vswhere 选择已安装且含 x64 C++ 工具
+  的 Visual Studio，不限定年份。只在子进程环境选择 Rust 1.96.1 MSVC、前置项目
+  工具并追加 C/C++ `/utf-8`，不改全局工具链/PATH；预检包含 Windows SDK、CMake、
+  Rust 与 nightly rustfmt。直接使用 Git `usr/bin/sh.exe`，避免启动器抢先加载
+  Git Perl；wrapper 清除继承的 make flags，Makefile 在 Windows 不向 NMake 导出
+  `MAKEFLAGS/MFLAGS/GNUMAKEFLAGS`。
 - hooks：`.claude/hooks/dangerous_patterns.conf` 是危险模式唯一真源，
   `pre_tool_use_gate.py` 消费（claude/codex 协议适配；ZCode 复用 claude 形）。
 
 ## 不变量
 
 - **构建产物仓内封闭**：编译、构建的一切产物与缓存只落仓内既定位置——
-  `target/`（构建目标，Makefile fork 段显式 `export CARGO_TARGET_DIR`）、
+  `target/`（Makefile 与 MSVC wrapper 统一固定 `CARGO_TARGET_DIR`）、
   `.local/sccache`（sccache 编译缓存，`SCCACHE_DIR`）、`.local/tmp`（构建进程
-  临时目录，MSYS make 缺 TMP/TEMP 时的回落值）、`deps/`（get-deps）、
+  临时目录，固定 `TMP/TEMP/TMPDIR`，不沿用仓外值）、`deps/`（get-deps）、
   `.ui-evidence/`（截图证据）与打包 stage 目录；`.local/` 整目录 gitignore。
   禁止把 `CARGO_TARGET_DIR`/`OUT_DIR`/`SCCACHE_DIR`/`TMP|TEMP` 指到仓库外，
   也不得依赖指向仓外的外部环境变量默认值；不经 make 直接调用 cargo/脚本构建

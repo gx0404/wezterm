@@ -20,45 +20,55 @@
 
 ## Windows 本地验收前置
 
-在 Visual Studio 的 x64 Native Tools 命令提示符中运行，确保 `cl`、`nmake`、
-SDK、Strawberry Perl、NASM 和 nextest 可用。NASM 与 Strawberry Perl 由
-`make setup`（`scripts/setup_env.sh`）钉版装进仓内 `.local/tools/`，不使用系统级
-安装；Build Tools 2022、SDK 与 Inno Setup 7.1 仍需人工安装。也可以从任意 shell 用
-`scripts\gx_msvc_env.cmd <命令>` 进入同一环境（自动把 Git for Windows 与仓内
-NASM 3.02、Strawberry Perl 排到 MSYS2 之前，产物目录固定 `target-gx-msvc/`）：
-该脚本只认仓内 `.local/tools/` 下的 NASM/Perl，缺失时提示先运行 `make setup`。
-MSYS2 的 `git` 若排在前面，`gx_package.py` 会因 POSIX 路径误报
-「must be an independent Git checkout」。仓库路径必须纯 ASCII：非 ASCII 路径会让
-Perl/nmake 把 OpenSSL 产物写进乱码目录（2026-10-03 实测）。Rust 版本以 `scripts/gx_package.py` 为准，
-nextest 版本以 `scripts/setup_env.sh` 为准；只通过当前进程环境选择工具，不修改
-用户全局默认工具链。
+仓库路径必须纯 ASCII：非 ASCII 路径会让 Perl/nmake 把 OpenSSL 产物写进乱码
+目录。先由用户提供 Git for Windows、Python>=3.10 的真实解释器、rustup 与
+Rust 1.96.1 MSVC、nightly rustfmt，以及带 x64 C++ 工具和 Windows SDK 的 Visual
+Studio。wrapper 通过 vswhere 发现已安装的 VS，不限定 2022；普通构建不需要 Inno
+Setup，打包时才需人工安装 Inno Setup >=7.1。工具详情见
+[MAKE_COMMANDS.md](MAKE_COMMANDS.md#首次安装与-windows-msvc-入口)。
 
-纯 ASCII 路径是硬前提；以下两项只是针对非 UTF-8 系统代码页的双保险：
+首次在仓库根目录的 **Git Bash** 安装项目工具，不要求已有 make：
 
-- C/C++ 编译参数追加 `/utf-8`，否则 OpenSSL 头文件预处理输出的路径可能不是
-  UTF-8，导致 `openssl-sys` 解析失败；这与 RC 模板中的 UTF-8 声明是不同层。
-- 使用支持中文调试信息路径的 NASM；本仓已验证 3.02。旧版本可能在生成
-  OpenSSL 汇编调试信息时报告 `unable to hash file`，不应关闭汇编绕过。
-- 使用 GNU Make 时将 `BUILD_OPTS=--release --locked` 设置为环境变量，不作为
-  Make 命令行赋值传入，避免 GNU Make 的 `MAKEFLAGS` 被 OpenSSL 的 NMake 错误
-  继承。注意 fork 段默认 `BUILD_OPTS ?= --release`，环境变量整体覆盖默认值，
-  只写 `--locked` 会退回 dev 构建。
-
-例如在已配置上述工具 PATH 的 x64 Native Tools **cmd** 中：
-
-```bat
-set "RUSTUP_TOOLCHAIN=1.96.1"
-set "CFLAGS=%CFLAGS% /utf-8"
-set "CXXFLAGS=%CXXFLAGS% /utf-8"
-set "BUILD_OPTS=--release --locked"
-gmake check build
-cargo nextest run --locked --all --no-fail-fast --test-threads 2
-cargo nextest run --locked -p wezterm-escape-parser
+```bash
+bash scripts/setup_env.sh
+bash scripts/setup_env.sh --check
 ```
 
-`1.96.1` 是当前打包真源的值，升级时以真源为准。若工具只安装在仓库的
-`.local/tools/`，先将对应 `bin` 目录加到本次会话 PATH。Windows checkout 可能
-带 CRLF；Linux/WSL 验证应使用 Linux 的 LF checkout，不直接复用 CRLF shell 脚本。
+安装器钉版安装 nextest、StyLua、Lua、框架 venv、NASM 和 Strawberry Perl，并从
+已校验的 Perl portable 包提取 GNU Make 4.4.1 及 libintl/libiconv DLL。venv 补
+`Scripts/python3.exe`，无需修改用户 Python 别名。安装结束与 `--check` 都严格
+检查工具版本、可运行性和 MSVC 编译前置；健康门通过不代表产品构建或测试通过。
+
+随后在仓库根目录的 **cmd 或 PowerShell** 执行（下列命令两者通用）：
+
+```bat
+.\scripts\gx_msvc_env.cmd --check
+.\scripts\gx_msvc_env.cmd make check
+.\scripts\gx_msvc_env.cmd make build
+.\scripts\gx_msvc_env.cmd make test
+```
+
+wrapper 只在子进程环境选择 `1.96.1-x86_64-pc-windows-msvc`，前置仓内工具及
+Git for Windows，不改全局默认 Rust、PATH 或用户配置。Rust 版本与
+`scripts/gx_package.py` 对齐，nextest 以 `scripts/setup_env.sh` 为准；升级时同步
+wrapper。`--check` 还验证 CMake、Windows SDK 与 nightly rustfmt。构建统一写入
+`target/`，sccache 与临时文件分别固定为 `.local/sccache`、`.local/tmp`，不再使用
+`target-gx-msvc/`。工具根覆盖形式见命令手册。
+
+wrapper 自动追加 C/C++ `/utf-8`，与 NASM 3.02 一起保护非 UTF-8 系统代码页场景，
+但不能替代纯 ASCII 仓库路径。它直接使用 Git `usr/bin/sh.exe`，避免 Git Perl
+遮蔽项目 Perl；Makefile 阻止 GNU Make 的 flags 传给 OpenSSL NMake。需要锁定依赖
+或收集全部测试失败时，可以在同一入口显式运行：
+
+```bat
+.\scripts\gx_msvc_env.cmd make build "BUILD_OPTS=--release --locked"
+.\scripts\gx_msvc_env.cmd cargo nextest run --locked --all --no-fail-fast --test-threads 2
+.\scripts\gx_msvc_env.cmd cargo nextest run --locked -p wezterm-escape-parser
+```
+
+`BUILD_OPTS` 会整体覆盖默认 `--release`，只写 `--locked` 会退回 dev 构建。
+Windows checkout 可能带 CRLF；Linux/WSL 验证应使用 Linux 的 LF checkout，不直接
+复用 CRLF shell 脚本。
 
 ## 测试约定
 

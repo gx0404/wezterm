@@ -31,7 +31,19 @@ servedocs:
 # ---------------------------------------------------------------------------
 # AI 协作开发框架（fork 维护段，上游没有；命令手册见 docs/MAKE_COMMANDS.md）
 # 工具解析序：项目钉版 .local/tools > 系统 PATH（安装：make setup）。
-export PATH := $(CURDIR)/.local/tools/venv/bin:$(CURDIR)/.local/tools/nextest/bin:$(CURDIR)/.local/tools/stylua/bin:$(CURDIR)/.local/tools/lua/bin:$(PATH)
+TOOLS_ROOT := $(subst \,/,$(or $(WEZTERM_TOOLCHAIN_ROOT),$(CURDIR)/.local/tools))
+PATH_SEPARATOR := :
+ifneq ($(filter %mingw32 %windows32 %windows-gnu,$(MAKE_HOST)),)
+PATH_SEPARATOR := ;
+# Git 的 bin/sh 启动器会把自带 Perl 重新前置；直接使用实际 shell。
+SHELL := $(subst \,/,$(or $(MAKESHELL),$(ProgramFiles)/Git/usr/bin/sh.exe))
+endif
+export PATH := $(TOOLS_ROOT)/make/bin$(PATH_SEPARATOR)$(TOOLS_ROOT)/venv/Scripts$(PATH_SEPARATOR)$(TOOLS_ROOT)/venv/bin$(PATH_SEPARATOR)$(TOOLS_ROOT)/nextest/bin$(PATH_SEPARATOR)$(TOOLS_ROOT)/stylua/bin$(PATH_SEPARATOR)$(TOOLS_ROOT)/lua/bin$(PATH_SEPARATOR)$(TOOLS_ROOT)/nasm/bin$(PATH_SEPARATOR)$(TOOLS_ROOT)/perl/perl/bin$(PATH_SEPARATOR)$(TOOLS_ROOT)/perl/c/bin$(PATH_SEPARATOR)$(PATH)
+FRAMEWORK_PY := $(or $(wildcard $(TOOLS_ROOT)/venv/Scripts/python.exe),$(wildcard $(TOOLS_ROOT)/venv/bin/python),python3)
+ifeq ($(OS),Windows_NT)
+# GNU make 的 jobserver/命令行选项不是 OpenSSL 子进程 NMake 的选项。
+unexport MAKEFLAGS MFLAGS GNUMAKEFLAGS
+endif
 
 # 日常二进制必须是优化构建：上游 build 目标的 $(BUILD_OPTS) 未定义时 cargo
 # 落 dev profile（opt-level 0 + debug assertions），高速输出/滚动明显卡顿。
@@ -46,19 +58,13 @@ export CARGO_TARGET_DIR := $(CURDIR)/target
 SCCACHE_CACHE_DIR := $(CURDIR)/.local/sccache
 export SCCACHE_DIR := $(SCCACHE_CACHE_DIR)
 BUILD_TMP_DIR := $(CURDIR)/.local/tmp
-$(shell mkdir -p "$(SCCACHE_CACHE_DIR)" "$(BUILD_TMP_DIR)")
-FRAMEWORK_PY := $(if $(wildcard .local/tools/venv/bin/python),.local/tools/venv/bin/python,python3)
+export TMP := $(BUILD_TMP_DIR)
+export TEMP := $(BUILD_TMP_DIR)
+export TMPDIR := $(BUILD_TMP_DIR)
+$(shell "$(FRAMEWORK_PY)" -c "from pathlib import Path; Path('$(SCCACHE_CACHE_DIR)').mkdir(parents=True, exist_ok=True); Path('$(BUILD_TMP_DIR)').mkdir(parents=True, exist_ok=True)")
 
-# Git Bash 调 MSYS2 make 时两套 msys-2.0.dll 运行时互不相认，子进程环境只剩 PATH/SYSTEMROOT
-# 等少数变量：缺 TMP/TEMP 时 dlltool/gcc 回退到 C:\WINDOWS\ 建临时文件而失败，缺 USERPROFILE
-# 时 Python 的 Path.home() 抛 RuntimeError，缺 LOCALAPPDATA 时 gx_package.py 找不到用户级
-# Inno Setup。仅 cygwin/msys 版 make 下补缺失项，不覆盖已有值：TMP/TEMP 优先仓内
-# .local/tmp（构建临时文件不外泄），USERPROFILE/LOCALAPPDATA 仍取 Windows 已知文件夹。
+# Git Bash 调 MSYS2 make 时两套运行时可能丢失 Windows 已知文件夹变量。
 ifneq ($(filter %-cygwin %-msys,$(MAKE_HOST)),)
-ifeq ($(and $(TMP),$(TEMP)),)
-export TMP := $(or $(TMP),$(BUILD_TMP_DIR))
-export TEMP := $(or $(TEMP),$(BUILD_TMP_DIR))
-endif
 ifeq ($(USERPROFILE),)
 WIN_PROFILE_DIR := $(shell /usr/bin/cygpath -w -F 40)
 ifneq ($(WIN_PROFILE_DIR),)

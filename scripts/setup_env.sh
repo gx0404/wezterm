@@ -12,11 +12,11 @@
 #                                             # 经 wezterm mlua 跑）
 #   .local/tools/nasm/bin/nasm.exe           # 仅 Windows：MSVC 打包的 vendored OpenSSL 汇编器
 #   .local/tools/perl/{perl,c}/bin            # 仅 Windows：Strawberry Perl portable（OpenSSL Configure）
+#   .local/tools/make/bin/make.exe           # 仅 Windows：同一 Perl 包的 GNU Make 4.4.1 与依赖 DLL
 #
 # Windows（uname -s 为 MINGW*/MSYS*/CYGWIN*）：nextest 与 stylua 换装 Windows 预编译包
 # （bin 下为 cargo-nextest.exe / stylua.exe）；lua 用 LuaBinaries 预编译包；框架 venv
-# 同样安装（Windows venv 是 Scripts/ 布局，install_venv 会补 bin/graphify shim 供
-# scripts/graphify.sh 的既定解析路径使用）。
+# 同样安装（Windows venv 是 Scripts/ 布局，补 python3.exe 与 bin/graphify shim）。
 #
 # 解析序：Makefile 已把上述 bin 目录前置到 PATH；$WEZTERM_TOOLCHAIN_ROOT
 # 可整体重定向 .local/tools（CI 或离线复用）。
@@ -103,15 +103,31 @@ need_cmd() {
     command -v "$1" >/dev/null 2>&1 && ok "$1" || miss "$1" "$2"
 }
 
-# WindowsApps 下的 python3.exe 可能只是占位符：command -v 找得到，运行却静默失败（退出码 49）。
 need_python3() {
-    if [ "${IS_WINDOWS}" = 1 ] && command -v python3 >/dev/null 2>&1 \
-        && ! python3 -c "" </dev/null >/dev/null 2>&1; then
-        miss python3 "$(command -v python3) 无法运行（WindowsApps 占位符？）；把可用的 Python>=3.11 前置到 PATH"
+    local py
+    if py="$(find_real_python)"; then
+        ok "Python>=3.10（${py}）"
     else
-        need_cmd python3 "$1"
+        miss python3 "请提供可运行的 Python>=3.10；WindowsApps 别名不作为解释器"
     fi
 }
+
+version_is() {
+    local expected="$1" field="$2" output
+    shift 2
+    output="$("$@" 2>&1)" || return 1
+    [ "$(printf '%s\n' "${output}" | awk -v field="${field}" 'NR==1 {print $field}')" = "${expected}" ]
+}
+
+nextest_ready() { version_is "${NEXTEST_VERSION}" 2 "${TOOLS}/nextest/bin/cargo-nextest${EXE}" --version; }
+stylua_ready() { version_is "${STYLUA_VERSION}" 2 "${TOOLS}/stylua/bin/stylua${EXE}" --version; }
+lua_ready() { version_is "${LUA_VERSION}" 2 "${TOOLS}/lua/bin/lua54${EXE}" -v; }
+nasm_ready() { version_is "${NASM_VERSION}" 3 "${TOOLS}/nasm/bin/nasm.exe" -v; }
+perl_ready() {
+    [ -f "${TOOLS}/perl/.version" ] && [ "$(<"${TOOLS}/perl/.version")" = "${PERL_VERSION}" ] \
+        && version_is "v${PERL_VERSION%.*}" 1 "${TOOLS}/perl/perl/bin/perl.exe" -e 'print "$^V\n"'
+}
+make_ready() { version_is "4.4.1" 3 "${TOOLS}/make/bin/make.exe" --version; }
 
 # venv 健康检查（两平台统一）：Linux/mac 用 bin/，Windows venv 用 Scripts/ 布局。
 venv_python() {
@@ -124,24 +140,24 @@ venv_python() {
     fi
 }
 
-venv_ready() {
+venv_packages_ready() {
     local py
     py="$(venv_python)" || return 1
-    "${py}" -c "import tomli" >/dev/null 2>&1 || return 1
-    [ -x "${TOOLS}/venv/bin/graphify" ] || return 1
-    # 版本判定直接读已安装包的元数据：graphify 的 --version 会先打印技能版本告警，
-    # 在部分 shell 组合下让管道比对误判为未就绪。
-    "${py}" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('graphifyy') == '${GRAPHIFY_VERSION}' else 1)" >/dev/null 2>&1
+    "${py}" -c "import graphify, tomli, importlib.metadata as m, sys; sys.exit(0 if sys.version_info >= (3, 10) and m.version('graphifyy') == '${GRAPHIFY_VERSION}' else 1)" >/dev/null 2>&1
 }
 
-# Git Bash 与 MSYS2 的 /tmp 指向不同目录，两套工具混用（如 MSYS2 bash 调 Git 自带的 unzip）时
-# 默认 mktemp 路径对另一方不可见；Windows 上把临时目录建在盘符路径下的 ${TOOLS} 里。
-new_tmpdir() {
+venv_ready() {
+    venv_packages_ready || return 1
+    [ -x "${TOOLS}/venv/bin/graphify" ] || return 1
     if [ "${IS_WINDOWS}" = 1 ]; then
-        mktemp -d "${TOOLS}/.tmp.XXXXXX"
-    else
-        mktemp -d
+        "${TOOLS}/venv/Scripts/python3.exe" -c 'import sys; assert sys.version_info >= (3, 10); assert sys.prefix != sys.base_prefix' >/dev/null 2>&1 || return 1
     fi
+    "${TOOLS}/venv/bin/graphify" --version >/dev/null 2>&1
+}
+
+new_tmpdir() {
+    mkdir -p "${TOOLS}"
+    mktemp -d "${TOOLS}/.tmp.XXXXXX"
 }
 
 # 系统 curl.exe 是原生程序，输出路径先经 cygpath -m 转成 D:/... 形式。
@@ -153,47 +169,34 @@ download() {
     fi
 }
 
+check_tool() {
+    if "$1"; then
+        ok "$2（项目钉版）"
+    else
+        miss "$2" "运行 scripts/setup_env.sh 修复项目工具（缺失、无法运行或版本不符）"
+    fi
+}
+
 check_all() {
-    need_cmd cargo "安装 rustup（https://rustup.rs）；引导工具不入本仓"
-    need_cmd rustc "随 rustup 安装"
-    need_python3 "系统包管理器安装（>=3.10；3.10 需 tomli，框架 venv 会带）"
-    command -v git >/dev/null 2>&1 && ok git || miss git "系统包管理器安装"
-    if [ -x "${TOOLS}/nextest/bin/cargo-nextest${EXE}" ]; then
-        ok "cargo-nextest $("${TOOLS}/nextest/bin/cargo-nextest${EXE}" --version 2>/dev/null | awk 'NR==1{print $2}')（项目钉版）"
-    elif command -v cargo-nextest >/dev/null 2>&1; then
-        note "cargo-nextest 走系统 PATH（建议安装项目钉版：scripts/setup_env.sh）"
-    else
-        miss cargo-nextest "运行 scripts/setup_env.sh 安装项目钉版"
+    fail=0
+    if [ "${IS_WINDOWS}" != 1 ]; then
+        cargo --version >/dev/null 2>&1 && ok cargo || miss cargo "安装 rustup；引导工具不入本仓"
+        rustc --version >/dev/null 2>&1 && ok rustc || miss rustc "随 rustup 安装"
     fi
-    if venv_ready; then
-        ok "框架 venv $("$(venv_python)" --version 2>&1 | awk '{print $2}')（tomli+graphifyy ${GRAPHIFY_VERSION}）"
-    else
-        miss "框架 venv" "运行 scripts/setup_env.sh 安装（tomli + graphifyy ${GRAPHIFY_VERSION}）"
-    fi
-    if [ -x "${TOOLS}/stylua/bin/stylua${EXE}" ]; then
-        ok "stylua $("${TOOLS}/stylua/bin/stylua${EXE}" --version 2>/dev/null | awk '{print $NF}')（项目钉版）"
-    elif command -v stylua >/dev/null 2>&1; then
-        note "stylua 走系统 PATH（建议安装项目钉版：scripts/setup_env.sh）"
-    else
-        miss stylua "运行 scripts/setup_env.sh 安装项目钉版（键表派生物比对/写入用）"
-    fi
-    if [ -x "${TOOLS}/lua/bin/lua54${EXE}" ]; then
-        ok "lua $("${TOOLS}/lua/bin/lua54${EXE}" -v 2>/dev/null | awk 'NR==1{print $2}')（项目钉版，scripts/tests 的 lua 单测）"
-    elif command -v lua54 >/dev/null 2>&1; then
-        note "lua54 走系统 PATH（建议安装项目钉版：scripts/setup_env.sh）"
-    else
-        miss lua54 "运行 scripts/setup_env.sh 安装项目钉版（scripts/tests 的 lua 单测运行器）"
-    fi
+    need_python3
+    git --version >/dev/null 2>&1 && ok git || miss git "安装 Git"
+    check_tool nextest_ready "cargo-nextest ${NEXTEST_VERSION}"
+    check_tool venv_ready "框架 venv（tomli + graphifyy ${GRAPHIFY_VERSION}）"
+    check_tool stylua_ready "stylua ${STYLUA_VERSION}"
+    check_tool lua_ready "lua ${LUA_VERSION}"
     if [ "${IS_WINDOWS}" = 1 ]; then
-        if [ -x "${TOOLS}/nasm/bin/nasm.exe" ]             && "${TOOLS}/nasm/bin/nasm.exe" -v 2>/dev/null | grep -q "version ${NASM_VERSION}"; then
-            ok "nasm ${NASM_VERSION}（项目钉版，MSVC 打包用）"
+        check_tool nasm_ready "nasm ${NASM_VERSION}"
+        check_tool perl_ready "Strawberry Perl ${PERL_VERSION}"
+        check_tool make_ready "GNU Make 4.4.1"
+        if MSYS2_ARG_CONV_EXCL='*' cmd.exe /d /c call "$(cygpath -w "${ROOT}/scripts/gx_msvc_env.cmd")" --check; then
+            ok "MSVC 编译前置"
         else
-            miss nasm "运行 scripts/setup_env.sh 安装项目钉版 ${NASM_VERSION}（MSVC 打包用）"
-        fi
-        if [ -x "${TOOLS}/perl/perl/bin/perl.exe" ]             && "${TOOLS}/perl/perl/bin/perl.exe" -v 2>/dev/null | grep -q "v${PERL_VERSION%.*.*}"; then
-            ok "perl ${PERL_VERSION}（Strawberry portable，项目钉版，MSVC 打包用）"
-        else
-            miss perl "运行 scripts/setup_env.sh 安装项目钉版 Strawberry Perl ${PERL_VERSION}（MSVC 打包用）"
+            miss "MSVC 编译前置" "运行 scripts\\gx_msvc_env.cmd --check 查看诊断；系统组件由用户安装"
         fi
     fi
     [ "$fail" -eq 0 ] && echo "[setup-env] 诊断通过" || echo "[setup-env] 存在缺项（见上）"
@@ -202,50 +205,28 @@ check_all() {
 
 install_nextest() {
     local dest="${TOOLS}/nextest"
-    if [ -x "${dest}/bin/cargo-nextest${EXE}" ] \
-        && "${dest}/bin/cargo-nextest${EXE}" --version 2>/dev/null | grep -q "${NEXTEST_VERSION}"; then
+    if nextest_ready; then
         note "cargo-nextest ${NEXTEST_VERSION} 已是钉版，跳过"
         return 0
     fi
-    mkdir -p "${dest}"
+    mkdir -p "${dest}/bin"
     local tmp
     tmp="$(new_tmpdir)"
     trap 'rm -rf "${tmp}"' RETURN
-    if [ "${NEXTEST_SHA256}" != "PENDING-COMPUTED-ON-FIRST-INSTALL" ]; then
-        note "下载 cargo-nextest ${NEXTEST_VERSION}（${PREBUILT_KIND}）"
-        if download "${NEXTEST_URL}" "${tmp}/nextest.tgz"; then
-            echo "${NEXTEST_SHA256}  ${tmp}/nextest.tgz" | sha256sum -c - \
-                || { echo "[setup-env] sha256 校验失败，拒绝安装" >&2; return 1; }
-            tar -xzf "${tmp}/nextest.tgz" -C "${tmp}"
-            install -m 0755 "${tmp}/cargo-nextest${EXE}" "${dest}/bin/cargo-nextest${EXE}" 2>/dev/null \
-                || { mkdir -p "${dest}/bin"; install -m 0755 "${tmp}/cargo-nextest${EXE}" "${dest}/bin/cargo-nextest${EXE}"; }
-            ok "cargo-nextest ${NEXTEST_VERSION} -> ${dest}/bin/"
-            return 0
-        fi
-        if [ "${IS_WINDOWS}" = 1 ]; then
-            # 下方回退只取 Linux 包，Windows 直接报错。
-            echo "[setup-env] 下载失败；也可手动 cargo install cargo-nextest --version =${NEXTEST_VERSION} --locked --root ${dest}" >&2
-            return 1
-        fi
-        note "预编译包下载失败，回退 cargo install（编译约数分钟）"
-    else
-        note "首次安装：下载并记录 sha256（确认后写回本脚本钉版）"
-    fi
-    curl -fsSL "${NEXTEST_URL_BASE}/linux-tar-gzip" -o "${tmp}/nextest.tgz" \
-        || { echo "[setup-env] 下载失败；也可手动 cargo install cargo-nextest --locked --root ${dest}" >&2; return 1; }
-    local sum
-    sum="$(sha256sum "${tmp}/nextest.tgz" | awk '{print $1}')"
-    echo "[setup-env] sha256(${NEXTEST_VERSION}) = ${sum}   # 写回 setup_env.sh 的 NEXTEST_SHA256 以钉版"
+    note "下载 cargo-nextest ${NEXTEST_VERSION}（${PREBUILT_KIND}）"
+    download "${NEXTEST_URL}" "${tmp}/nextest.tgz" \
+        || { echo "[setup-env] 下载失败；检查网络后重跑 scripts/setup_env.sh（不使用未校验回退）" >&2; return 1; }
+    echo "${NEXTEST_SHA256}  ${tmp}/nextest.tgz" | sha256sum -c - \
+        || { echo "[setup-env] sha256 校验失败，拒绝安装" >&2; return 1; }
     tar -xzf "${tmp}/nextest.tgz" -C "${tmp}"
-    mkdir -p "${dest}/bin"
-    install -m 0755 "${tmp}/cargo-nextest" "${dest}/bin/cargo-nextest"
+    install -m 0755 "${tmp}/cargo-nextest${EXE}" "${dest}/bin/cargo-nextest${EXE}"
+    nextest_ready || { echo "[setup-env] cargo-nextest 运行/版本校验失败" >&2; return 1; }
     ok "cargo-nextest ${NEXTEST_VERSION} -> ${dest}/bin/"
 }
 
 install_stylua() {
     local dest="${TOOLS}/stylua"
-    if [ -x "${dest}/bin/stylua${EXE}" ] \
-        && "${dest}/bin/stylua${EXE}" --version 2>/dev/null | grep -q "${STYLUA_VERSION}"; then
+    if stylua_ready; then
         note "stylua ${STYLUA_VERSION} 已是钉版，跳过"
         return 0
     fi
@@ -265,8 +246,7 @@ install_stylua() {
 
 install_lua() {
     local dest="${TOOLS}/lua"
-    if [ -x "${dest}/bin/lua54${EXE}" ] \
-        && "${dest}/bin/lua54${EXE}" -v 2>/dev/null | grep -q "Lua ${LUA_VERSION}"; then
+    if lua_ready; then
         note "lua ${LUA_VERSION} 已是钉版，跳过"
         return 0
     fi
@@ -313,7 +293,7 @@ install_lua() {
 install_nasm() {
     [ "${IS_WINDOWS}" = 1 ] || return 0
     local dest="${TOOLS}/nasm"
-    if [ -x "${dest}/bin/nasm.exe" ]         && "${dest}/bin/nasm.exe" -v 2>/dev/null | grep -q "version ${NASM_VERSION}"; then
+    if nasm_ready; then
         note "nasm ${NASM_VERSION} 已是钉版，跳过"
         return 0
     fi
@@ -333,7 +313,7 @@ install_nasm() {
 install_perl() {
     [ "${IS_WINDOWS}" = 1 ] || return 0
     local dest="${TOOLS}/perl"
-    if [ -x "${dest}/perl/bin/perl.exe" ] && [ -f "${dest}/.version" ]         && [ "$(cat "${dest}/.version")" = "${PERL_VERSION}" ]; then
+    if perl_ready; then
         note "perl ${PERL_VERSION} 已是钉版，跳过"
         return 0
     fi
@@ -352,27 +332,46 @@ install_perl() {
     ok "perl ${PERL_VERSION} -> ${dest}/"
 }
 
-# 找真实解释器：跳过 WindowsApps 别名，返回 sys.executable（Git Bash 下转成 POSIX 路径）。
-find_real_python() {
-    local cand path real root
-    for cand in python3 python; do
-        path="$(command -v "${cand}" 2>/dev/null || true)"
-        [ -n "${path}" ] || continue
-        case "${path}" in *WindowsApps*) continue ;; esac
-        "${path}" -c "" </dev/null >/dev/null 2>&1 || continue
-        real="$("${path}" -c 'import sys; print(sys.executable)' </dev/null 2>/dev/null || true)"
-        [ -n "${real}" ] || real="${path}"
-        if command -v cygpath >/dev/null 2>&1; then real="$(cygpath -u "${real}")"; fi
-        printf '%s\n' "${real}"
+install_make() {
+    [ "${IS_WINDOWS}" = 1 ] || return 0
+    perl_ready && version_is "4.4.1" 3 "${TOOLS}/perl/c/bin/gmake.exe" --version \
+        || { echo "[setup-env] Strawberry Perl 包内 GNU Make 4.4.1 校验失败" >&2; return 1; }
+    if make_ready; then
+        note "GNU Make 4.4.1 已是钉版，跳过"
         return 0
+    fi
+    mkdir -p "${TOOLS}/make/bin"
+    install -m 0755 "${TOOLS}/perl/c/bin/gmake.exe" "${TOOLS}/make/bin/make.exe"
+    install -m 0755 "${TOOLS}/perl/c/bin/libintl-8.dll" "${TOOLS}/perl/c/bin/libiconv-2.dll" "${TOOLS}/make/bin/"
+    make_ready || { echo "[setup-env] GNU Make 运行/版本校验失败" >&2; return 1; }
+    ok "GNU Make 4.4.1 -> ${TOOLS}/make/bin/（许可保留于 ${TOOLS}/perl/licenses/）"
+}
+
+probe_python() {
+    local path="$1" real
+    case "$(printf '%s' "${path}" | tr '[:upper:]' '[:lower:]')" in *windowsapps*) return 1 ;; esac
+    [ -x "${path}" ] || return 1
+    real="$("${path}" -c 'import sys; sys.exit(1) if sys.version_info < (3, 10) else print(sys.executable)' </dev/null 2>/dev/null)" || return 1
+    [ -n "${real}" ] || return 1
+    case "$(printf '%s' "${real}" | tr '[:upper:]' '[:lower:]')" in *windowsapps*) return 1 ;; esac
+    if [ "${IS_WINDOWS}" = 1 ]; then real="$(cygpath -u "${real}")"; fi
+    printf '%s\n' "${real}"
+}
+
+find_real_python() {
+    local cand path root
+    for path in "${TOOLS}/venv/Scripts/python.exe" "${TOOLS}/venv/bin/python"; do
+        probe_python "${path}" && return 0
+    done
+    for cand in python3 python; do
+        while IFS= read -r path; do
+            probe_python "${path}" && return 0
+        done < <(type -a -p "${cand}" 2>/dev/null || true)
     done
     if [ "${IS_WINDOWS}" = 1 ] && [ -n "${LOCALAPPDATA:-}" ]; then
-        root="${LOCALAPPDATA}"
-        if command -v cygpath >/dev/null 2>&1; then root="$(cygpath -u "${root}")"; fi
-        for path in "${root}"/Python/pythoncore-3.*-64/python.exe; do
-            [ -x "${path}" ] || continue
-            printf '%s\n' "${path}"
-            return 0
+        root="$(cygpath -u "${LOCALAPPDATA}")"
+        for path in "${root}"/Python/pythoncore-3.*-64/python.exe "${root}"/Programs/Python/Python3*/python.exe; do
+            probe_python "${path}" && return 0
         done
     fi
     return 1
@@ -383,23 +382,25 @@ install_venv() {
         note "框架 venv（tomli + graphifyy ${GRAPHIFY_VERSION}）已就绪，跳过"
         return 0
     fi
-    local venv="${TOOLS}/venv"
-    # WindowsApps 下的 python3/python/py 是 Python 安装管理器（pymanager）的别名：找不到匹配
-    # 运行时会自动把 Python 装进「当前目录\Python」（2026-10-03 实测把 153 MB 运行时写进仓库根），
-    # 所以一律跳过这些别名，只用真实解释器路径；Windows 上再回退到 pymanager 自己的安装根。
-    local pyexe=""
-    pyexe="$(find_real_python || true)"
-    [ -n "${pyexe}" ] || { echo "[setup-env] 没有可运行的 Python>=3.11，无法建框架 venv" >&2; return 1; }
-    if command -v uv >/dev/null 2>&1; then
-        uv venv --python "${pyexe}" "${venv}" >/dev/null
-        uv pip install --python "$(venv_python)" "graphifyy==${GRAPHIFY_VERSION}" tomli >/dev/null
-    else
-        "${pyexe}" -m venv "${venv}"
-        "$(venv_python)" -m pip install --quiet "graphifyy==${GRAPHIFY_VERSION}" tomli
+    local venv="${TOOLS}/venv" pyexe
+    if ! venv_packages_ready; then
+        if ! pyexe="$(venv_python)" || ! probe_python "${pyexe}" >/dev/null; then
+            pyexe="$(find_real_python)" \
+                || { echo "[setup-env] 没有可运行的 Python>=3.10，无法建框架 venv" >&2; return 1; }
+            if command -v uv >/dev/null 2>&1; then
+                uv venv --python "${pyexe}" "${venv}" >/dev/null
+            else
+                "${pyexe}" -m venv "${venv}"
+            fi
+        fi
+        if command -v uv >/dev/null 2>&1; then
+            uv pip install --python "$(venv_python)" "graphifyy==${GRAPHIFY_VERSION}" tomli >/dev/null
+        else
+            "$(venv_python)" -m pip install --quiet "graphifyy==${GRAPHIFY_VERSION}" tomli
+        fi
     fi
-    # Windows venv 是 Scripts/ 布局：补 bin/graphify shim，对齐 scripts/graphify.sh
-    # 与 Makefile 的既定解析路径。
-    if [ ! -x "${venv}/bin/graphify" ] && [ -x "${venv}/Scripts/graphify.exe" ]; then
+    if [ "${IS_WINDOWS}" = 1 ]; then
+        cp -f "${venv}/Scripts/python.exe" "${venv}/Scripts/python3.exe"
         mkdir -p "${venv}/bin"
         printf '#!/usr/bin/env bash\nexec "$(cd "$(dirname "${BASH_SOURCE[0]}")/../Scripts" && pwd)/graphify.exe" "$@"\n' \
             > "${venv}/bin/graphify"
@@ -409,17 +410,35 @@ install_venv() {
     ok "框架 venv -> ${venv}（tomli + graphifyy ${GRAPHIFY_VERSION}）"
 }
 
-if [ "$MODE" = "check" ]; then
-    check_all
-else
+main() {
+    export PATH="${TOOLS}/make/bin:${TOOLS}/venv/Scripts:${TOOLS}/venv/bin:${TOOLS}/nextest/bin:${TOOLS}/stylua/bin:${TOOLS}/lua/bin:${TOOLS}/nasm/bin:${TOOLS}/perl/perl/bin:${PATH}"
+    export PYTHONDONTWRITEBYTECODE=1
+    if [ "$MODE" = "check" ]; then
+        check_all
+        return
+    fi
+    mkdir -p "${ROOT}/.local/tmp" "${ROOT}/.local/cache"
+    export TMPDIR="${ROOT}/.local/tmp"
+    export TMP="${TMPDIR}" TEMP="${TMPDIR}"
+    export PIP_CACHE_DIR="${ROOT}/.local/cache/pip" UV_CACHE_DIR="${ROOT}/.local/cache/uv"
+    if [ "${IS_WINDOWS}" = 1 ]; then
+        export TMP="$(cygpath -m "${TMPDIR}")" TEMP="$(cygpath -m "${TMPDIR}")"
+        export PIP_CACHE_DIR="$(cygpath -m "${PIP_CACHE_DIR}")" UV_CACHE_DIR="$(cygpath -m "${UV_CACHE_DIR}")"
+    fi
     need_cmd cargo "安装 rustup；引导工具不入本仓"
-    need_python3 "系统包管理器安装"
-    [ "$fail" -ne 0 ] && { echo "[setup-env] 必备引导工具缺失，先按提示安装" >&2; exit 1; }
+    need_python3
+    [ "$fail" -ne 0 ] && { echo "[setup-env] 必备引导工具缺失，先按提示安装" >&2; return 1; }
     install_nextest
     install_venv
     install_stylua
-    install_lua
     install_nasm
     install_perl
+    install_make
+    install_lua
+    check_all
     echo "[setup-env] 完成：make test / make graph / make generated-check / make framework-check 现在使用项目钉版工具"
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main
 fi

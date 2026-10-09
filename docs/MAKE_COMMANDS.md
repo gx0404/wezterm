@@ -1,8 +1,11 @@
 # Make 命令手册
 
 命令真源：根 `Makefile`；框架命令经 `scripts/dev_framework.py` 调度
-（配置 `docs/dev-framework.json`）。工具解析序：`.local/tools` > PATH
-（安装 `make setup`）。诊断用 `make ai-doctor`（只读，不安装）。
+（配置 `docs/dev-framework.json`）。工具解析序：`.local/tools` > PATH。
+Windows 首次在 Git Bash 执行 `bash scripts/setup_env.sh`（无需已有 make），
+随后从 cmd/PowerShell 经 `scripts\gx_msvc_env.cmd make <目标>` 执行；完整步骤见
+[首次安装与 Windows MSVC 入口](#首次安装与-windows-msvc-入口)。已有 make 时可用
+`make setup`。框架入口诊断用 `make ai-doctor`（只读，不安装）。
 
 ## 上游目标（语义随上游）
 
@@ -19,9 +22,9 @@
 | 目标 | 作用 | 前置/副作用 |
 |---|---|---|
 | `make help` | 目标总览 | 无 |
-| `make setup` | 钉版安装 nextest、stylua、lua + venv(graphifyy/tomli) 到 `.local/tools/`（Windows 装 Windows 版预编译包，venv 同样安装并补 bin shim） | 联网下载；幂等 |
+| `make setup` | 钉版安装 nextest、stylua、lua + venv(graphifyy/tomli)；Windows 另装 NASM、Strawberry Perl、GNU Make 及依赖 DLL | 联网下载到 `.local/tools/`；幂等；结束执行全环境健康门，缺项失败 |
 | `make ai-doctor` | 只读诊断命令入口 | 无 |
-| `make framework-check` | resolver --check（规则闭集/体积/排序守门） | 无 |
+| `make framework-check` | resolver --check（规则闭集/体积/排序守门）→ `gx_bundle.py sync --check`（本机配置/插件与 dotfiles 快照漂移检查） | 只读；存在非登记差异时失败 |
 | `make framework-ready` | 配置完整门（拒绝 pending 命令） | 无 |
 | `make framework-test` | 框架脚本 unittest | 无 |
 | `make ci-check` | resolver --check → version --check → lint → typecheck → test | 编译+全量测试，耗时 |
@@ -47,7 +50,12 @@
 
 ## 环境变量
 
-- `WEZTERM_TOOLCHAIN_ROOT`：重定向 `.local/tools`（CI/离线复用）。
+- `WEZTERM_TOOLCHAIN_ROOT`：覆盖安装器、Makefile 与 MSVC wrapper 的工具根，不改变
+  `target/` 或缓存目录。Windows 跨 Git Bash/cmd 共用时传 Windows 绝对路径
+  （如 `E:/checkout/.local/tools` 或 `E:\checkout\.local\tools`）；安装器用 cygpath
+  转成 POSIX 路径，Makefile 归一化反斜杠，wrapper 按 Windows 路径解析。
+  `/e/...` 仅适用于 Git Bash 安装器，不要原样传给 cmd wrapper。CI/离线复用可覆盖，
+  本地 agent 安装仍遵守工具仓内封闭。
 - `WEZTERM_GRAPHIFY_CLI` / `WEZTERM_GRAPHIFY_ALLOW_ANY_VERSION=1`：
   图谱 CLI 覆盖/版本放行（升级比对时用）。
 - `TASK=`：`make evidence TASK=<任务名>`（缺省 ui-smoke）。
@@ -61,11 +69,57 @@
 提交的四个程序、`--output-dir <目录>` 指定产物位置，以及与 CHANGELOG 一致的
 `--version X.Y.Z`。手动 GitHub 构建与发布见 [RELEASE.md](RELEASE.md)。
 
+## 首次安装与 Windows MSVC 入口
+
+Windows 首次安装在仓库根目录的 **Git Bash** 执行，无需预装 make：
+
+```bash
+bash scripts/setup_env.sh
+bash scripts/setup_env.sh --check
+```
+
+前置：纯 ASCII 仓库路径、Git for Windows、可运行的 Python>=3.10、rustup 和
+Rust 1.96.1 MSVC、nightly rustfmt，以及含 x64 C++ 工具和 Windows SDK 的 Visual
+Studio。VS/SDK 等系统组件由用户安装；wrapper 经 vswhere 选择已安装的 VS，
+不限定年份。Inno Setup >=7.1 只在打包时需要，不是普通 check/build/test 的前置。
+
+安装器将 nextest、StyLua、Lua、框架 venv、NASM 3.02、Strawberry Perl 5.42.3.1
+装入 `.local/tools/`；GNU Make 4.4.1 从同一 sha256 校验的 Perl portable 包提取，
+连同 `libintl-8.dll`、`libiconv-2.dll` 放入 `make/bin/`，许可留在 `perl/licenses/`。
+Windows venv 补 `Scripts/python3.exe` 与 `bin/graphify` shim，框架命令优先使用
+venv 的真实 Python，不依赖 WindowsApps 别名。下载优先使用系统 `curl.exe` 的
+Windows 证书库；安装临时文件及 pip/uv 缓存位于仓内 `.local/`。
+
+安装结束和 `--check` 都校验钉版版本、可运行性与完整环境；Windows 还调用
+MSVC wrapper 预检 C++ 编译器、SDK、CMake、Rust 和 nightly rustfmt，缺项非零退出。
+环境健康不等于产品构建或测试通过，后续仍须实际执行相应命令。
+
+安装后在仓库根目录的 **cmd 或 PowerShell** 使用同一入口：
+
+```bat
+.\scripts\gx_msvc_env.cmd --check
+.\scripts\gx_msvc_env.cmd make check
+.\scripts\gx_msvc_env.cmd make build
+.\scripts\gx_msvc_env.cmd make test
+```
+
+wrapper 仅在子进程选择 `1.96.1-x86_64-pc-windows-msvc`，不改全局默认工具链或
+PATH。它前置项目工具，使用 Git `usr/bin/sh.exe` 避免启动器将 Git Perl 抢到
+Strawberry Perl 前面；Makefile 按原生 Windows/MSYS make 选择 PATH 分隔符，并阻止
+GNU Make flags 传给 OpenSSL NMake。`make setup` 可用于安装后的幂等补齐；
+`make ai-doctor` 只诊断框架命令入口，不能替代 `setup_env.sh --check`。
+
+Makefile 和 wrapper 统一将构建目标固定为 `target/`、编译缓存固定为
+`.local/sccache`、构建临时文件固定为 `.local/tmp`，不再另建 `target-gx-msvc/`。
+不经这两个入口直接运行 cargo 时，也须在本次会话设置同样的仓内目录。
+额外验收命令见 [TESTING.md](TESTING.md#windows-本地验收前置)。
+
 ## Windows 本地构建（gnu 工具链）
 
-适用范围：rustup gnu 主机（`x86_64-pc-windows-gnu`）、钉版 Rust 1.96.1（同
-`scripts/gx_package.py`）+ nightly（fmt）+ MSYS2（`C:\msys64`）。gx-ci 与
-`make gx-package-windows` 仍用 MSVC，本节只管本机开发期编译与测试。
+这是已有 MSYS2/GNU 环境的可选路线，不是 MSVC 安装前置。适用范围：rustup gnu
+主机（`x86_64-pc-windows-gnu`）、钉版 Rust 1.96.1（同 `scripts/gx_package.py`）+
+nightly（fmt）+ MSYS2（`C:\msys64`）。本节保留 GNU 优化与历史测量；gx-ci 和
+`make gx-package-windows` 使用 MSVC，本机 MSVC 构建与测试走上节 wrapper。
 
 ### 工具与 PATH
 
@@ -130,9 +184,9 @@ WINAPI_NO_BUNDLED_LIBRARIES = "1"
 sccache 缓存上限（默认 10 GiB）写在 `%APPDATA%\Mozilla\sccache\config\config`，
 设为 40 GiB；改后执行 `sccache --stop-server` 生效，`sccache --show-stats`
 看命中。经 make 构建时缓存目录与构建临时文件已固定仓内
-（`SCCACHE_DIR=.local/sccache`、`TMP/TEMP` 回落 `.local/tmp`，见
-development.md「构建产物仓内封闭」）；不经 make 直接调 cargo 的会话要自设
-`SCCACHE_DIR` 才守得住同一不变量。
+（`SCCACHE_DIR=.local/sccache`、`TMP/TEMP/TMPDIR` 固定 `.local/tmp`，见
+development.md「构建产物仓内封闭」）；不经 make 或 MSVC wrapper 直接调 cargo
+的会话须自行设置仓内 `CARGO_TARGET_DIR`、`SCCACHE_DIR` 与临时目录。
 
 ```toml
 [cache.disk]
@@ -142,26 +196,17 @@ size = 42949672960
 并行度：cargo 默认 jobs 等于逻辑核数、nextest 默认同数测试线程，无需另设；
 提速来自消除串行段（单线程的 vendored OpenSSL make、GNU ld 链接）。
 
-### Git Bash 下的 make 与框架命令
+### GNU 路线的 shell 边界
 
-- Git 与 MSYS2 两套 msys-2.0.dll 构建不同，Git Bash 启动 MSYS2 make 时子进程
-  只拿到 PATH/SYSTEMROOT 等 5 个变量。Makefile fork 段只补缺失的
-  TMP/TEMP/USERPROFILE/LOCALAPPDATA：缺 TMP/TEMP 时 dlltool 报无法在
-  `C:\WINDOWS\` 建临时文件，缺 USERPROFILE 时 Python `Path.home()` 崩溃，缺
-  LOCALAPPDATA 时找不到用户级 Inno Setup。
-- 在 Git Bash 里 export 的变量（`RUSTFLAGS`、`CARGO_*`、`K9_UPDATE`、
-  `GX_SYNC_WRITE` 等）过不了这道边界，要写成 make 命令行变量（如
-  `make test K9_UPDATE=1`）或写进 cargo 配置。ProgramFiles 与 HOME 未恢复：经
-  make 跑 framework-test 时 Windows 资源编译器用例会被跳过，HOME 是 MSYS2 的
-  `/home/<用户>`。从 PowerShell/cmd 启动 make 不受影响。
+- 若仍混用 Git Bash 与 MSYS2 make，两套运行时可能丢失 Windows 环境变量；
+  Makefile 仅对 MSYS/Cygwin make 补缺失的 USERPROFILE/LOCALAPPDATA，构建临时
+  目录在所有路线都固定仓内。不要把跨运行时的变量丢失当成项目钉版原生 make
+  的固有限制；MSVC 路线使用上节的 cmd/PowerShell wrapper。
 - 框架命令的 `.sh` 入口（setup、generated-check、graph 等）经 PATH 中的
   Git Bash 或 MSYS2 bash 执行，跳过 System32 与 WindowsApps 下的 WSL 启动器；
   找不到 bash 时 `make ai-doctor` 报 MISSING，`make <目标>` 报错说明原因。
-- `make setup` 安装钉版 nextest/stylua/lua 的 Windows 版（sha256 校验）与框架
-  venv（graphifyy/tomli；Windows venv 是 Scripts/ 布局，脚本会补
-  `bin/graphify` shim 供 graphify.sh 既定解析路径）。下载优先用系统自带
-  `curl.exe`，走 Windows 证书库（杀软或代理解密 HTTPS 时，MSYS2 curl 的自带
-  CA 包会报自签名证书）；解压需要 `unzip`（Git for Windows 自带）。
+- Windows 安装器的健康门包含 MSVC 前置；仅有 GNU 工具链时会明确报缺项，
+  不能将已装好 nextest/Lua 等项目工具等同于全环境就绪。
 
 ### 实测对比
 
@@ -194,17 +239,17 @@ crate 增量以工作区 crate 的增量编译为主，sccache 不覆盖，收�
 
 ### 与 CI 的差异及未采纳项
 
-本机 gnu + 系统 OpenSSL，CI 为 msvc + vendored；CI 仍按原矩阵把关。本机复现
-CI 形态见 [TESTING.md](TESTING.md) 的「Windows 本地验收前置」。
+上述 GNU 历史测量使用系统 OpenSSL，Windows CI 为 MSVC + vendored；两者结果
+不能互证。本机复现 MSVC 形态见 [TESTING.md](TESTING.md#windows-本地验收前置)，
+本节历史性能数据不代表当前 MSVC 环境已通过构建或测试。
 
-未采纳：nightly 的 `-Zthreads` 并行前端与 cranelift 后端（偏离钉版稳定
-工具链）；切 MSVC 目标（需管理员安装 VS Build Tools）；永久 PATH、电源模式
-「最佳性能」、杀软排除项（系统级设置，本机未采用，可按需自行设置）。
+该轮 GNU 优化未采用 nightly 的 `-Zthreads` 并行前端、cranelift 后端（偏离
+钉版稳定工具链），也未修改永久 PATH、电源模式或杀软排除项。MSVC 现已有独立
+wrapper 入口，不再列为未采纳路线。
 
 ## 已知边界
 
 - `make docs` 依赖 docker/podman 与 GitHub API（release 信息注入），fork
   日常不做文档站构建；上游 pages CI 把关。
-- Windows 本机开发期构建与测试见上节（gnu 工具链），MSVC 形态由 gx-ci
-  把关；macOS 平台门在本机无环境时以 PENDING 记录，由上游 CI 矩阵佐证
-  （gen_* 工作流）。
+- Windows 本地 MSVC/GNU 两条路线见上文，GX CI 继续独立验证 Windows/Linux；
+  macOS 本地无环境时记 PENDING，上游归档工作流不能替代实际验证。

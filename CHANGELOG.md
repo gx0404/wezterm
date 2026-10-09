@@ -274,6 +274,13 @@
 
 
 ### Fixed
+- Windows 开发环境：首次可从 Git Bash 直接 `bash scripts/setup_env.sh`，无需预装 make；
+  从 sha256 校验的 Strawberry Perl portable 包提取 GNU Make 4.4.1 与 libintl/libiconv
+  DLL，venv 补 `python3.exe`，安装与 `--check` 均执行严格版本及全环境健康检查。
+  MSVC wrapper 自动发现已安装的 VS C++/SDK，仅在子进程选择 Rust 1.96.1，前置仓内
+  工具与 Git 实际 shell，避免 Git Perl 遮蔽和 GNU Make flags 泄入 NMake；Makefile
+  适配原生 Windows make 的 PATH 分隔符。构建统一用 `target/`，缓存和临时文件固定
+  仓内，不修改用户全局工具链、PATH 或配置；新增安装器与 wrapper 回归测试。
 - GX 自动 CI 的 push/PR 与手动发布源码 ref 对齐默认分支 `feature/gx_wezterm`，
   同步入口文档及回归断言；不再依赖旧 `gx` 分支，集成仓仍按独立锁定 SHA 构建。
 - 知识库 `kb/chunks.json` 单独固定 LF checkout，避免 Windows 的 `core.autocrlf`
